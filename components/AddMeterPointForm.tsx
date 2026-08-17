@@ -1,0 +1,303 @@
+"use client";
+
+import Link from "next/link";
+import { useMemo, useState, type ReactNode } from "react";
+
+const energyTypes = ["Điện", "Nước", "Nhiệt", "Hơi"] as const;
+
+const devices = [
+  { id: "iem3000", name: "Schneider iEM3000", spec: "Modbus RTU • 3-Phase" },
+  { id: "pac3200", name: "Siemens PAC3200", spec: "Modbus TCP • 3-Phase" },
+  { id: "pm5000", name: "Schneider PM5320", spec: "Modbus TCP • Power Quality" },
+  { id: "abb-b23", name: "ABB B23", spec: "Pulse / M-Bus • Energy" },
+  { id: "multical", name: "Kamstrup MULTICAL 603", spec: "M-Bus • Heat / Cooling" },
+];
+
+export function AddMeterPointForm() {
+  const [energy, setEnergy] = useState<(typeof energyTypes)[number]>("Điện");
+  const [query, setQuery] = useState("");
+  const [droppedDevice, setDroppedDevice] = useState<(typeof devices)[0] | null>(
+    null,
+  );
+  const [pointId, setPointId] = useState("");
+  const [pointName, setPointName] = useState("");
+
+  const filteredDevices = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return devices;
+    return devices.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q) || d.spec.toLowerCase().includes(q),
+    );
+  }, [query]);
+
+  function applyDevice(device: (typeof devices)[0]) {
+    setDroppedDevice(device);
+    setPointName(device.name);
+    setPointId((current) => current || device.id.toUpperCase());
+  }
+
+  return (
+    <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          Thêm mới điểm đo
+        </h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Cấu hình điểm thu thập dữ liệu mới cho hệ thống giám sát năng lượng.
+        </p>
+      </div>
+
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const id = e.dataTransfer.getData("text/plain");
+              const device = devices.find((d) => d.id === id);
+              if (device) applyDevice(device);
+            }}
+            className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#8bb4ee] bg-[#f3f8ff] px-6 py-10 text-center"
+          >
+            <ImportIcon className="mb-3 h-8 w-8 text-[#1a73e8]" />
+            <p className="max-w-md text-sm text-slate-500">
+              {droppedDevice
+                ? `Đã gắn thiết bị: ${droppedDevice.name}`
+                : "Kéo thiết bị từ thư viện vào đây để tự động cấu hình..."}
+            </p>
+          </div>
+
+          <h2 className="mt-8 text-[15px] font-semibold text-slate-800">
+            Thông số cơ bản
+          </h2>
+
+          <form
+            className="mt-4 space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+            }}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="MÃ ĐIỂM ĐO (ID)">
+                <input
+                  value={pointId}
+                  onChange={(e) => setPointId(e.target.value)}
+                  placeholder="VD: MP-001"
+                  className="input"
+                />
+              </Field>
+              <Field label="TÊN ĐIỂM ĐO">
+                <input
+                  value={pointName}
+                  onChange={(e) => setPointName(e.target.value)}
+                  placeholder="Nhập tên điểm đo"
+                  className="input"
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {energyTypes.map((type) => {
+                const active = energy === type;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setEnergy(type)}
+                    className={`h-10 rounded-lg border text-sm font-medium transition-colors ${
+                      active
+                        ? "border-[#1a73e8] bg-white text-[#1a73e8]"
+                        : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
+                    }`}
+                  >
+                    {type}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="ĐIỂM ĐO CHA (PARENT POINT)">
+                <div className="relative">
+                  <select className="input appearance-none pr-9">
+                    <option value="">Chọn điểm đo cha</option>
+                    <option value="plant">Nhà máy chính</option>
+                    <option value="line-a">Dây chuyền A</option>
+                    <option value="line-b">Dây chuyền B</option>
+                  </select>
+                  <ChevronIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+              </Field>
+              <Field label="CHU KỲ LẤY MẪU (PHÚT)">
+                <input
+                  type="number"
+                  min={1}
+                  defaultValue={15}
+                  className="input"
+                />
+              </Field>
+            </div>
+
+            <Field label="CÔNG THỨC CHUYỂN ĐỔI (DATA TRANSFORMATION)">
+              <div className="relative">
+                <input
+                  placeholder="VD: kWh * 0.85"
+                  className="input pr-10"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-lg font-semibold text-slate-400">
+                  Σ
+                </span>
+              </div>
+            </Field>
+
+            <div className="flex justify-end gap-3 pt-4">
+              <Link
+                href="/"
+                className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Hủy
+              </Link>
+              <button
+                type="submit"
+                className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+              >
+                Lưu thay đổi
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <aside className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="mb-4 flex items-center gap-2">
+            <h2 className="text-[15px] font-semibold text-slate-800">
+              Thư viện thiết bị
+            </h2>
+            <InfoIcon className="h-4 w-4 text-slate-400" />
+          </div>
+
+          <label className="relative mb-4 flex items-center">
+            <span className="pointer-events-none absolute left-3 text-slate-400">
+              <MiniSearchIcon className="h-4 w-4" />
+            </span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Tìm thiết bị..."
+              className="h-9 w-full rounded-lg border border-slate-200 bg-[#f8fafc] pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:bg-white"
+            />
+          </label>
+
+          <ul className="space-y-2">
+            {filteredDevices.map((device) => (
+              <li key={device.id}>
+                <button
+                  type="button"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", device.id);
+                    e.dataTransfer.effectAllowed = "copy";
+                  }}
+                  onClick={() => applyDevice(device)}
+                  className="flex w-full items-center gap-3 rounded-lg border border-slate-100 bg-white px-3 py-3 text-left hover:border-[#c5daf7] hover:bg-[#f7fbff]"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                    <MeterIcon className="h-4 w-4" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800">
+                      {device.name}
+                    </span>
+                    <span className="block text-xs text-slate-400">
+                      {device.spec}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+            {filteredDevices.length === 0 && (
+              <li className="py-6 text-center text-sm text-slate-400">
+                Không tìm thấy thiết bị
+              </li>
+            )}
+          </ul>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function ImportIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 14v5.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V14"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 4v11M8 11l4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 11v5M12 8v.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MiniSearchIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 16.5 20 20.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MeterIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 15V9M12 15v-4M16 15v-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}

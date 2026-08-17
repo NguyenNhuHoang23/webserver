@@ -1,0 +1,169 @@
+"use client";
+
+import { Handle, Position, type NodeProps } from "@xyflow/react";
+import type { JunctionFlowNode, MeterFlowNode, MeterIcon, MeterStatus } from "./types";
+
+const statusBorder: Record<MeterStatus, string> = {
+  normal: "border-[#3b82f6]",
+  warning: "border-[#f59e0b]",
+  offline: "border-slate-300",
+};
+
+const statusText: Record<MeterStatus, string> = {
+  normal: "text-[#1a73e8]",
+  warning: "text-[#ea8c12]",
+  offline: "text-slate-400",
+};
+
+const iconWrap: Record<MeterStatus, string> = {
+  normal: "bg-blue-50 text-[#3b82f6]",
+  warning: "bg-orange-50 text-[#ea8c12]",
+  offline: "bg-slate-100 text-slate-400",
+};
+
+export function MeterNode({ data, selected }: NodeProps<MeterFlowNode>) {
+  return (
+    <div
+      className={`diagram-card w-[248px] rounded-xl border-2 bg-white px-3.5 py-3 shadow-[0_2px_8px_rgba(15,23,42,0.06)] ${statusBorder[data.status]} ${
+        selected ? "ring-2 ring-[#1a73e8]/20" : ""
+      }`}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!h-2 !w-2 !border-0 !bg-slate-300"
+      />
+
+      <div className="mb-2 flex items-start justify-between text-slate-300">
+        <RefreshIcon className="h-3.5 w-3.5" />
+        <GearIcon className="h-3.5 w-3.5" />
+      </div>
+
+      <div className="flex items-start gap-2.5">
+        <span
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${iconWrap[data.status]}`}
+        >
+          <NodeGlyph type={data.icon} className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 pt-0.5">
+          <p className="truncate text-[13.5px] font-bold text-slate-800">{data.title}</p>
+          {data.subtitle ? (
+            <p className="text-[12px] text-slate-400">{data.subtitle}</p>
+          ) : null}
+          {data.statusLabel ? (
+            <p className={`mt-0.5 text-[11px] font-bold tracking-wide ${statusText[data.status]}`}>
+              {data.statusLabel}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        className={`mt-3 grid gap-x-4 gap-y-1.5 ${
+          data.metrics.length > 2 ? "grid-cols-2" : "grid-cols-2"
+        }`}
+      >
+        {data.metrics.map((metric) => (
+          <div key={metric.label}>
+            <p className="text-[10.5px] text-slate-400">{metric.label}</p>
+            <p className="text-[12.5px] font-semibold text-slate-700">{metric.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!h-2 !w-2 !border-0 !bg-slate-300"
+      />
+    </div>
+  );
+}
+
+export function JunctionNode(_props: NodeProps<JunctionFlowNode>) {
+  return (
+    <div className="h-3 w-3 rounded-full bg-slate-300">
+      <Handle
+        id="in"
+        type="target"
+        position={Position.Top}
+        className="!h-2 !w-2 !border-0 !bg-slate-300"
+      />
+      <Handle
+        id="left"
+        type="source"
+        position={Position.Left}
+        className="!h-2 !w-2 !border-0 !bg-slate-300"
+      />
+      <Handle
+        id="right"
+        type="source"
+        position={Position.Right}
+        className="!h-2 !w-2 !border-0 !bg-slate-300"
+      />
+    </div>
+  );
+}
+
+function NodeGlyph({ type, className }: { type: MeterIcon; className?: string }) {
+  if (type === "cabinet") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect x="6" y="4" width="12" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M9 8h6M9 12h6M9 16h3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "fan") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+        <path
+          d="M12 9.5c3-3.8 7 0 4.2 3.2M12 14.5c-3 3.8-7 0-4.2-3.2M14.5 12c3.8 3 0 7-3.2 4.2M9.5 12C5.7 9 9.8 5 12.9 8.8"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M5 20V10l4-2v3l4-3v4l4-2v10H5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M15 11h4v9h-4" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M20 12a8 8 0 1 1-2.3-5.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path d="M20 5v5h-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function GearIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M12 5v1.5M12 17.5V19M19 12h-1.5M6.5 12H5M16.8 7.2l-1 1M8.2 15.8l-1 1M16.8 16.8l-1-1M8.2 8.2l-1-1"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}

@@ -1,0 +1,396 @@
+"use client";
+
+import { useState } from "react";
+import type { Project } from "@/lib/projects";
+
+const ENERGY = [
+  { day: "07-01", kwh: 198.4 },
+  { day: "07-02", kwh: 186.2 },
+  { day: "07-03", kwh: 172.8 },
+  { day: "07-04", kwh: 96.5 },
+  { day: "07-05", kwh: 210.6 },
+  { day: "07-06", kwh: 148.3 },
+  { day: "07-07", kwh: 88.1 },
+  { day: "07-08", kwh: 205.9 },
+  { day: "07-09", kwh: 168.4 },
+  { day: "07-10", kwh: 46.4 },
+  { day: "07-11", kwh: 194.7 },
+  { day: "07-12", kwh: 221.5 },
+  { day: "07-13", kwh: 158.2 },
+  { day: "07-14", kwh: 74.6 },
+  { day: "07-15", kwh: 236.8 },
+  { day: "07-16", kwh: 182.3 },
+  { day: "07-17", kwh: 129.7 },
+  { day: "07-18", kwh: 214.1 },
+  { day: "07-19", kwh: 216.9 },
+];
+
+const DEVICE_STATUS = [
+  { label: "BÌNH THƯỜNG", value: 12, color: "#43a047" },
+  { label: "CẢNH BÁO", value: 2, color: "#ef8d3a" },
+  { label: "NGOẠI TUYẾN", value: 1, color: "#9aa3af" },
+];
+
+const ALERTS = [
+  { time: "2026-07-19 07:38:48", point: "Tủ điện văn phòng", param: "F_avg", value: "49.79" },
+  { time: "2026-07-19 07:38:38", point: "Tủ điện văn phòng", param: "F_avg", value: "50.42" },
+  { time: "2026-07-19 07:38:27", point: "Tủ điện văn phòng", param: "F_avg", value: "50.32" },
+  { time: "2026-07-19 07:38:17", point: "Tủ điện văn phòng", param: "F_avg", value: "49.99" },
+];
+
+export function ClientDashboard({ project }: { project: Project }) {
+  return (
+    <div className="mx-auto h-full max-w-[1480px] overflow-y-auto px-5 py-5 lg:px-6">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-[28px] font-bold tracking-tight text-slate-800">
+            Bảng điều khiển hệ thống
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Thống kê hoạt động năng lượng {project.name}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+        >
+          <CalendarIcon className="h-4 w-4 text-slate-400" />
+          Tháng 07/2026
+        </button>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <DashboardCard title="ĐIỆN NĂNG TIÊU THỤ" className="xl:col-span-2">
+          <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <p>
+              Lớn nhất:{" "}
+              <span className="font-semibold text-[#1a73e8]">236.8 kWh</span>
+            </p>
+            <p>
+              Nhỏ nhất:{" "}
+              <span className="font-semibold text-emerald-600">46.4 kWh</span>
+            </p>
+            <p>
+              Tổng:{" "}
+              <span className="font-semibold text-slate-800">3350.4 kWh</span>
+            </p>
+          </div>
+          <EnergyChart data={ENERGY} />
+        </DashboardCard>
+
+        <DashboardCard title="TRẠNG THÁI THIẾT BỊ">
+          <DeviceStatusChart items={DEVICE_STATUS} />
+        </DashboardCard>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <DashboardCard title="CHI PHÍ">
+          <DonutChart
+            color="#1e5f8a"
+            value="6406.59"
+            unit="nghìn VNĐ"
+            caption="Tủ điện văn phòng: 100% chi phí hệ thống"
+          />
+        </DashboardCard>
+
+        <DashboardCard title="PHÁT THẢI CO2">
+          <DonutChart
+            color="#1e6b45"
+            value="2.21"
+            unit="tấn CO2 tđ"
+            caption={
+              <span className="inline-flex items-center gap-1">
+                Giảm thiểu 12% so với tháng trước
+                <span className="text-emerald-600">↓</span>
+              </span>
+            }
+          />
+        </DashboardCard>
+
+        <DashboardCard title="NHẬT KÝ CẢNH BÁO" className="lg:col-span-2">
+          <AlertLogTable />
+        </DashboardCard>
+      </div>
+    </div>
+  );
+}
+
+function DashboardCard({
+  title,
+  children,
+  className = "",
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={`rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] ${className}`}
+    >
+      <div className="mb-2 flex items-start justify-between">
+        <h2 className="text-[12px] font-semibold tracking-[0.08em] text-slate-400">
+          {title}
+        </h2>
+        <button
+          type="button"
+          className="text-slate-300 hover:text-slate-500"
+          aria-label="Phóng to"
+        >
+          <ExpandIcon className="h-4 w-4" />
+        </button>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function EnergyChart({ data }: { data: { day: string; kwh: number }[] }) {
+  const max = Math.max(...data.map((item) => item.kwh));
+
+  return (
+    <div className="flex h-[250px] items-end gap-1.5 pb-1">
+      {data.map((item) => (
+        <div key={item.day} className="flex min-w-0 flex-1 flex-col items-center">
+          <div className="flex h-[220px] w-full items-end">
+            <div
+              className="mx-auto w-[78%] rounded-t-[2px] bg-[#2b6f9e]"
+              style={{ height: `${(item.kwh / max) * 100}%` }}
+              title={`${item.day}: ${item.kwh} kWh`}
+            />
+          </div>
+          <span className="mt-1.5 text-[10px] text-slate-400">{item.day}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DeviceStatusChart({
+  items,
+}: {
+  items: { label: string; value: number; color: string }[];
+}) {
+  const ticks = [15, 10, 5, 0];
+  const yMax = 15;
+
+  return (
+    <div className="flex h-[280px] gap-2 pt-2">
+      <div className="flex h-[230px] flex-col justify-between py-0.5 text-[11px] text-slate-400">
+        {ticks.map((tick) => (
+          <span key={tick} className="leading-none">
+            {tick}
+          </span>
+        ))}
+      </div>
+      <div className="relative min-w-0 flex-1">
+        <div className="absolute inset-x-0 top-0 h-[230px]">
+          {ticks.map((tick, i) => (
+            <div
+              key={tick}
+              className="absolute inset-x-0 border-t border-slate-100"
+              style={{ top: `${(i / (ticks.length - 1)) * 100}%` }}
+            />
+          ))}
+        </div>
+        <div className="relative flex h-[230px] items-end justify-around px-4">
+          {items.map((item) => (
+            <div key={item.label} className="flex h-full w-[28%] flex-col items-center justify-end">
+              <span className="mb-1 text-sm font-semibold text-slate-700">
+                {item.value}
+              </span>
+              <div
+                className="w-full rounded-t-md"
+                style={{
+                  height: `${(item.value / yMax) * 100}%`,
+                  backgroundColor: item.color,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex justify-around px-4">
+          {items.map((item) => (
+            <p
+              key={item.label}
+              className="w-[28%] text-center text-[10px] font-medium tracking-wide text-slate-400"
+            >
+              {item.label}
+            </p>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DonutChart({
+  color,
+  value,
+  unit,
+  caption,
+}: {
+  color: string;
+  value: string;
+  unit: string;
+  caption: React.ReactNode;
+}) {
+  const radius = 56;
+  const circumference = 2 * Math.PI * radius;
+  const filled = circumference * 0.82;
+
+  return (
+    <div className="flex flex-col items-center pt-1">
+      <div className="relative h-[210px] w-[210px]">
+        <svg viewBox="0 0 160 160" className="h-full w-full -rotate-90">
+          <circle
+            cx="80"
+            cy="80"
+            r={radius}
+            fill="none"
+            stroke="#edf0f3"
+            strokeWidth="22"
+          />
+          <circle
+            cx="80"
+            cy="80"
+            r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth="22"
+            strokeDasharray={`${filled} ${circumference}`}
+            strokeLinecap="butt"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+          <p className="text-[26px] font-bold leading-none text-slate-800">{value}</p>
+          <p className="mt-1.5 text-xs text-slate-400">{unit}</p>
+        </div>
+      </div>
+      <p className="mt-1 text-center text-[12px] text-slate-400">{caption}</p>
+    </div>
+  );
+}
+
+function AlertLogTable() {
+  const [time, setTime] = useState("");
+  const [point, setPoint] = useState("all");
+  const [param, setParam] = useState("");
+  const [value, setValue] = useState("");
+
+  const rows = ALERTS.filter((row) => {
+    const matchTime = !time || row.time.includes(time);
+    const matchPoint = point === "all" || row.point === point;
+    const matchParam =
+      !param || row.param.toLowerCase().includes(param.toLowerCase());
+    const matchValue = !value || row.value.includes(value);
+    return matchTime && matchPoint && matchParam && matchValue;
+  });
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] text-left text-[13px]">
+        <thead>
+          <tr className="text-[12px] font-medium text-slate-500">
+            <th className="pb-2 font-medium">
+              Thời gian <span className="text-slate-300">↕</span>
+            </th>
+            <th className="pb-2 font-medium">
+              Điểm đo <span className="text-slate-300">↕</span>
+            </th>
+            <th className="pb-2 font-medium">
+              Thông số <span className="text-slate-300">↕</span>
+            </th>
+            <th className="pb-2 font-medium">
+              Giá trị <span className="text-slate-300">↕</span>
+            </th>
+          </tr>
+          <tr className="text-slate-400">
+            <th className="pb-2 pr-2 font-normal">
+              <span className="relative block">
+                <input
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                />
+                <FilterMark />
+              </span>
+            </th>
+            <th className="pb-2 pr-2 font-normal">
+              <span className="relative block">
+                <select
+                  value={point}
+                  onChange={(e) => setPoint(e.target.value)}
+                  className="h-8 w-full appearance-none rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                >
+                  <option value="all" />
+                  <option value="Tủ điện văn phòng">Tủ điện văn phòng</option>
+                </select>
+                <FilterMark />
+              </span>
+            </th>
+            <th className="pb-2 pr-2 font-normal">
+              <span className="relative block">
+                <input
+                  value={param}
+                  onChange={(e) => setParam(e.target.value)}
+                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                />
+                <FilterMark />
+              </span>
+            </th>
+            <th className="pb-2 font-normal">
+              <span className="relative block">
+                <input
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                />
+                <FilterMark />
+              </span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.time} className="border-t border-slate-100 text-slate-600">
+              <td className="py-2.5 whitespace-nowrap">{row.time}</td>
+              <td className="py-2.5">{row.point}</td>
+              <td className="py-2.5">
+                <button type="button" className="text-[#1a73e8] hover:underline">
+                  {row.param}
+                </button>
+              </td>
+              <td className="py-2.5">{row.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FilterMark() {
+  return (
+    <span className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[10px] text-slate-300">
+      ▾
+    </span>
+  );
+}
+
+function ExpandIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 3.5V7M16 3.5V7M4 10h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
