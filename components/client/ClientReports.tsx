@@ -36,7 +36,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
   const [template, setTemplate] = useState(TEMPLATES[0]);
   const [reportId, setReportId] = useState<(typeof REPORTS)[number]["id"]>(initialId);
   const report = REPORTS.find((item) => item.id === reportId) ?? REPORTS[0];
-  const [title, setTitle] = useState(report.title);
+  const [title, setTitle] = useState<string>(report.title);
   const [chart, setChart] = useState<YesNo>("Có");
   const [summary, setSummary] = useState<YesNo>("Có");
   const [detail, setDetail] = useState<YesNo>(reportId === "alerts" ? "Có" : "Không");
