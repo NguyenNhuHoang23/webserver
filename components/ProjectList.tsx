@@ -199,13 +199,13 @@ export function ProjectList() {
                       >
                         <EyeIcon className="h-4 w-4" />
                       </Link>
-                      <button
-                        type="button"
+                      <Link
+                        href={`/chinh-sua-du-an/${project.id}`}
                         className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
                         aria-label="Sửa dự án"
                       >
                         <EditIcon className="h-4 w-4" />
-                      </button>
+                      </Link>
                     </div>
                   </td>
                 </tr>

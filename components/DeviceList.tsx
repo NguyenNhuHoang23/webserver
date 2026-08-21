@@ -2,579 +2,493 @@
 
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
-import { AlertConfig } from "@/components/AlertConfig";
-import { GhgConfig } from "@/components/GhgConfig";
 
-type Energy = "Điện" | "Nước" | "Nhiệt" | "Hơi";
-type DeviceKind = "meter" | "inverter" | "thermo" | "water" | "wind" | "steam";
-type Status = "connected" | "disconnected";
+type DeviceKind = "power" | "flow" | "temp" | "steam";
+type DeviceStatus = "active" | "maintenance" | "offline";
 
-type MeterPoint = {
+type CatalogDevice = {
   id: string;
   name: string;
-  sn: string; 
+  sn: string;
+  brandModel: string;
+  brand: string;
   type: string;
-  energy: Energy;
   kind: DeviceKind;
-  status: Status;
-  value: number | null;
-  unit: string;
-  children?: MeterPoint[];
+  status: DeviceStatus;
+  lastSync: string;
 };
 
-const ENERGY_OPTIONS: Energy[] = ["Điện", "Nước", "Nhiệt", "Hơi"];
+const PAGE_SIZE = 10;
 
-const seeds: MeterPoint[] = [
+const seeds: CatalogDevice[] = [
   {
-    id: "MP-001",
-    name: "MP-001 - Trạm Biến Áp Chính",
-    sn: "SN: 98721345601",
-    type: "Industrial Smart Meter",
-    energy: "Điện",
-    kind: "meter",
-    status: "connected",
-    value: 12450.2,
-    unit: "kWh",
-    children: [
-      {
-        id: "MP-001-A",
-        name: "MP-001-A - Inverter Dãy 1",
-        sn: "SN: 98721345602",
-        type: "PV Inverter Monitoring",
-        energy: "Điện",
-        kind: "inverter",
-        status: "connected",
-        value: 450.8,
-        unit: "kW",
-      },
-      {
-        id: "MP-001-T",
-        name: "MP-001-T - Cảm biến nhiệt dàn",
-        sn: "SN: 98721345603",
-        type: "Temperature Sensor",
-        energy: "Nhiệt",
-        kind: "thermo",
-        status: "disconnected",
-        value: null,
-        unit: "°C",
-      },
-    ],
+    id: "dev-1",
+    name: "Power Meter Main-01",
+    sn: "SN: EM-992834-A",
+    brandModel: "Schneider iEM3000",
+    brand: "Schneider",
+    type: "Power Meter",
+    kind: "power",
+    status: "active",
+    lastSync: "10:45:22 24/05/2024",
   },
   {
-    id: "MP-002",
-    name: "MP-002 - Hệ thống làm mát",
-    sn: "SN: 55190233410",
-    type: "Ultrasonic Flow Meter",
-    energy: "Nước",
-    kind: "water",
-    status: "connected",
-    value: 84.2,
-    unit: "m³/h",
+    id: "dev-2",
+    name: "Water Flow Sensor-B2",
+    sn: "SN: WF-112093-X",
+    brandModel: "Siemens SITRANS F",
+    brand: "Siemens",
+    type: "Flow Meter",
+    kind: "flow",
+    status: "active",
+    lastSync: "10:42:15 24/05/2024",
   },
   {
-    id: "MP-003",
-    name: "MP-003 - Trạm quan trắc gió",
-    sn: "SN: 22019888341",
-    type: "Anemometer",
-    energy: "Điện",
-    kind: "wind",
-    status: "connected",
-    value: 5.4,
-    unit: "m/s",
+    id: "dev-3",
+    name: "Temp Probe Line-C",
+    sn: "SN: TP-445021-Z",
+    brandModel: "ABB SensyTemp",
+    brand: "ABB",
+    type: "Temperature",
+    kind: "temp",
+    status: "maintenance",
+    lastSync: "09:12:01 24/05/2024",
   },
   {
-    id: "MP-004",
-    name: "MP-004 - Nồi hơi công nghệ",
-    sn: "SN: 77412009812",
-    type: "Steam Flow Computer",
-    energy: "Hơi",
+    id: "dev-4",
+    name: "Steam Gauge High-P",
+    sn: "SN: SG-778120-K",
+    brandModel: "Yokogawa EJX",
+    brand: "Yokogawa",
+    type: "Steam Meter",
     kind: "steam",
-    status: "connected",
-    value: 12.6,
-    unit: "t/h",
+    status: "active",
+    lastSync: "Vừa xong",
   },
   {
-    id: "MP-005",
-    name: "MP-005 - Đồng hồ nước đầu nguồn",
-    sn: "SN: 33002119844",
-    type: "Water Smart Meter",
-    energy: "Nước",
-    kind: "water",
-    status: "connected",
-    value: 219.4,
-    unit: "m³",
+    id: "dev-5",
+    name: "Power Meter Sub-02",
+    sn: "SN: EM-883401-B",
+    brandModel: "Schneider PM5100",
+    brand: "Schneider",
+    type: "Power Meter",
+    kind: "power",
+    status: "offline",
+    lastSync: "18:20:44 23/05/2024",
+  },
+  {
+    id: "dev-6",
+    name: "Cooling Water Meter-01",
+    sn: "SN: WF-220184-Y",
+    brandModel: "Siemens MAG 5100",
+    brand: "Siemens",
+    type: "Flow Meter",
+    kind: "flow",
+    status: "active",
+    lastSync: "10:44:02 24/05/2024",
   },
 ];
 
-const extraPoints: MeterPoint[] = Array.from({ length: 37 }, (_, i) => {
-  const n = i + 6;
-  const cycle: Array<Pick<MeterPoint, "energy" | "kind" | "type" | "unit" | "status" | "value">> = [
+const extra: CatalogDevice[] = Array.from({ length: 122 }, (_, i) => {
+  const n = i + 7;
+  const cycle: Array<
+    Pick<CatalogDevice, "brand" | "brandModel" | "type" | "kind" | "status">
+  > = [
     {
-      energy: "Điện",
-      kind: "meter",
-      type: "Industrial Smart Meter",
-      unit: "kWh",
-      status: i % 9 === 0 ? "disconnected" : "connected",
-      value: i % 9 === 0 ? null : 1800 + i * 37.4,
+      brand: "Schneider",
+      brandModel: "Schneider iEM3000",
+      type: "Power Meter",
+      kind: "power",
+      status: i % 31 === 0 ? "offline" : i % 17 === 0 ? "maintenance" : "active",
     },
     {
-      energy: "Nước",
-      kind: "water",
-      type: "Water Smart Meter",
-      unit: "m³/h",
-      status: "connected",
-      value: 20 + (i % 15) * 1.7,
+      brand: "Siemens",
+      brandModel: "Siemens SITRANS F",
+      type: "Flow Meter",
+      kind: "flow",
+      status: i % 19 === 0 ? "maintenance" : "active",
     },
     {
-      energy: "Nhiệt",
-      kind: "thermo",
-      type: "Temperature Sensor",
-      unit: "°C",
-      status: i % 8 === 0 ? "disconnected" : "connected",
-      value: i % 8 === 0 ? null : 42 + (i % 12),
+      brand: "ABB",
+      brandModel: "ABB SensyTemp",
+      type: "Temperature",
+      kind: "temp",
+      status: i % 23 === 0 ? "offline" : "active",
     },
     {
-      energy: "Hơi",
+      brand: "Yokogawa",
+      brandModel: "Yokogawa EJX",
+      type: "Steam Meter",
       kind: "steam",
-      type: "Steam Flow Computer",
-      unit: "t/h",
-      status: "connected",
-      value: 3.2 + (i % 6) * 0.8,
+      status: "active",
     },
   ];
   const item = cycle[i % cycle.length];
+  const hour = String(8 + (i % 10)).padStart(2, "0");
+  const min = String((i * 3) % 60).padStart(2, "0");
+  const sec = String((i * 7) % 60).padStart(2, "0");
   return {
-    id: `MP-${String(n).padStart(3, "0")}`,
-    name: `MP-${String(n).padStart(3, "0")} - Điểm đo khu ${n}`,
-    sn: `SN: 88${String(100000000 + n).slice(1)}`,
+    id: `dev-${n}`,
+    name: `${item.type.split(" ")[0]} Unit-${String(n).padStart(2, "0")}`,
+    sn: `SN: XX-${String(100000 + n)}-${String.fromCharCode(65 + (i % 26))}`,
     ...item,
+    lastSync:
+      i % 11 === 0 ? "Vừa xong" : `${hour}:${min}:${sec} 24/05/2024`,
   };
 });
 
-const allPoints: MeterPoint[] = [...seeds, ...extraPoints];
-const PAGE_SIZE = 10;
-const TABS = [
-  { id: "points", label: "Cấu hình điểm đo" },
-  { id: "ghg", label: "Cấu hình khí nhà kính" },
-  { id: "alerts", label: "Cấu hình cảnh báo" },
-] as const;
-
-function flatten(points: MeterPoint[]): MeterPoint[] {
-  return points.flatMap((p) => [p, ...(p.children ?? [])]);
-}
+const allDevices: CatalogDevice[] = [...seeds, ...extra];
 
 export function DeviceList() {
-  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("points");
-  const [energies, setEnergies] = useState<Energy[]>(["Điện", "Nước", "Nhiệt", "Hơi"]);
-  const [query, setQuery] = useState("");
-  const [deviceType, setDeviceType] = useState("all");
+  const [brand, setBrand] = useState("all");
+  const [status, setStatus] = useState<"all" | DeviceStatus>("all");
+  const [view, setView] = useState<"list" | "grid">("list");
   const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["MP-001"]));
+  const [devices, setDevices] = useState(allDevices);
 
-  const deviceTypes = useMemo(
-    () => Array.from(new Set(flatten(allPoints).map((p) => p.type))).sort(),
+  const brands = useMemo(
+    () => Array.from(new Set(allDevices.map((d) => d.brand))).sort(),
     [],
   );
 
-  const filteredRoots = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    return devices.filter((d) => {
+      const matchBrand = brand === "all" || d.brand === brand;
+      const matchStatus = status === "all" || d.status === status;
+      return matchBrand && matchStatus;
+    });
+  }, [brand, devices, status]);
 
-    function match(point: MeterPoint): boolean {
-      const energyOk = energies.length === 0 || energies.includes(point.energy);
-      const typeOk = deviceType === "all" || point.type === deviceType;
-      const textOk =
-        !q ||
-        point.name.toLowerCase().includes(q) ||
-        point.id.toLowerCase().includes(q) ||
-        point.sn.toLowerCase().includes(q);
-      return energyOk && typeOk && textOk;
-    }
-
-    const next: MeterPoint[] = [];
-    for (const root of allPoints) {
-      const children = (root.children ?? []).filter(match);
-      if (match(root)) {
-        next.push(root.children ? { ...root, children } : root);
-      } else if (children.length) {
-        next.push({ ...root, children });
-      }
-    }
-    return next;
-  }, [deviceType, energies, query]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRoots.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const start = (currentPage - 1) * PAGE_SIZE;
-  const pageRows = filteredRoots.slice(start, start + PAGE_SIZE);
+  const rows = filtered.slice(start, start + PAGE_SIZE);
 
-  function toggleEnergy(energy: Energy) {
-    setPage(1);
-    setEnergies((current) =>
-      current.includes(energy)
-        ? current.filter((item) => item !== energy)
-        : [...current, energy],
-    );
-  }
+  const stats = useMemo(() => {
+    const active = devices.filter((d) => d.status === "active").length;
+    const maintenance = devices.filter((d) => d.status === "maintenance").length;
+    const offline = devices.filter((d) => d.status === "offline").length;
+    return { total: devices.length, active, maintenance, offline };
+  }, [devices]);
 
-  function toggleExpand(id: string) {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function removeDevice(id: string) {
+    setDevices((current) => current.filter((d) => d.id !== id));
   }
 
   return (
     <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200">
-        <div className="flex gap-6">
-          {TABS.map((item) => {
-            const active = tab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setTab(item.id)}
-                className={`relative pb-3 text-sm font-semibold ${
-                  active ? "text-[#1a73e8]" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                {item.label}
-                {active && (
-                  <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[#1a73e8]" />
-                )}
-              </button>
-            );
-          })}
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-[#0f2b5b]">
+            Quản lý thiết bị đo
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Giám sát và quản lý danh mục thiết bị đo lường trong toàn hệ thống.
+          </p>
         </div>
         <Link
           href="/thiet-bi/them-moi"
-          className="mb-2 inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+          className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
         >
           <span className="text-lg leading-none">+</span>
-          Thêm mới điểm đo
+          Thêm thiết bị mới
         </Link>
       </div>
 
-      {tab === "ghg" ? (
-        <GhgConfig />
-      ) : tab === "alerts" ? (
-        <AlertConfig />
-      ) : (
-        <>
-          <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              label="TỔNG ĐIỂM ĐO"
-              value="42"
-              hint={<span className="text-emerald-600">+3 thiết bị mới</span>}
-            />
-            <StatCard
-              label="KẾT NỐI"
-              value="39 / 42"
-              hint={<span className="text-slate-500">active</span>}
-            />
-            <StatCard
-              label="CẢNH BÁO HỆ THỐNG"
-              value="02"
-              valueClass="text-red-500"
-              hint={<span className="text-red-500">Cần xử lý ngay</span>}
-            />
-            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-              <p className="text-[11px] font-semibold tracking-wide text-slate-400">
-                BÁO CÁO MỚI NHẤT
-              </p>
-              <button
-                type="button"
-                className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-[#1a73e8] hover:underline"
-              >
-                <DownloadIcon className="h-4 w-4" />
-                Tải về báo cáo tháng 10
-              </button>
-            </article>
-          </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="TỔNG THIẾT BỊ"
+          value={String(stats.total)}
+          icon={<BoxIcon className="h-5 w-5" />}
+          iconWrap="bg-[#e8f1fd] text-[#1a73e8]"
+        />
+        <StatCard
+          label="ĐANG HOẠT ĐỘNG"
+          value={String(stats.active)}
+          valueClass="text-emerald-600"
+          icon={<CheckIcon className="h-5 w-5" />}
+          iconWrap="bg-emerald-50 text-emerald-600"
+        />
+        <StatCard
+          label="BẢO TRÌ"
+          value={String(stats.maintenance)}
+          valueClass="text-orange-500"
+          icon={<WrenchIcon className="h-5 w-5" />}
+          iconWrap="bg-orange-50 text-orange-500"
+        />
+        <StatCard
+          label="NGOẠI TUYẾN"
+          value={String(stats.offline)}
+          valueClass="text-red-500"
+          icon={<OfflineIcon className="h-5 w-5" />}
+          iconWrap="bg-red-50 text-red-500"
+        />
+      </div>
 
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            {ENERGY_OPTIONS.map((energy) => {
-              const active = energies.includes(energy);
-              return (
-                <div
-                  key={energy}
-                  className={`inline-flex h-8 items-center rounded-full pl-3 text-sm font-medium ${
-                    active
-                      ? "bg-[#1a73e8] text-white"
-                      : "bg-white text-slate-600 ring-1 ring-slate-200"
-                  }`}
-                >
-                  <button type="button" onClick={() => toggleEnergy(energy)} className="pr-1">
-                    {energy}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Bỏ lọc ${energy}`}
-                    className={`px-2 text-base leading-none ${active ? "text-white/80" : "text-slate-400"}`}
-                    onClick={() => {
-                      setEnergies((current) => current.filter((item) => item !== energy));
-                      setPage(1);
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50"
-              aria-label="Thêm loại năng lượng"
-            >
-              +
-            </button>
-          </div>
-
-          <div className="mb-4 flex flex-wrap items-center gap-3">
-            <label className="relative min-w-[240px] flex-1">
-              <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400">
-                <SearchIcon className="h-4 w-4" />
-              </span>
-              <input
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="Tìm kiếm điểm đo, ID..."
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8]"
-              />
-            </label>
-            <select
-              value={deviceType}
-              onChange={(e) => {
-                setDeviceType(e.target.value);
+      <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500">
+              <FilterIcon className="h-4 w-4" />
+              Lọc theo:
+            </span>
+            <FilterSelect
+              value={brand}
+              onChange={(v) => {
+                setBrand(v);
                 setPage(1);
               }}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 outline-none focus:border-[#1a73e8]"
-            >
-              <option value="all">Tất cả loại thiết bị</option>
-              {deviceTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "all", label: "Tất cả thương hiệu" },
+                ...brands.map((b) => ({ value: b, label: b })),
+              ]}
+            />
+            <FilterSelect
+              value={status}
+              onChange={(v) => {
+                setStatus(v as "all" | DeviceStatus);
+                setPage(1);
+              }}
+              options={[
+                { value: "all", label: "Tất cả trạng thái" },
+                { value: "active", label: "Đang hoạt động" },
+                { value: "maintenance", label: "Bảo trì" },
+                { value: "offline", label: "Ngoại tuyến" },
+              ]}
+            />
           </div>
+          <div className="flex items-center gap-1">
+            <ToolbarButton
+              label="Dạng lưới"
+              active={view === "grid"}
+              onClick={() => setView("grid")}
+            >
+              <GridIcon className="h-4 w-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              label="Dạng danh sách"
+              active={view === "list"}
+              onClick={() => setView("list")}
+            >
+              <ListIcon className="h-4 w-4" />
+            </ToolbarButton>
+          </div>
+        </div>
 
-          <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
-                    <th className="px-5 py-3">TÊN / ID ĐIỂM ĐO</th>
-                    <th className="px-5 py-3">LOẠI THIẾT BỊ</th>
-                    <th className="px-5 py-3">TRẠNG THÁI</th>
-                    <th className="px-5 py-3">GIÁ TRỊ HIỆN TẠI</th>
-                    <th className="px-5 py-3 text-right">THAO TÁC</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRows.map((point) => {
-                    const hasChildren = Boolean(point.children?.length);
-                    const isOpen = expanded.has(point.id);
-                    return (
-                      <DeviceRows
-                        key={point.id}
-                        point={point}
-                        depth={0}
-                        hasChildren={hasChildren}
-                        isOpen={isOpen}
-                        onToggle={() => toggleExpand(point.id)}
-                      />
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm text-slate-500">
-              <p>
-                Đang hiển thị {filteredRoots.length === 0 ? 0 : start + 1}-
-                {Math.min(start + PAGE_SIZE, filteredRoots.length)} trên tổng số{" "}
-                {filteredRoots.length} điểm đo
-              </p>
-              <div className="flex items-center gap-1">
-                <PageBtn disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
-                  ‹
-                </PageBtn>
-                {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter((n) => n <= 3 || n === totalPages)
-                  .map((n, idx, arr) => {
-                    const prev = arr[idx - 1];
-                    return (
-                      <span key={n} className="contents">
-                        {prev && n - prev > 1 && (
-                          <span className="px-1 text-slate-400">…</span>
-                        )}
-                        <PageBtn active={n === currentPage} onClick={() => setPage(n)}>
-                          {n}
-                        </PageBtn>
-                      </span>
-                    );
-                  })}
-                <PageBtn
-                  disabled={currentPage === totalPages}
-                  onClick={() => setPage(currentPage + 1)}
+        {view === "list" ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-[#f8fafc] text-[11px] font-semibold tracking-wide text-slate-400">
+                  <th className="px-5 py-3">TÊN THIẾT BỊ</th>
+                  <th className="px-5 py-3">THƯƠNG HIỆU / MODEL</th>
+                  <th className="px-5 py-3">LOẠI</th>
+                  <th className="px-5 py-3">ĐỒNG BỘ CUỐI</th>
+                  <th className="px-5 py-3 text-right">THAO TÁC</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((device) => {
+                  const Icon = kindIcons[device.kind];
+                  return (
+                    <tr
+                      key={device.id}
+                      className="border-b border-slate-50 last:border-0 hover:bg-slate-50/70"
+                    >
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <span>
+                            <span className="block font-semibold text-slate-800">
+                              {device.name}
+                            </span>
+                            <span className="block text-xs text-slate-400">
+                              {device.sn}
+                            </span>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-600">
+                        {device.brandModel}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                          {device.type}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-600">
+                        {device.lastSync}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex justify-end gap-1">
+                          <Link
+                            href={`/thiet-bi/them-moi?id=${device.id}`}
+                            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
+                            aria-label="Sửa thiết bị"
+                          >
+                            <EditIcon className="h-4 w-4" />
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => removeDevice(device.id)}
+                            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
+                            aria-label="Xóa thiết bị"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
+            {rows.map((device) => {
+              const Icon = kindIcons[device.kind];
+              return (
+                <article
+                  key={device.id}
+                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
                 >
-                  ›
-                </PageBtn>
-              </div>
-            </div>
-          </section>
-        </>
-      )}
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-slate-800">
+                        {device.name}
+                      </p>
+                      <p className="text-xs text-slate-400">{device.sn}</p>
+                      <p className="mt-2 text-sm text-slate-600">
+                        {device.brandModel}
+                      </p>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                          {device.type}
+                        </span>
+                        <span className="text-xs text-slate-400">
+                          {device.lastSync}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-sm text-slate-500">
+          <p>
+            Hiển thị {filtered.length === 0 ? 0 : start + 1}-
+            {Math.min(start + PAGE_SIZE, filtered.length)} trên tổng số{" "}
+            {filtered.length} thiết bị
+          </p>
+          <Pagination
+            page={currentPage}
+            totalPages={totalPages}
+            onChange={setPage}
+          />
+        </div>
+
+        <div className="flex items-start gap-2.5 rounded-b-xl border-t border-[#d6e6fb] bg-[#eef5ff] px-5 py-3.5 text-sm text-[#1a5fbe]">
+          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            <span className="font-semibold">Mẹo:</span> Bạn có thể nhấp đúp vào
+            một hàng để xem biểu đồ dữ liệu thời gian thực của thiết bị đó.
+          </p>
+        </div>
+      </section>
     </div>
   );
-}
-
-function DeviceRows({
-  point,
-  depth,
-  hasChildren,
-  isOpen,
-  onToggle,
-}: {
-  point: MeterPoint;
-  depth: number;
-  hasChildren: boolean;
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
-  const Icon = kindIcons[point.kind];
-
-  return (
-    <>
-      <tr className="border-b border-slate-50 last:border-0 hover:bg-slate-50/80">
-        <td className="px-5 py-3.5">
-          <div className="flex items-center gap-2" style={{ paddingLeft: depth * 22 }}>
-            {hasChildren ? (
-              <button
-                type="button"
-                onClick={onToggle}
-                className="flex h-5 w-5 items-center justify-center text-slate-400"
-                aria-label={isOpen ? "Thu gọn" : "Mở rộng"}
-              >
-                <ChevronIcon className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`} />
-              </button>
-            ) : (
-              <span className="w-5" />
-            )}
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
-              <Icon className="h-4 w-4" />
-            </span>
-            <span>
-              <span className="block font-semibold text-slate-800">{point.name}</span>
-              <span className="block text-xs text-slate-400">{point.sn}</span>
-            </span>
-          </div>
-        </td>
-        <td className="px-5 py-3.5 text-slate-600">{point.type}</td>
-        <td className="px-5 py-3.5">
-          <span className="inline-flex items-center gap-2 text-sm font-medium">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                point.status === "connected" ? "bg-emerald-500" : "bg-red-500"
-              }`}
-            />
-            <span className={point.status === "connected" ? "text-slate-700" : "text-red-500"}>
-              {point.status === "connected" ? "Connected" : "Disconnected"}
-            </span>
-          </span>
-        </td>
-        <td className="px-5 py-3.5">
-          {point.value == null ? (
-            <span className="font-semibold text-slate-400">
-              --.- <span className="text-xs font-medium">{point.unit}</span>
-            </span>
-          ) : (
-            <span className="text-base font-bold text-[#1a73e8]">
-              {formatValue(point.value, point.unit)}{" "}
-              <span className="text-xs font-semibold text-[#5b9cf0]">{point.unit}</span>
-            </span>
-          )}
-        </td>
-        <td className="px-5 py-3.5">
-          <div className="flex justify-end">
-            <Link
-              href="/thiet-bi/them-moi"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
-              aria-label="Chỉnh sửa điểm đo"
-            >
-              <EditIcon className="h-4 w-4" />
-            </Link>
-          </div>
-        </td>
-      </tr>
-      {hasChildren &&
-        isOpen &&
-        point.children?.map((child) => (
-          <DeviceRows
-            key={child.id}
-            point={child}
-            depth={depth + 1}
-            hasChildren={Boolean(child.children?.length)}
-            isOpen={false}
-            onToggle={() => undefined}
-          />
-        ))}
-    </>
-  );
-}
-
-function formatValue(value: number, unit: string) {
-  const digits = unit === "kWh" || unit === "kW" || unit === "m³" ? 1 : 1;
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
 }
 
 function StatCard({
   label,
   value,
-  hint,
+  icon,
+  iconWrap,
   valueClass = "text-slate-900",
 }: {
   label: string;
   value: string;
-  hint: ReactNode;
+  icon: ReactNode;
+  iconWrap: string;
   valueClass?: string;
 }) {
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-      <p className="text-[11px] font-semibold tracking-wide text-slate-400">{label}</p>
-      <p className={`mt-2 text-3xl font-bold tracking-tight ${valueClass}`}>{value}</p>
-      <p className="mt-1.5 text-xs font-medium">{hint}</p>
+    <article className="flex items-start justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div>
+        <p className="text-[11px] font-semibold tracking-wide text-slate-400">
+          {label}
+        </p>
+        <p className={`mt-2 text-3xl font-bold tracking-tight ${valueClass}`}>
+          {value}
+        </p>
+      </div>
+      <span
+        className={`flex h-11 w-11 items-center justify-center rounded-full ${iconWrap}`}
+      >
+        {icon}
+      </span>
     </article>
   );
 }
 
-function PageBtn({
+function FilterSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-9 appearance-none rounded-lg border border-slate-200 bg-white py-0 pr-8 pl-3 text-sm text-slate-600 outline-none focus:border-[#1a73e8]"
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-slate-400">
+        ▾
+      </span>
+    </div>
+  );
+}
+
+function ToolbarButton({
   children,
-  onClick,
+  label,
   active = false,
-  disabled = false,
+  onClick,
 }: {
   children: ReactNode;
-  onClick: () => void;
+  label: string;
   active?: boolean;
-  disabled?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <button
       type="button"
-      disabled={disabled}
+      title={label}
       onClick={onClick}
-      className={`flex h-8 min-w-8 items-center justify-center rounded-md px-2 text-sm font-medium disabled:opacity-40 ${
-        active ? "bg-[#1a73e8] text-white" : "text-slate-600 hover:bg-slate-100"
+      className={`flex h-8 w-8 items-center justify-center rounded-md ${
+        active
+          ? "bg-[#e8f1fd] text-[#1a73e8]"
+          : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
       }`}
     >
       {children}
@@ -582,45 +496,216 @@ function PageBtn({
   );
 }
 
-const kindIcons: Record<DeviceKind, (props: { className?: string }) => ReactNode> = {
-  meter: RadioIcon,
-  inverter: BoltIcon,
-  thermo: ThermoIcon,
-  water: DropIcon,
-  wind: WindIcon,
-  steam: SteamIcon,
+function Pagination({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (page: number) => void;
+}) {
+  const items: Array<number | "…"> = [];
+  if (totalPages <= 5) {
+    for (let i = 1; i <= totalPages; i++) items.push(i);
+  } else if (page <= 3) {
+    items.push(1, 2, 3, "…", totalPages);
+  } else if (page >= totalPages - 2) {
+    items.push(1, "…", totalPages - 2, totalPages - 1, totalPages);
+  } else {
+    items.push(1, "…", page, "…", totalPages);
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        disabled={page === 1}
+        onClick={() => onChange(page - 1)}
+        className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+      >
+        ‹
+      </button>
+      {items.map((item, idx) =>
+        item === "…" ? (
+          <span key={`e-${idx}`} className="px-1 text-slate-400">
+            …
+          </span>
+        ) : (
+          <button
+            key={item}
+            type="button"
+            onClick={() => onChange(item)}
+            className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium ${
+              item === page
+                ? "bg-[#1a73e8] text-white"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            {item}
+          </button>
+        ),
+      )}
+      <button
+        type="button"
+        disabled={page === totalPages}
+        onClick={() => onChange(page + 1)}
+        className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
+const kindIcons: Record<
+  DeviceKind,
+  (props: { className?: string }) => ReactNode
+> = {
+  power: BoltIcon,
+  flow: DropIcon,
+  temp: ThermoIcon,
+  steam: WaveIcon,
 };
 
-function SearchIcon({ className }: { className?: string }) {
+function BoxIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M16 16.5 20 20.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M4 8.5 12 4l8 4.5V16L12 20.5 4 16V8.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M12 12v8.5M4 8.5l8 3.5 8-3.5" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
 
-function DownloadIcon({ className }: { className?: string }) {
+function CheckIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M12 4v10M8 10l4 4 4-4M5 18h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="m8.5 12.2 2.4 2.4 4.6-5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-function ChevronIcon({ className }: { className?: string }) {
+function WrenchIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M14.5 6.5a3.5 3.5 0 0 0 4.7 4.7L15 15.4 8.6 9l4.2-4.2a3.5 3.5 0 0 0 1.7 1.7Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m8.6 9-4.1 4.1a2 2 0 0 0 0 2.8l1.6 1.6a2 2 0 0 0 2.8 0L13 13.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-function RadioIcon({ className }: { className?: string }) {
+function OfflineIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="14" r="2.2" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M8.2 10.8a5.5 5.5 0 0 1 7.6 0M6 8.2a8.5 8.5 0 0 1 12 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M5 12.5a9 9 0 0 1 14 0M8 15.5a5 5 0 0 1 8 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <circle cx="12" cy="19" r="1.2" fill="currentColor" />
+      <path d="m5 5 14 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function FilterIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 6h16l-6 7.5V18l-4 2v-6.5L4 6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function GridIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ListIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function EditIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 17.5V20h2.5L18 8.5 15.5 6 4 17.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M13.8 7.7 16.3 10.2" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M5 7h14M10 7V5h4v2M8 7l.8 12h6.4L16 7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M12 11v5M12 8v.01"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -633,44 +718,47 @@ function BoltIcon({ className }: { className?: string }) {
   );
 }
 
+function DropIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 3s6 7 6 11a6 6 0 1 1-12 0c0-4 6-11 6-11Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function ThermoIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M10 13.5V6.5a2 2 0 1 1 4 0v7a3.5 3.5 0 1 1-4 0Z" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M10 13.5V6.5a2 2 0 1 1 4 0v7a3.5 3.5 0 1 1-4 0Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
       <path d="M12 9v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
 
-function DropIcon({ className }: { className?: string }) {
+function WaveIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M12 3s6 7 6 11a6 6 0 1 1-12 0c0-4 6-11 6-11Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function WindIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M4 9h11a2.5 2.5 0 1 0-2.5-2.5M4 13h13a2.5 2.5 0 1 1-2.5 2.5M4 17h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SteamIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M5 18h14M8 18V9l4-4 4 4v9M9.5 12h5M9.5 15h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function EditIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M4 17.5V20h2.5L18 8.5 15.5 6 4 17.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M13.8 7.7 16.3 10.2" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M3 14c2-3 4-3 6 0s4 3 6 0 4-3 6 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M3 9c2-3 4-3 6 0s4 3 6 0 4-3 6 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

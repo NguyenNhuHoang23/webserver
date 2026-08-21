@@ -307,7 +307,7 @@ export function AddCustomDeviceForm() {
             />
           </label>
           <p className="mt-3 text-center text-xs leading-5 text-slate-400">
-            Chọn ảnh thiết bị để nhân viên hiện trường dễ dàng nhận diện.
+            Thêm ảnh thiết bị để nhân viên hiện trường dễ dàng nhận diện.
           </p>
         </section>
 
@@ -328,7 +328,7 @@ export function AddCustomDeviceForm() {
 
       <div className="sticky bottom-0 -mx-6 mt-1 flex items-center justify-between gap-3 border-t border-slate-200 bg-[#f3f5f8]/95 px-6 py-4 backdrop-blur lg:-mx-8 lg:px-8">
         <p className="flex items-center gap-2 text-xs text-slate-500">
-          <RefreshIcon className="h-4 w-4" />
+          <ClockIcon className="h-4 w-4" />
           Chỉnh sửa lần cuối: {lastEdited}
         </p>
         <div className="flex items-center gap-3">
@@ -410,11 +410,11 @@ function CameraIcon({ className }: { className?: string }) {
   );
 }
 
-function RefreshIcon({ className }: { className?: string }) {
+function ClockIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M20 12a8 8 0 1 1-2.3-5.7L20 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M20 4v4h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 8v4.5l3 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
