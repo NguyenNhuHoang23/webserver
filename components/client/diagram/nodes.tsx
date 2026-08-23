@@ -1,6 +1,7 @@
 "use client";
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { useDiagramActions } from "./context";
 import type { JunctionFlowNode, MeterFlowNode, MeterIcon, MeterStatus } from "./types";
 
 const statusBorder: Record<MeterStatus, string> = {
@@ -21,7 +22,9 @@ const iconWrap: Record<MeterStatus, string> = {
   offline: "bg-slate-100 text-slate-400",
 };
 
-export function MeterNode({ data, selected }: NodeProps<MeterFlowNode>) {
+export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
+  const { openSettings } = useDiagramActions();
+
   return (
     <div
       className={`diagram-card w-[248px] rounded-xl border-2 bg-white px-3.5 py-3 shadow-[0_2px_8px_rgba(15,23,42,0.06)] ${statusBorder[data.status]} ${
@@ -36,14 +39,28 @@ export function MeterNode({ data, selected }: NodeProps<MeterFlowNode>) {
 
       <div className="mb-2 flex items-start justify-between text-slate-300">
         <RefreshIcon className="h-3.5 w-3.5" />
-        <GearIcon className="h-3.5 w-3.5" />
+        <button
+          type="button"
+          className="rounded p-0.5 hover:bg-slate-100 hover:text-slate-500"
+          aria-label="Cài đặt điểm đo"
+          onClick={(event) => {
+            event.stopPropagation();
+            openSettings(id);
+          }}
+        >
+          <GearIcon className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       <div className="flex items-start gap-2.5">
         <span
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${iconWrap[data.status]}`}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full ${iconWrap[data.status]}`}
         >
-          <NodeGlyph type={data.icon} className="h-5 w-5" />
+          {data.iconImage ? (
+            <img src={data.iconImage} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <NodeGlyph type={data.icon} className="h-5 w-5" />
+          )}
         </span>
         <div className="min-w-0 pt-0.5">
           <p className="truncate text-[13.5px] font-bold text-slate-800">{data.title}</p>
@@ -127,6 +144,45 @@ function NodeGlyph({ type, className }: { type: MeterIcon; className?: string })
       </svg>
     );
   }
+  if (type === "meter") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M8 15V9M12 15v-4M16 15v-6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "pump") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="4.5" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M12 7.5V4M12 20v-3.5M16.5 12H20M4 12h3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "valve") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M4 12h16M8 8l4 4-4 4M16 8l-4 4 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (type === "solar") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect x="4" y="8" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M7 18v3M12 18v3M17 18v3M12 4v4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "boiler") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect x="5" y="10" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M8 10V7h8v3M9 6h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
@@ -167,3 +223,5 @@ function GearIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export { NodeGlyph };

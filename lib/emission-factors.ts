@@ -130,3 +130,29 @@ export function removeFactorGroup(id: string) {
   saveFactorGroups(next);
   return next;
 }
+
+export type LibraryFactor = {
+  id: string;
+  groupId: string;
+  name: string;
+  source: string;
+  gasKey: GasKey;
+  gasLabel: string;
+  value: number;
+  unit: string;
+};
+
+export function flattenFactorGroups(groups: FactorGroup[]): LibraryFactor[] {
+  return groups.flatMap((group) =>
+    group.gases.map((gas) => ({
+      id: `${group.id}:${gas.key}`,
+      groupId: group.id,
+      name: group.name,
+      source: group.source,
+      gasKey: gas.key,
+      gasLabel: gas.label,
+      value: gas.value,
+      unit: gas.unit,
+    })),
+  );
+}

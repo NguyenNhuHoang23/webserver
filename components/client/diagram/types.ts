@@ -1,7 +1,15 @@
 import type { Edge, Node } from "@xyflow/react";
 
 export type MeterStatus = "normal" | "warning" | "offline";
-export type MeterIcon = "plant" | "cabinet" | "fan";
+export type MeterIcon =
+  | "plant"
+  | "cabinet"
+  | "fan"
+  | "meter"
+  | "pump"
+  | "valve"
+  | "solar"
+  | "boiler";
 export type EnergyKind = "Điện" | "Nhiệt" | "Khí nén" | "Nước";
 
 export type MeterMetric = {
@@ -15,6 +23,7 @@ export type MeterNodeData = {
   status: MeterStatus;
   statusLabel?: string;
   icon: MeterIcon;
+  iconImage?: string;
   metrics: MeterMetric[];
   energy: EnergyKind;
   listed?: boolean;

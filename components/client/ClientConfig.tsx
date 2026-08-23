@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 
 type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
 type Utility = "Điện" | "Nước" | "Nhiệt" | "Hơi";
+type DropPosition = "before" | "after" | "child";
 
 const NAV: { id: TabId; n: number; label: string; icon: "doc" | "nodes" | "cash" | "warn" | "user" }[] = [
   { id: "project", n: 1, label: "Dự án", icon: "doc" },
@@ -17,7 +18,14 @@ const UTILITIES: Utility[] = ["Điện", "Nước", "Nhiệt", "Hơi"];
 
 const ALERT_TAGS = ["Energy", "U/I", "Tần số", "Công suất", "Sóng hài", "Mất cân bằng pha"];
 
-type Meter = { id: string; name: string; code: string; type: string; depth: number; utility: Utility };
+type Meter = {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  parentId: string | null;
+  utility: Utility;
+};
 type Slot = { id: string; name: string; color: string; from: string; to: string; price: string };
 type AccountRow = {
   id: string;
@@ -29,13 +37,13 @@ type AccountRow = {
 };
 
 const INITIAL_METERS: Meter[] = [
-  { id: "m1", name: "Main Feed (Tổng trạm)", code: "MF-001", type: "Đồng hồ tổng 3 pha", depth: 0, utility: "Điện" },
-  { id: "m2", name: "Production Line A", code: "PLA-01", type: "Smart Meter V3", depth: 1, utility: "Điện" },
-  { id: "m3", name: "HVAC System", code: "HVAC-02", type: "Power Analyzer", depth: 1, utility: "Điện" },
-  { id: "m4", name: "Chiller Unit 1", code: "CHL-01-A", type: "Sub-meter Modbus", depth: 2, utility: "Điện" },
-  { id: "m5", name: "Nhà máy nước", code: "WTR-01", type: "Đồng hồ lưu lượng", depth: 0, utility: "Nước" },
-  { id: "m6", name: "Lò hơi trung tâm", code: "STM-01", type: "Cảm biến hơi", depth: 0, utility: "Hơi" },
-  { id: "m7", name: "Bộ trao đổi nhiệt", code: "HT-01", type: "Nhiệt kế IoT", depth: 0, utility: "Nhiệt" },
+  { id: "m1", name: "Main Feed (Tổng trạm)", code: "MF-001", type: "Đồng hồ tổng 3 pha", parentId: null, utility: "Điện" },
+  { id: "m2", name: "Production Line A", code: "PLA-01", type: "Smart Meter V3", parentId: "m1", utility: "Điện" },
+  { id: "m3", name: "HVAC System", code: "HVAC-02", type: "Power Analyzer", parentId: "m1", utility: "Điện" },
+  { id: "m4", name: "Chiller Unit 1", code: "CHL-01-A", type: "Sub-meter Modbus", parentId: "m2", utility: "Điện" },
+  { id: "m5", name: "Nhà máy nước", code: "WTR-01", type: "Đồng hồ lưu lượng", parentId: null, utility: "Nước" },
+  { id: "m6", name: "Lò hơi trung tâm", code: "STM-01", type: "Cảm biến hơi", parentId: null, utility: "Hơi" },
+  { id: "m7", name: "Bộ trao đổi nhiệt", code: "HT-01", type: "Nhiệt kế IoT", parentId: null, utility: "Nhiệt" },
 ];
 
 const INITIAL_SLOTS: Slot[] = [
@@ -104,7 +112,7 @@ export function ClientConfig() {
   };
 
   const visibleMeters = useMemo(
-    () => meters.filter((item) => item.utility === utility),
+    () => orderMetersByTree(meters.filter((item) => item.utility === utility)),
     [meters, utility],
   );
 
@@ -194,6 +202,12 @@ export function ClientConfig() {
               utility={utility}
               onUtility={setUtility}
               meters={visibleMeters}
+              onMetersChange={(nextVisible) => {
+                setMeters((current) => {
+                  const other = current.filter((item) => item.utility !== utility);
+                  return [...other, ...nextVisible];
+                });
+              }}
             />
           ) : null}
 
@@ -395,15 +409,42 @@ function MetersPanel({
   utility,
   onUtility,
   meters,
+  onMetersChange,
 }: {
   utility: Utility;
   onUtility: (v: Utility) => void;
   meters: Meter[];
+  onMetersChange: (rows: Meter[]) => void;
 }) {
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{ id: string; position: DropPosition } | null>(null);
+
+  const depthMap = useMemo(() => buildDepthMap(meters), [meters]);
+
+  function resolveDropPosition(event: DragEvent<HTMLTableRowElement>): DropPosition {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const offsetY = event.clientY - rect.top;
+    const ratio = offsetY / rect.height;
+    if (ratio < 0.28) return "before";
+    if (ratio > 0.72) return "after";
+    return "child";
+  }
+
+  function handleDrop(targetId: string, position: DropPosition) {
+    if (!dragId) return;
+    const next = applyMeterDrop(meters, dragId, targetId, position);
+    if (next) onMetersChange(next);
+    setDragId(null);
+    setDropHint(null);
+  }
+
   return (
     <div>
       <UtilityTabs value={utility} onChange={onUtility} />
-      <div className="mt-4 overflow-x-auto">
+      <p className="mt-3 text-[12px] text-slate-500">
+        Kéo thả để sắp xếp thứ tự. Thả vào giữa dòng để đặt làm điểm đo con.
+      </p>
+      <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[640px] text-left text-[13px]">
           <thead>
             <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
@@ -414,36 +455,194 @@ function MetersPanel({
             </tr>
           </thead>
           <tbody>
-            {meters.map((item) => (
-              <tr key={item.id} className="border-b border-slate-50 text-slate-700">
-                <td className="py-3">
-                  <span className="inline-flex items-center gap-2" style={{ paddingLeft: item.depth * 22 }}>
-                    <DragHandle />
-                    {item.depth > 0 ? <span className="text-slate-300">↳</span> : null}
-                    <span className="font-medium">{item.name}</span>
-                  </span>
-                </td>
-                <td className="py-3 text-slate-500">{item.code}</td>
-                <td className="py-3">{item.type}</td>
-                <td className="py-3">
-                  <span className="flex justify-end gap-1 text-slate-400">
-                    {item.depth > 0 && item.depth < 2 ? (
-                      <IconBtn label="Xem">
-                        <EyeIcon />
-                      </IconBtn>
+            {meters.map((item) => {
+              const depth = depthMap.get(item.id) ?? 0;
+              const isDragging = dragId === item.id;
+              const hint = dropHint?.id === item.id ? dropHint.position : null;
+              return (
+                <tr
+                  key={item.id}
+                  draggable
+                  onDragStart={(event) => {
+                    setDragId(item.id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", item.id);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (!dragId || dragId === item.id) return;
+                    if (isDescendant(meters, dragId, item.id)) return;
+                    event.dataTransfer.dropEffect = "move";
+                    setDropHint({ id: item.id, position: resolveDropPosition(event) });
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (!dragId || dragId === item.id) return;
+                    handleDrop(item.id, resolveDropPosition(event));
+                  }}
+                  onDragEnd={() => {
+                    setDragId(null);
+                    setDropHint(null);
+                  }}
+                  className={`border-b border-slate-50 text-slate-700 transition-colors ${
+                    isDragging ? "opacity-40" : ""
+                  } ${
+                    hint === "child"
+                      ? "bg-[#eef5ff] ring-1 ring-inset ring-[#3b82f6]/30"
+                      : hint
+                        ? "bg-slate-50"
+                        : "hover:bg-slate-50/70"
+                  }`}
+                >
+                  <td className="relative py-3">
+                    {hint === "before" ? (
+                      <span className="absolute inset-x-0 top-0 h-0.5 bg-[#3b82f6]" />
                     ) : null}
-                    <IconBtn label="Chi tiết">
-                      <ListIcon />
-                    </IconBtn>
-                  </span>
-                </td>
-              </tr>
-            ))}
+                    {hint === "after" ? (
+                      <span className="absolute inset-x-0 bottom-0 h-0.5 bg-[#3b82f6]" />
+                    ) : null}
+                    <span className="inline-flex items-center gap-2" style={{ paddingLeft: depth * 22 }}>
+                      <span className="cursor-grab active:cursor-grabbing">
+                        <DragHandle />
+                      </span>
+                      {depth > 0 ? <span className="text-slate-300">↳</span> : null}
+                      <span className="font-medium">{item.name}</span>
+                      {hint === "child" ? (
+                        <span className="rounded bg-[#dbeafe] px-1.5 py-0.5 text-[10px] font-semibold text-[#2563eb]">
+                          Làm con
+                        </span>
+                      ) : null}
+                    </span>
+                  </td>
+                  <td className="py-3 text-slate-500">{item.code}</td>
+                  <td className="py-3">{item.type}</td>
+                  <td className="py-3">
+                    <span className="flex justify-end gap-1 text-slate-400">
+                      {depth > 0 && depth < 2 ? (
+                        <IconBtn label="Xem">
+                          <EyeIcon />
+                        </IconBtn>
+                      ) : null}
+                      <IconBtn label="Chi tiết">
+                        <ListIcon />
+                      </IconBtn>
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
   );
+}
+
+function orderMetersByTree(meters: Meter[]) {
+  const byParent = new Map<string | null, Meter[]>();
+  for (const meter of meters) {
+    const key = meter.parentId;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key)!.push(meter);
+  }
+  for (const group of byParent.values()) {
+    group.sort((a, b) => meters.indexOf(a) - meters.indexOf(b));
+  }
+
+  const ordered: Meter[] = [];
+  function walk(parentId: string | null) {
+    for (const meter of byParent.get(parentId) ?? []) {
+      ordered.push(meter);
+      walk(meter.id);
+    }
+  }
+  walk(null);
+  return ordered;
+}
+
+function buildDepthMap(meters: Meter[]) {
+  const map = new Map<string, Meter>(meters.map((meter) => [meter.id, meter]));
+  const depths = new Map<string, number>();
+
+  function depthFor(id: string): number {
+    if (depths.has(id)) return depths.get(id)!;
+    const meter = map.get(id);
+    if (!meter?.parentId || !map.has(meter.parentId)) {
+      depths.set(id, 0);
+      return 0;
+    }
+    const next = depthFor(meter.parentId) + 1;
+    depths.set(id, next);
+    return next;
+  }
+
+  for (const meter of meters) depthFor(meter.id);
+  return depths;
+}
+
+function isDescendant(meters: Meter[], ancestorId: string, nodeId: string) {
+  const map = new Map(meters.map((meter) => [meter.id, meter]));
+  let current = map.get(nodeId);
+  while (current?.parentId) {
+    if (current.parentId === ancestorId) return true;
+    current = map.get(current.parentId);
+  }
+  return false;
+}
+
+function findChildInsertIndex(ordered: Meter[], parentId: string) {
+  const parentIndex = ordered.findIndex((meter) => meter.id === parentId);
+  if (parentIndex < 0) return ordered.length;
+
+  const parentDepth = buildDepthMap(ordered).get(parentId) ?? 0;
+  let index = parentIndex + 1;
+  const depths = buildDepthMap(ordered);
+  while (index < ordered.length && (depths.get(ordered[index].id) ?? 0) > parentDepth) {
+    index += 1;
+  }
+  return index;
+}
+
+function applyMeterDrop(
+  meters: Meter[],
+  dragId: string,
+  targetId: string,
+  position: DropPosition,
+): Meter[] | null {
+  if (dragId === targetId) return null;
+  if (isDescendant(meters, dragId, targetId)) return null;
+
+  const drag = meters.find((meter) => meter.id === dragId);
+  const target = meters.find((meter) => meter.id === targetId);
+  if (!drag || !target) return null;
+
+  const ordered = orderMetersByTree(meters);
+  const without = ordered.filter((meter) => meter.id !== dragId);
+  const depths = buildDepthMap(without);
+  const targetDepth = depths.get(targetId) ?? 0;
+
+  let parentId: string | null;
+  let insertAt: number;
+
+  if (position === "child") {
+    if (targetDepth >= 2) return null;
+    parentId = targetId;
+    insertAt = findChildInsertIndex(without, targetId);
+  } else {
+    parentId = target.parentId;
+    const targetIndex = without.findIndex((meter) => meter.id === targetId);
+    insertAt = position === "before" ? targetIndex : targetIndex + 1;
+  }
+
+  const moved: Meter = { ...drag, parentId };
+  const next = [...without.slice(0, insertAt), moved, ...without.slice(insertAt)];
+
+  for (const meter of next) {
+    const depth = buildDepthMap(next).get(meter.id) ?? 0;
+    if (depth > 2) return null;
+  }
+
+  return next;
 }
 
 function CostPanel({

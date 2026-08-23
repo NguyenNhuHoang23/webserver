@@ -1,7 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Project } from "@/lib/projects";
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
+
+const YEAR_OPTIONS = [2024, 2025, 2026, 2027];
 
 const ENERGY = [
   { day: "07-01", kwh: 198.4 },
@@ -50,13 +54,7 @@ export function ClientDashboard({ project }: { project: Project }) {
             Thống kê hoạt động năng lượng {project.name}
           </p>
         </div>
-        <button
-          type="button"
-          className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
-        >
-          <CalendarIcon className="h-4 w-4 text-slate-400" />
-          Tháng 07/2026
-        </button>
+        <MonthPicker defaultMonth={7} defaultYear={2026} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
@@ -111,6 +109,101 @@ export function ClientDashboard({ project }: { project: Project }) {
           <AlertLogTable />
         </DashboardCard>
       </div>
+    </div>
+  );
+}
+
+function MonthPicker({
+  defaultMonth,
+  defaultYear,
+}: {
+  defaultMonth: number;
+  defaultYear: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [month, setMonth] = useState(defaultMonth);
+  const [year, setYear] = useState(defaultYear);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const label = `Tháng ${String(month).padStart(2, "0")}/${year}`;
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:bg-slate-50"
+      >
+        <CalendarIcon className="h-4 w-4 text-slate-400" />
+        {label}
+        <span className="text-[10px] text-slate-400">▾</span>
+      </button>
+
+      {open ? (
+        <div className="absolute top-11 right-0 z-20 w-[220px] rounded-md border border-slate-200 bg-white p-3 shadow-md">
+          <div className="mb-2 flex items-center gap-2">
+            <select
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
+              aria-label="Năm"
+            >
+              {YEAR_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </div>
+          <ul role="listbox" aria-label="Chọn tháng" className="grid grid-cols-3 gap-1.5">
+            {MONTH_OPTIONS.map((value) => {
+              const active = value === month;
+              return (
+                <li key={value}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => {
+                      setMonth(value);
+                      setOpen(false);
+                    }}
+                    className={`h-9 w-full rounded-md text-[12px] font-medium ${
+                      active
+                        ? "bg-[#1a73e8] text-white"
+                        : "bg-slate-50 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {String(value).padStart(2, "0")}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

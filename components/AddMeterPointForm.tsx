@@ -1,37 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  deviceSpec,
+  INITIAL_DEVICES,
+  loadDevices,
+  type CatalogDevice,
+} from "@/lib/devices";
 
 const energyTypes = ["Điện", "Nước", "Nhiệt", "Hơi"] as const;
-
-const devices = [
-  { id: "iem3000", name: "Schneider iEM3000", spec: "Modbus RTU • 3-Phase" },
-  { id: "pac3200", name: "Siemens PAC3200", spec: "Modbus TCP • 3-Phase" },
-  { id: "pm5000", name: "Schneider PM5320", spec: "Modbus TCP • Power Quality" },
-  { id: "abb-b23", name: "ABB B23", spec: "Pulse / M-Bus • Energy" },
-  { id: "multical", name: "Kamstrup MULTICAL 603", spec: "M-Bus • Heat / Cooling" },
-];
 
 export function AddMeterPointForm() {
   const [energy, setEnergy] = useState<(typeof energyTypes)[number]>("Điện");
   const [query, setQuery] = useState("");
-  const [droppedDevice, setDroppedDevice] = useState<(typeof devices)[0] | null>(
-    null,
-  );
+  const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
+  const [droppedDevice, setDroppedDevice] = useState<CatalogDevice | null>(null);
   const [pointId, setPointId] = useState("");
   const [pointName, setPointName] = useState("");
+
+  useEffect(() => {
+    setDevices(loadDevices());
+  }, []);
 
   const filteredDevices = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return devices;
     return devices.filter(
       (d) =>
-        d.name.toLowerCase().includes(q) || d.spec.toLowerCase().includes(q),
+        d.name.toLowerCase().includes(q) ||
+        d.brandModel.toLowerCase().includes(q) ||
+        d.type.toLowerCase().includes(q) ||
+        d.sn.toLowerCase().includes(q) ||
+        (d.protocol ?? "").toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [devices, query]);
 
-  function applyDevice(device: (typeof devices)[0]) {
+  function applyDevice(device: CatalogDevice) {
     setDroppedDevice(device);
     setPointName(device.name);
     setPointId((current) => current || device.id.toUpperCase());
@@ -142,7 +147,7 @@ export function AddMeterPointForm() {
               </Field>
             </div>
 
-            <Field label="CÔNG THỨC CHUYỂN ĐỔI (DATA TRANSFORMATION)">
+            <Field label="CÔNG THỨC CHUYỂN ĐỔI (DATA TRANSFORM)">
               <div className="relative">
                 <input
                   placeholder="VD: kWh * 0.85"
@@ -191,7 +196,7 @@ export function AddMeterPointForm() {
             />
           </label>
 
-          <ul className="space-y-2">
+          <ul className="max-h-[min(640px,70vh)] space-y-2 overflow-y-auto pr-1">
             {filteredDevices.map((device) => (
               <li key={device.id}>
                 <button
@@ -207,12 +212,12 @@ export function AddMeterPointForm() {
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
                     <MeterIcon className="h-4 w-4" />
                   </span>
-                  <span>
-                    <span className="block text-sm font-medium text-slate-800">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-slate-800">
                       {device.name}
                     </span>
-                    <span className="block text-xs text-slate-400">
-                      {device.spec}
+                    <span className="block truncate text-xs text-slate-400">
+                      {device.brandModel} • {deviceSpec(device)}
                     </span>
                   </span>
                 </button>

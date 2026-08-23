@@ -1,17 +1,17 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  flattenFactorGroups,
+  formatFactorValue,
+  INITIAL_FACTOR_GROUPS,
+  loadFactorGroups,
+  type GasKey,
+  type LibraryFactor,
+} from "@/lib/emission-factors";
 
 type ScopeId = 1 | 2 | 3;
 type InputMethod = "meter" | "manual" | "file";
-
-type EmissionFactor = {
-  id: string;
-  name: string;
-  value: number;
-  unit: string;
-  kind: "electric" | "petrol" | "diesel" | "lpg";
-};
 
 type EmissionSource = {
   id: string;
@@ -36,13 +36,6 @@ const METHODS: { id: InputMethod; label: string; hint: string }[] = [
   { id: "file", label: "Tải file", hint: "CSV / Excel phát thải" },
 ];
 
-const FACTORS: EmissionFactor[] = [
-  { id: "grid-2024", name: "Điện lưới 2024", value: 0.522, unit: "kg CO₂e / kWh", kind: "electric" },
-  { id: "ron95", name: "Xăng RON 95", value: 2.312, unit: "kg CO₂e / Litre", kind: "petrol" },
-  { id: "diesel", name: "Dầu Diesel", value: 2.68, unit: "kg CO₂e / Litre", kind: "diesel" },
-  { id: "lpg", name: "Khí LPG", value: 1.65, unit: "kg CO₂e / kg", kind: "lpg" },
-];
-
 const METHOD_LABEL: Record<InputMethod, string> = {
   meter: "Điểm đo",
   manual: "Thủ công",
@@ -62,8 +55,8 @@ const initialSources: EmissionSource[] = [
     scope: 1,
     name: "Tiêu thụ điện Xưởng A",
     method: "meter",
-    factorId: "grid-2024",
-    factorValue: 0.7221,
+    factorId: "do-industry:co2",
+    factorValue: 74100,
     formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
     appliedAt: "2024-01-01",
   },
@@ -72,8 +65,8 @@ const initialSources: EmissionSource[] = [
     scope: 1,
     name: "Máy phát Diesel dự phòng",
     method: "manual",
-    factorId: "diesel",
-    factorValue: 2.68,
+    factorId: "do-road:co2",
+    factorValue: 74100,
     formula: "{Giá trị thủ công} * {Hệ số phát thải}",
     appliedAt: "2024-01-01",
   },
@@ -82,8 +75,8 @@ const initialSources: EmissionSource[] = [
     scope: 2,
     name: "Điện lưới mua ngoài",
     method: "meter",
-    factorId: "grid-2024",
-    factorValue: 0.522,
+    factorId: "natural-gas:co2",
+    factorValue: 56100,
     formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
     appliedAt: "2024-03-01",
   },
@@ -92,8 +85,8 @@ const initialSources: EmissionSource[] = [
     scope: 3,
     name: "Vận tải hàng hóa đầu vào",
     method: "file",
-    factorId: "ron95",
-    factorValue: 2.312,
+    factorId: "gasoline-road:co2",
+    factorValue: 69300,
     formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
     appliedAt: "2024-02-15",
   },
@@ -103,6 +96,9 @@ export function GhgConfig() {
   const [activeScope, setActiveScope] = useState<ScopeId>(1);
   const [tableFilter, setTableFilter] = useState<"all" | ScopeId>(1);
   const [query, setQuery] = useState("");
+  const [factors, setFactors] = useState<LibraryFactor[]>(() =>
+    flattenFactorGroups(INITIAL_FACTOR_GROUPS),
+  );
   const [sources, setSources] = useState<EmissionSource[]>(initialSources);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropHover, setDropHover] = useState(false);
@@ -112,18 +108,24 @@ export function GhgConfig() {
   const [method, setMethod] = useState<InputMethod>("meter");
   const [factorId, setFactorId] = useState("");
   const [formula, setFormula] = useState("{Giá trị điểm đo} * {Hệ số phát thải}");
-  const [factorValue, setFactorValue] = useState("0.7221");
+  const [factorValue, setFactorValue] = useState("74100");
   const [appliedAt, setAppliedAt] = useState("2024-01-01");
+
+  useEffect(() => {
+    setFactors(flattenFactorGroups(loadFactorGroups()));
+  }, []);
 
   const filteredFactors = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return FACTORS;
-    return FACTORS.filter(
+    if (!q) return factors;
+    return factors.filter(
       (item) =>
         item.name.toLowerCase().includes(q) ||
+        item.source.toLowerCase().includes(q) ||
+        item.gasLabel.toLowerCase().includes(q) ||
         item.unit.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [factors, query]);
 
   const visibleSources = useMemo(
     () =>
@@ -133,7 +135,7 @@ export function GhgConfig() {
     [sources, tableFilter],
   );
 
-  function applyFactor(factor: EmissionFactor) {
+  function applyFactor(factor: LibraryFactor) {
     setFactorId(factor.id);
     setFactorValue(String(factor.value));
     setFormula((current) =>
@@ -149,7 +151,7 @@ export function GhgConfig() {
     setMethod("meter");
     setFactorId("");
     setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-    setFactorValue("0.7221");
+    setFactorValue(factors[0] ? String(factors[0].value) : "0");
     setAppliedAt("2024-01-01");
   }
 
@@ -179,7 +181,7 @@ export function GhgConfig() {
       scope: activeScope,
       name: trimmed,
       method,
-      factorId: factorId || "grid-2024",
+      factorId: factorId || factors[0]?.id || "",
       factorValue: Number.isFinite(parsed) ? parsed : 0,
       formula,
       appliedAt,
@@ -244,7 +246,7 @@ export function GhgConfig() {
             e.preventDefault();
             setDropHover(false);
             const id = e.dataTransfer.getData("text/plain");
-            const factor = FACTORS.find((item) => item.id === id);
+            const factor = factors.find((item) => item.id === id);
             if (factor) applyFactor(factor);
           }}
           className={`rounded-xl border bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] ${
@@ -325,15 +327,16 @@ export function GhgConfig() {
                   onChange={(e) => {
                     const nextId = e.target.value;
                     setFactorId(nextId);
-                    const factor = FACTORS.find((item) => item.id === nextId);
+                    const factor = factors.find((item) => item.id === nextId);
                     if (factor) setFactorValue(String(factor.value));
                   }}
                   className="input appearance-none pr-9"
                 >
                   <option value="">Chọn hệ số từ thư viện</option>
-                  {FACTORS.map((factor) => (
+                  {factors.map((factor) => (
                     <option key={factor.id} value={factor.id}>
-                      {factor.name} — {factor.value} {factor.unit}
+                      {factor.name} ({factor.gasLabel}) — {formatFactorValue(factor.value)}{" "}
+                      {factor.unit}
                     </option>
                   ))}
                 </select>
@@ -425,9 +428,9 @@ export function GhgConfig() {
             />
           </label>
 
-          <ul className="space-y-2">
+          <ul className="max-h-[min(640px,70vh)] space-y-2 overflow-y-auto pr-1">
             {filteredFactors.map((factor) => {
-              const Icon = factorIcons[factor.kind];
+              const Icon = factorIcons[factor.gasKey];
               return (
                 <li key={factor.id}>
                   <button
@@ -448,8 +451,8 @@ export function GhgConfig() {
                       <span className="block truncate text-sm font-medium text-slate-800">
                         {factor.name}
                       </span>
-                      <span className="block text-xs text-slate-400">
-                        {factor.value} {factor.unit}
+                      <span className="block truncate text-xs text-slate-400">
+                        {factor.gasLabel}: {formatFactorValue(factor.value)} {factor.unit}
                       </span>
                     </span>
                   </button>
@@ -605,14 +608,10 @@ const methodIcons: Record<InputMethod, (props: { className?: string }) => ReactN
   file: UploadIcon,
 };
 
-const factorIcons: Record<
-  EmissionFactor["kind"],
-  (props: { className?: string }) => ReactNode
-> = {
-  electric: BoltIcon,
-  petrol: FuelIcon,
-  diesel: DropIcon,
-  lpg: FlameIcon,
+const factorIcons: Record<GasKey, (props: { className?: string }) => ReactNode> = {
+  co2: BoltIcon,
+  ch4: FlameIcon,
+  n2o: DropIcon,
 };
 
 function LeafIcon({ className }: { className?: string }) {
@@ -710,20 +709,6 @@ function BoltIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <path d="M13 2 4.5 13.5h6.2L9.2 22 19.5 10h-6.2L13 2Z" />
-    </svg>
-  );
-}
-
-function FuelIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="4" y="4" width="10" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M14 8h2.5a2 2 0 0 1 2 2V16a2 2 0 0 0 2 2M7 8h4"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
     </svg>
   );
 }

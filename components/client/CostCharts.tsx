@@ -86,11 +86,6 @@ export function CostCharts() {
     return { peak: 0, normal, off, none: 0 };
   }, [total]);
 
-  const dateLabel = (() => {
-    const [y, m, d] = date.split("-");
-    return `${m}/${d}/${y}`;
-  })();
-
   const exportCsv = () => {
     const rows = ["Thời điểm,Chi phí (VND)", ...bars.map((b) => `${b.label},${b.dark}`)].join("\n");
     const blob = new Blob([rows], { type: "text/csv;charset=utf-8" });
@@ -203,14 +198,13 @@ export function CostCharts() {
               </button>
             ))}
           </div>
-          <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
-            <CalendarIcon className="h-4 w-4" />
-            {dateLabel}
+          <label className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
+            <CalendarIcon className="h-4 w-4 shrink-0" />
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="sr-only"
+              className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
             />
           </label>
         </div>

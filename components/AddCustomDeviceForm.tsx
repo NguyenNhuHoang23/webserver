@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  kindFromDeviceType,
+  loadDevices,
+  todaySyncLabel,
+  typeLabelFromDeviceType,
+  upsertDevice,
+} from "@/lib/devices";
 
 type ExtraField = { id: string; label: string; value: string };
 type RegisterRow = {
@@ -28,12 +36,19 @@ function nextId(prefix: string) {
 }
 
 export function AddCustomDeviceForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const editingId = searchParams.get("id");
+
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [deviceType, setDeviceType] = useState(deviceTypes[0]);
   const [protocol, setProtocol] = useState(protocols[0]);
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
+  const [isEdit, setIsEdit] = useState(false);
+  const [existingName, setExistingName] = useState("");
+  const [existingSn, setExistingSn] = useState("");
   const [extraFields, setExtraFields] = useState<ExtraField[]>([]);
   const [rows, setRows] = useState<RegisterRow[]>([
     {
@@ -61,6 +76,29 @@ export function AddCustomDeviceForm() {
 
   const lastEdited = useMemo(() => "Vừa xong", []);
 
+  useEffect(() => {
+    if (!editingId) {
+      setIsEdit(false);
+      return;
+    }
+    const existing = loadDevices().find((item) => item.id === editingId);
+    if (!existing) {
+      setIsEdit(false);
+      return;
+    }
+    setIsEdit(true);
+    setExistingName(existing.name);
+    setExistingSn(existing.sn);
+    setBrand(existing.brand);
+    setModel(existing.brandModel.replace(`${existing.brand} `, ""));
+    setProtocol(existing.protocol || protocols[0]);
+    const matchedType =
+      deviceTypes.find((type) =>
+        type.toLowerCase().includes(existing.type.toLowerCase().split(" ")[0]),
+      ) ?? deviceTypes[0];
+    setDeviceType(matchedType);
+  }, [editingId]);
+
   function addExtraField() {
     setExtraFields((current) => [
       ...current,
@@ -87,10 +125,40 @@ export function AddCustomDeviceForm() {
     );
   }
 
+  function handleSubmit() {
+    const brandName = brand.trim() || "Custom";
+    const modelName = model.trim() || "Device";
+    const brandModel = modelName.toLowerCase().startsWith(brandName.toLowerCase())
+      ? modelName
+      : `${brandName} ${modelName}`;
+    const id = editingId && isEdit ? editingId : `dev-${Date.now()}`;
+
+    upsertDevice({
+      id,
+      name: isEdit && existingName ? existingName : `${modelName}`,
+      sn:
+        isEdit && existingSn
+          ? existingSn
+          : `SN: ${brandName.slice(0, 2).toUpperCase()}-${String(Date.now()).slice(-6)}`,
+      brandModel,
+      brand: brandName,
+      type: typeLabelFromDeviceType(deviceType),
+      kind: kindFromDeviceType(deviceType),
+      status: "active",
+      lastSync: todaySyncLabel(),
+      protocol,
+    });
+
+    router.push("/thiet-bi");
+  }
+
   return (
     <form
       className="mx-auto flex max-w-[1100px] flex-col gap-5 p-6 pb-28 lg:p-8"
-      onSubmit={(e) => e.preventDefault()}
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleSubmit();
+      }}
     >
       <div className="flex items-start gap-3">
         <Link
@@ -102,7 +170,7 @@ export function AddCustomDeviceForm() {
         </Link>
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Thêm mới Thiết bị Tùy chỉnh
+            {isEdit ? "Cập nhật thiết bị tùy chỉnh" : "Thêm mới Thiết bị Tùy chỉnh"}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             Cấu hình thông số kỹ thuật và bản đồ dữ liệu cho thiết bị mới.
@@ -342,7 +410,7 @@ export function AddCustomDeviceForm() {
             type="submit"
             className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
           >
-            Lưu thiết bị
+            {isEdit ? "Cập nhật thiết bị" : "Lưu thiết bị"}
           </button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background,
   Panel,
@@ -14,10 +14,28 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { JunctionNode, MeterNode } from "./diagram/nodes";
-import type { DiagramEdge, DiagramNode, EnergyKind, MeterNodeData } from "./diagram/types";
+import { DiagramActionsContext } from "./diagram/context";
+import { JunctionNode, MeterNode, NodeGlyph } from "./diagram/nodes";
+import type {
+  DiagramEdge,
+  DiagramNode,
+  EnergyKind,
+  MeterIcon,
+  MeterNodeData,
+} from "./diagram/types";
 
 const ENERGY_FILTERS: EnergyKind[] = ["Điện", "Nhiệt", "Khí nén", "Nước"];
+
+const ICON_OPTIONS: { id: MeterIcon; label: string }[] = [
+  { id: "plant", label: "Nhà máy" },
+  { id: "cabinet", label: "Tủ điện" },
+  { id: "fan", label: "Quạt/Máy nén" },
+  { id: "meter", label: "Đồng hồ" },
+  { id: "pump", label: "Bơm" },
+  { id: "valve", label: "Van" },
+  { id: "solar", label: "Pin mặt trời" },
+  { id: "boiler", label: "Lò hơi" },
+];
 
 const nodeTypes: NodeTypes = {
   meter: MeterNode,
@@ -137,10 +155,45 @@ function SystemDiagramInner() {
   const [group, setGroup] = useState("group-1");
   const [energy, setEnergy] = useState<EnergyKind>("Điện");
   const [selectedId, setSelectedId] = useState("office");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const { fitView, setCenter, getNode } = useReactFlow();
+
+  const selectedNode = useMemo(
+    () => nodes.find((node) => node.id === selectedId && node.type === "meter") ?? null,
+    [nodes, selectedId],
+  );
+
+  const selectedData = selectedNode?.data as MeterNodeData | undefined;
+
+  const diagramActions = useMemo(
+    () => ({
+      openSettings: (nodeId: string) => {
+        setSelectedId(nodeId);
+        setSettingsOpen(true);
+        setNodes((current) =>
+          current.map((item) => ({ ...item, selected: item.id === nodeId })),
+        );
+      },
+    }),
+    [setNodes],
+  );
+
+  const updateSelectedNode = useCallback(
+    (patch: Partial<MeterNodeData>) => {
+      if (!selectedId) return;
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === selectedId && node.type === "meter"
+            ? { ...node, data: { ...(node.data as MeterNodeData), ...patch } }
+            : node,
+        ),
+      );
+    },
+    [selectedId, setNodes],
+  );
 
   const listedPoints = useMemo(() => {
     const flowPoints = nodes
@@ -181,6 +234,7 @@ function SystemDiagramInner() {
 
   const selectPoint = (id: string) => {
     setSelectedId(id);
+    setSettingsOpen(false);
     const node = getNode(id);
     if (!node) return;
     setNodes((current) =>
@@ -236,20 +290,23 @@ function SystemDiagramInner() {
   };
 
   return (
-    <div className="flex h-full min-h-0 bg-white">
-      <aside className="flex w-[270px] shrink-0 flex-col border-r border-slate-200 bg-[#f7f9fc]">
-        <div className="flex items-center justify-between px-4 pt-4 pb-3">
-          <h2 className="text-[12px] font-bold tracking-[0.08em] text-slate-500">
-            DANH SÁCH ĐIỂM ĐO
-          </h2>
-          <button
-            type="button"
-            className="text-slate-400 hover:text-slate-600"
-            aria-label="Cài đặt điểm đo"
-          >
-            <GearIcon className="h-4 w-4" />
-          </button>
-        </div>
+    <DiagramActionsContext.Provider value={diagramActions}>
+      <div className="flex h-full min-h-0 bg-white">
+        <aside className="flex w-[270px] shrink-0 flex-col border-r border-slate-200 bg-[#f7f9fc]">
+          <div className="flex items-center justify-between px-4 pt-4 pb-3">
+            <h2 className="text-[12px] font-bold tracking-[0.08em] text-slate-500">
+              DANH SÁCH ĐIỂM ĐO
+            </h2>
+            <button
+              type="button"
+              className="text-slate-400 hover:text-slate-600 disabled:opacity-40"
+              aria-label="Cài đặt điểm đo"
+              disabled={!selectedNode}
+              onClick={() => selectedNode && setSettingsOpen(true)}
+            >
+              <GearIcon className="h-4 w-4" />
+            </button>
+          </div>
         <div className="px-4 pb-3">
           <select
             value={group}
@@ -352,49 +409,204 @@ function SystemDiagramInner() {
           </div>
         </div>
 
-        <div ref={wrapperRef} className="relative min-h-0 flex-1">
-          <ReactFlow
-            className="diagram-flow"
-            nodes={visibleNodes}
-            edges={visibleEdges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={(_, node) => {
-              if (node.type === "meter") setSelectedId(node.id);
-            }}
-            nodesConnectable
-            fitView
-            fitViewOptions={{ padding: 0.28 }}
-            minZoom={0.4}
-            maxZoom={1.8}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background gap={22} size={1} color="#e8edf3" />
-            <CanvasControls
-              onFit={() => fitView({ padding: 0.28, duration: 220 })}
-              onFullscreen={() => {
-                const el = wrapperRef.current;
-                if (!el) return;
-                if (document.fullscreenElement) {
-                  void document.exitFullscreen();
-                } else {
-                  void el.requestFullscreen();
+        <div ref={wrapperRef} className="relative flex min-h-0 flex-1">
+          <div className="relative min-h-0 min-w-0 flex-1">
+            <ReactFlow
+              className="diagram-flow"
+              nodes={visibleNodes}
+              edges={visibleEdges}
+              nodeTypes={nodeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onNodeClick={(_, node) => {
+                if (node.type === "meter") {
+                  setSelectedId(node.id);
+                  setSettingsOpen(true);
                 }
               }}
+              onPaneClick={() => setSettingsOpen(false)}
+              nodesConnectable
+              fitView
+              fitViewOptions={{ padding: 0.28 }}
+              minZoom={0.4}
+              maxZoom={1.8}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background gap={22} size={1} color="#e8edf3" />
+              <CanvasControls
+                onFit={() => fitView({ padding: 0.28, duration: 220 })}
+                onFullscreen={() => {
+                  const el = wrapperRef.current;
+                  if (!el) return;
+                  if (document.fullscreenElement) {
+                    void document.exitFullscreen();
+                  } else {
+                    void el.requestFullscreen();
+                  }
+                }}
+              />
+            </ReactFlow>
+            {energy !== "Điện" && visibleNodes.filter((n) => n.type === "meter").length === 0 ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <p className="rounded-lg bg-white/90 px-4 py-2 text-sm text-slate-400">
+                  Chưa có điểm đo loại {energy} trên sơ đồ
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          {settingsOpen && selectedData ? (
+            <NodeSettingsPanel
+              data={selectedData}
+              onClose={() => setSettingsOpen(false)}
+              onChange={updateSelectedNode}
             />
-          </ReactFlow>
-          {energy !== "Điện" && visibleNodes.filter((n) => n.type === "meter").length === 0 ? (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <p className="rounded-lg bg-white/90 px-4 py-2 text-sm text-slate-400">
-                Chưa có điểm đo loại {energy} trên sơ đồ
-              </p>
-            </div>
           ) : null}
         </div>
       </section>
     </div>
+    </DiagramActionsContext.Provider>
+  );
+}
+
+function NodeSettingsPanel({
+  data,
+  onClose,
+  onChange,
+}: {
+  data: MeterNodeData;
+  onClose: () => void;
+  onChange: (patch: Partial<MeterNodeData>) => void;
+}) {
+  return (
+    <aside className="flex w-[300px] shrink-0 flex-col border-l border-slate-200 bg-white">
+      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+        <div>
+          <h2 className="text-[13px] font-semibold text-slate-800">Cài đặt điểm đo</h2>
+          <p className="text-[11px] text-slate-400">Tùy chỉnh tên và biểu tượng</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          aria-label="Đóng cài đặt"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+        <SettingsField label="TÊN ĐIỂM ĐO">
+          <input
+            value={data.title}
+            onChange={(e) => onChange({ title: e.target.value })}
+            placeholder="Nhập tên điểm đo"
+            className="input"
+          />
+        </SettingsField>
+
+        <SettingsField label="MÔ TẢ PHỤ">
+          <input
+            value={data.subtitle ?? ""}
+            onChange={(e) => onChange({ subtitle: e.target.value || undefined })}
+            placeholder="VD: Main Feed, Line A..."
+            className="input"
+          />
+        </SettingsField>
+
+        <SettingsField label="BIỂU TƯỢNG">
+          <div className="grid grid-cols-4 gap-2">
+            {ICON_OPTIONS.map((option) => {
+              const active = data.icon === option.id && !data.iconImage;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  title={option.label}
+                  onClick={() => onChange({ icon: option.id, iconImage: undefined })}
+                  className={`flex flex-col items-center gap-1 rounded-lg border px-1.5 py-2 text-[10px] ${
+                    active
+                      ? "border-[#1a73e8] bg-[#eef5ff] text-[#1a73e8]"
+                      : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white"
+                  }`}
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white">
+                    <NodeGlyph type={option.id} className="h-4 w-4" />
+                  </span>
+                  <span className="truncate">{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </SettingsField>
+
+        <SettingsField label="ẢNH TÙY CHỈNH">
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center hover:border-[#1a73e8] hover:bg-[#f4f8ff]">
+            {data.iconImage ? (
+              <img
+                src={data.iconImage}
+                alt="Biểu tượng tùy chỉnh"
+                className="mb-2 h-14 w-14 rounded-full object-cover"
+              />
+            ) : (
+              <ImageIcon className="mb-2 h-7 w-7 text-slate-400" />
+            )}
+            <span className="text-[11px] font-medium text-slate-600">
+              {data.iconImage ? "Chọn ảnh khác" : "Tải ảnh lên"}
+            </span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                onChange({ iconImage: URL.createObjectURL(file) });
+              }}
+            />
+          </label>
+          {data.iconImage ? (
+            <button
+              type="button"
+              onClick={() => onChange({ iconImage: undefined })}
+              className="mt-2 text-[11px] font-medium text-red-500 hover:underline"
+            >
+              Xóa ảnh, dùng biểu tượng mặc định
+            </button>
+          ) : null}
+        </SettingsField>
+
+        <SettingsField label="HIỂN THỊ">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={data.listed ?? false}
+              onChange={(e) => onChange({ listed: e.target.checked })}
+              className="accent-[#1a73e8]"
+            />
+            Hiển thị trong danh sách điểm đo
+          </label>
+        </SettingsField>
+      </div>
+    </aside>
+  );
+}
+
+function SettingsField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">
+        {label}
+      </span>
+      {children}
+    </label>
   );
 }
 
@@ -486,6 +698,16 @@ function ExpandIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M14 5h5v5M10 19H5v-5M19 9l-6 6M5 15l6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ImageIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="9" cy="10" r="1.5" fill="currentColor" />
+      <path d="m4 16 4.5-4.5 3 3L15 11l5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
