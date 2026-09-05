@@ -1,5 +1,5 @@
-import { AddMeterPointForm } from "@/components/AddMeterPointForm";
+import { AddProjectForm } from "@/components/AddProjectForm";
 
 export default function CreateProjectPage() {
-  return <AddMeterPointForm />;
+  return <AddProjectForm />;
 }

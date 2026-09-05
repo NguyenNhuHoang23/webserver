@@ -10,7 +10,7 @@ export type MeterIcon =
   | "valve"
   | "solar"
   | "boiler";
-export type EnergyKind = "Điện" | "Nhiệt" | "Khí nén" | "Nước";
+export type EnergyKind = string;
 
 export type MeterMetric = {
   label: string;

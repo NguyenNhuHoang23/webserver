@@ -19,10 +19,15 @@ function toggleIn<T>(list: T[], value: T) {
   return [...list, value];
 }
 
-function timeLabel(index: number, kind: "full" | "min" | "sec") {
+function timeLabel(index: number, kind: "full" | "min" | "sec" | "tooltip") {
   const d = new Date(T0 + (index / (N - 1)) * 240000);
+  const yyyy = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  if (kind === "tooltip") return `${yyyy}-${mo}-${dd} ${hh}:${mm}:${ss}`;
   if (kind === "full") return `1-27(Tue) ${hh}:${mm}`;
   if (kind === "min") return `${hh}:${mm}`;
   return "30";
@@ -261,10 +266,13 @@ function UnbPane({
 }) {
   const W = 820;
   const H = 240;
-  const pad = { l: 52, r: 10, t: 12, b: axis ? 40 : 12 };
+  const pad = { l: 52, r: 10, t: 12, b: axis ? 40 : 28 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const [yMin, yMax] = domain;
+  const filterId = `unb-tip-${title.replace(/[^a-z0-9]/gi, "")}`;
+  const tipW = 168;
+  const tipH = 22 + Math.max(series.length, 1) * 18;
   const xAt = (i: number) =>
     pad.l + ((i - viewWin.start) / Math.max(1, viewWin.end - viewWin.start)) * innerW;
   const yAt = (v: number) => pad.t + ((yMax - v) / (yMax - yMin || 1)) * innerH;
@@ -325,8 +333,82 @@ function UnbPane({
           />
         );
       })}
+      <defs>
+        <filter id={filterId} x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.12" />
+        </filter>
+      </defs>
       {hover != null ? (
-        <line x1={xAt(hover)} x2={xAt(hover)} y1={pad.t} y2={H - pad.b} stroke="#94a3b8" strokeDasharray="3 3" />
+        <g pointerEvents="none">
+          <line
+            x1={xAt(hover)}
+            x2={xAt(hover)}
+            y1={pad.t}
+            y2={H - pad.b}
+            stroke="#64748b"
+            strokeDasharray="4 3"
+          />
+          {series.map((s) => (
+            <circle
+              key={`${s.key}-dot`}
+              cx={xAt(hover)}
+              cy={yAt(s.values[hover])}
+              r="3.5"
+              fill={s.color}
+              stroke="white"
+              strokeWidth="1.5"
+            />
+          ))}
+          <rect
+            x={Math.min(Math.max(xAt(hover) - 68, pad.l), W - pad.r - 136)}
+            y={H - pad.b + 2}
+            width="136"
+            height="16"
+            rx="2"
+            fill="#334155"
+          />
+          <text
+            x={Math.min(Math.max(xAt(hover), pad.l + 68), W - pad.r - 68)}
+            y={H - pad.b + 13}
+            textAnchor="middle"
+            fill="white"
+            fontSize="10"
+            fontWeight="600"
+          >
+            {timeLabel(hover, "tooltip")}
+          </text>
+          {(() => {
+            const hx = xAt(hover);
+            const tipX = hx + 12 + tipW > W - pad.r - 4 ? hx - tipW - 12 : hx + 12;
+            const tipY = Math.min(pad.t + 8, H - pad.b - tipH - 4);
+            return (
+              <g transform={`translate(${Math.max(pad.l, tipX)}, ${Math.max(pad.t, tipY)})`}>
+                <rect
+                  width={tipW}
+                  height={tipH}
+                  rx="6"
+                  fill="white"
+                  stroke="#e2e8f0"
+                  filter={`url(#${filterId})`}
+                />
+                <text x="10" y="16" className="fill-slate-600" fontSize="11" fontWeight="600">
+                  {timeLabel(hover, "tooltip")}
+                </text>
+                {series.map((s, i) => (
+                  <g key={`${s.key}-tip`} transform={`translate(10, ${28 + i * 18})`}>
+                    <circle cx="4" cy="-3" r="3.5" fill={s.color} />
+                    <text x="14" y="0" fontSize="11" fill="#475569">
+                      {s.name}
+                    </text>
+                    <text x={tipW - 12} y="0" textAnchor="end" fontSize="11" fontWeight="700" fill="#0f172a">
+                      {s.values[hover].toFixed(3)}
+                    </text>
+                  </g>
+                ))}
+              </g>
+            );
+          })()}
+        </g>
       ) : null}
       {timeTicks.map((tick) => (
         <text

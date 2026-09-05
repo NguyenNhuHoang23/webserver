@@ -9,26 +9,20 @@ import {
   type GasKey,
   type LibraryFactor,
 } from "@/lib/emission-factors";
+import {
+  GHG_SCOPES,
+  INITIAL_GHG_SOURCES,
+  loadGhgSources,
+  saveGhgSources,
+  type GhgEmissionSource,
+  type GhgInputMethod,
+  type ScopeId,
+} from "@/lib/ghg-sources";
 
-type ScopeId = 1 | 2 | 3;
-type InputMethod = "meter" | "manual" | "file";
+type InputMethod = GhgInputMethod;
+type EmissionSource = GhgEmissionSource;
 
-type EmissionSource = {
-  id: string;
-  scope: ScopeId;
-  name: string;
-  method: InputMethod;
-  factorId: string;
-  factorValue: number;
-  formula: string;
-  appliedAt: string;
-};
-
-const SCOPES: { id: ScopeId; label: string }[] = [
-  { id: 1, label: "Phạm vi 1" },
-  { id: 2, label: "Phạm vi 2" },
-  { id: 3, label: "Phạm vi 3" },
-];
+const SCOPES = GHG_SCOPES.map((item) => ({ id: item.id, label: item.label }));
 
 const METHODS: { id: InputMethod; label: string; hint: string }[] = [
   { id: "meter", label: "Chọn từ điểm đo", hint: "Lấy số liệu realtime" },
@@ -49,48 +43,7 @@ function formatFactor(value: number) {
   });
 }
 
-const initialSources: EmissionSource[] = [
-  {
-    id: "src-1",
-    scope: 1,
-    name: "Tiêu thụ điện Xưởng A",
-    method: "meter",
-    factorId: "do-industry:co2",
-    factorValue: 74100,
-    formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
-    appliedAt: "2024-01-01",
-  },
-  {
-    id: "src-2",
-    scope: 1,
-    name: "Máy phát Diesel dự phòng",
-    method: "manual",
-    factorId: "do-road:co2",
-    factorValue: 74100,
-    formula: "{Giá trị thủ công} * {Hệ số phát thải}",
-    appliedAt: "2024-01-01",
-  },
-  {
-    id: "src-3",
-    scope: 2,
-    name: "Điện lưới mua ngoài",
-    method: "meter",
-    factorId: "natural-gas:co2",
-    factorValue: 56100,
-    formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
-    appliedAt: "2024-03-01",
-  },
-  {
-    id: "src-4",
-    scope: 3,
-    name: "Vận tải hàng hóa đầu vào",
-    method: "file",
-    factorId: "gasoline-road:co2",
-    factorValue: 69300,
-    formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
-    appliedAt: "2024-02-15",
-  },
-];
+const initialSources: EmissionSource[] = INITIAL_GHG_SOURCES;
 
 export function GhgConfig() {
   const [activeScope, setActiveScope] = useState<ScopeId>(1);
@@ -113,7 +66,13 @@ export function GhgConfig() {
 
   useEffect(() => {
     setFactors(flattenFactorGroups(loadFactorGroups()));
+    setSources(loadGhgSources());
   }, []);
+
+  function persistSources(next: EmissionSource[]) {
+    setSources(next);
+    saveGhgSources(next);
+  }
 
   const filteredFactors = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -186,10 +145,10 @@ export function GhgConfig() {
       formula,
       appliedAt,
     };
-    setSources((current) =>
+    persistSources(
       editingId
-        ? current.map((item) => (item.id === editingId ? next : item))
-        : [next, ...current],
+        ? sources.map((item) => (item.id === editingId ? next : item))
+        : [next, ...sources],
     );
     setTableFilter(activeScope);
     resetForm();
@@ -540,7 +499,7 @@ export function GhgConfig() {
                         <button
                           type="button"
                           onClick={() =>
-                            setSources((current) => current.filter((item) => item.id !== source.id))
+                            persistSources(sources.filter((item) => item.id !== source.id))
                           }
                           className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
                           aria-label={`Xóa ${source.name}`}

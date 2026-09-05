@@ -1,32 +1,42 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
+import { loadProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
 
-type EnergyKind = "Điện" | "Nhiệt" | "Khí nén" | "Hơi";
 type Resolution = "Ngày" | "Tháng" | "Năm";
-type Category = "Chi phí điện năng" | "Chi phí nhiệt năng" | "Chi phí khí nén" | "Chi phí hơi";
 
-const ENERGIES: { id: EnergyKind; icon: "bolt" | "heat" | "air" | "steam" }[] = [
-  { id: "Điện", icon: "bolt" },
-  { id: "Nhiệt", icon: "heat" },
-  { id: "Khí nén", icon: "air" },
-  { id: "Hơi", icon: "steam" },
+type CostPoint = {
+  id: string;
+  code: string;
+  name: string;
+  energy: string;
+  color: string;
+};
+
+const POINT_COLORS = ["#1e5a96", "#27ae60", "#e67e22", "#8b5cf6", "#06b6d4", "#ef4444", "#a16207"];
+
+const FALLBACK_POINTS: CostPoint[] = [
+  { id: "c1", code: "DB-OFF1", name: "Tủ điện văn phòng", energy: "Điện", color: POINT_COLORS[0] },
+  { id: "c2", code: "DB-PRD1", name: "Tủ điện sản xuất", energy: "Điện", color: POINT_COLORS[1] },
+  { id: "c3", code: "DB-HVAC", name: "Điều hòa trung tâm", energy: "Điện", color: POINT_COLORS[2] },
+  { id: "c4", code: "DB-MAIN", name: "Tủ điện tổng", energy: "Điện", color: POINT_COLORS[3] },
+  { id: "c5", code: "AIR-01", name: "Máy nén khí trạm 1", energy: "Khí nén", color: POINT_COLORS[0] },
+  { id: "c6", code: "AIR-02", name: "Máy nén khí trạm 2", energy: "Khí nén", color: POINT_COLORS[1] },
+  { id: "c7", code: "WTR-01", name: "Đồng hồ nước đầu nguồn", energy: "Nước", color: POINT_COLORS[0] },
+  { id: "c8", code: "WTR-02", name: "Hệ thống làm mát", energy: "Nước", color: POINT_COLORS[1] },
+  { id: "c9", code: "HT-01", name: "Cảm biến nhiệt dàn", energy: "Nhiệt", color: POINT_COLORS[0] },
+  { id: "c10", code: "STM-01", name: "Nồi hơi công nghệ", energy: "Hơi", color: POINT_COLORS[0] },
 ];
 
-const POINTS = [
-  { id: 1, name: "Điểm đo 1", code: "(DB-OFF1) Tủ điện văn phòng" },
-  { id: 2, name: "Điểm đo 2", code: "(DB-PRD1) Tủ điện sản xuất" },
-  { id: 3, name: "Điểm đo 3", code: "(DB-CMP1) Máy nén khí 1" },
-  { id: 4, name: "Điểm đo 4", code: "(DB-HVAC) Điều hòa trung tâm" },
-  { id: 5, name: "Điểm đo 5", code: "(DB-MAIN) Tủ điện tổng" },
-];
-
-const CATEGORIES: Category[] = [
-  "Chi phí điện năng",
-  "Chi phí nhiệt năng",
-  "Chi phí khí nén",
-  "Chi phí hơi",
-];
+const ENERGY_KIND_META: Record<string, "bolt" | "heat" | "air" | "steam" | "water"> = {
+  Điện: "bolt",
+  Nhiệt: "heat",
+  "Khí nén": "air",
+  Hơi: "steam",
+  Nước: "water",
+};
 
 const TOU = [
   { id: "peak", label: "Cao", color: "#e67e22" },
@@ -43,15 +53,23 @@ function hourLabel(h: number) {
   return `${String(h).padStart(2, "0")}:00`;
 }
 
-function costSeries(seed: number, pointId: number, resolution: Resolution) {
+function costLabel(energy: string) {
+  if (energy === "Nhiệt") return "Chi phí nhiệt năng";
+  if (energy === "Khí nén") return "Chi phí khí nén";
+  if (energy === "Hơi") return "Chi phí hơi";
+  if (energy === "Nước") return "Chi phí nước";
+  return "Chi phí điện năng";
+}
+
+function costSeries(seed: number, pointIndex: number, resolution: Resolution) {
   const count = resolution === "Năm" ? 12 : resolution === "Ngày" ? 24 : 8;
   const startHour = resolution === "Ngày" ? 0 : 1;
-  const targets = [68719, 54210, 81340, 42180, 95880];
-  const target = targets[pointId - 1] * (1 + (seed - 1) * 0.015);
+  const targets = [68719, 54210, 81340, 42180, 95880, 33400, 28900];
+  const target = targets[pointIndex % targets.length] * (1 + (seed - 1) * 0.015);
   const raw = Array.from({ length: count }, (_, i) => {
     const ramp = (i + 1) / count;
-    const dark = 6200 + 3600 * ramp + 260 * Math.sin(i * 1.15 + seed);
-    const light = dark * (0.55 + 0.07 * Math.sin(i + pointId));
+    const dark = 6200 + 3600 * ramp + 260 * Math.sin(i * 1.15 + seed + pointIndex);
+    const light = dark * (0.55 + 0.07 * Math.sin(i + pointIndex));
     return { dark, light };
   });
   const sumDark = raw.reduce((s, b) => s + b.dark, 0);
@@ -68,79 +86,251 @@ function costSeries(seed: number, pointId: number, resolution: Resolution) {
 }
 
 export function CostCharts() {
-  const [category, setCategory] = useState<Category>("Chi phí điện năng");
-  const [energy, setEnergy] = useState<EnergyKind>("Điện");
+  const params = useParams<{ id: string }>();
+  const projectId = params?.id ?? "default";
+  const [energyKinds, setEnergyKinds] = useState<MeterType[]>(() => resolveMeterTypes(null));
+  const [energy, setEnergy] = useState<string>("Điện");
   const [resolution, setResolution] = useState<Resolution>("Tháng");
   const [date, setDate] = useState("2026-07-19");
-  const [pointId, setPointId] = useState(1);
+  const [allPoints, setAllPoints] = useState<CostPoint[]>(FALLBACK_POINTS);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [seed, setSeed] = useState(1);
   const [showSum, setShowSum] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
 
-  const point = POINTS.find((p) => p.id === pointId) ?? POINTS[0];
-  const bars = useMemo(() => costSeries(seed, pointId, resolution), [seed, pointId, resolution]);
-  const total = bars.reduce((s, b) => s + b.dark, 0);
+  useEffect(() => {
+    const project = loadProjects().find((item) => item.id === projectId);
+    const types = resolveMeterTypes(project);
+    setEnergyKinds(types);
+    setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
+
+    const reload = () => {
+      const meters = orderMetersByTree(loadClientMeters(projectId));
+      if (!meters.length) {
+        setAllPoints(FALLBACK_POINTS);
+        return;
+      }
+      setAllPoints(
+        meters.map((meter, index) => ({
+          id: meter.id,
+          code: meter.code,
+          name: meter.name,
+          energy: meter.utility,
+          color: POINT_COLORS[index % POINT_COLORS.length],
+        })),
+      );
+    };
+    reload();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "ems-client-meters") reload();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("ems-client-meters-changed", reload);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("ems-client-meters-changed", reload);
+    };
+  }, [projectId]);
+
+  const pointsForEnergy = useMemo(
+    () => allPoints.filter((p) => p.energy === energy),
+    [allPoints, energy],
+  );
+
+  const filteredPoints = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return pointsForEnergy;
+    return pointsForEnergy.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.code.toLowerCase().includes(q),
+    );
+  }, [pointsForEnergy, query]);
+
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
+      if (kept.length > 0) return kept;
+      // Mặc định tick 2 điểm đầu để so sánh tham số trên biểu đồ
+      return pointsForEnergy.slice(0, Math.min(2, pointsForEnergy.length)).map((p) => p.id);
+    });
+  }, [pointsForEnergy]);
+
+  const selectedPoints = useMemo(
+    () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
+    [pointsForEnergy, selectedIds],
+  );
+
+  const series = useMemo(
+    () =>
+      selectedPoints.map((point, index) => ({
+        point,
+        bars: costSeries(seed, index + point.id.charCodeAt(1), resolution),
+      })),
+    [selectedPoints, seed, resolution],
+  );
+
+  const primaryBars = series[0]?.bars ?? costSeries(seed, 0, resolution);
+  const grandTotal = series.reduce(
+    (sum, item) => sum + item.bars.reduce((s, b) => s + b.dark, 0),
+    0,
+  );
+
+  const pointTotals = useMemo(
+    () =>
+      series.map((item) => ({
+        point: item.point,
+        total: item.bars.reduce((s, b) => s + b.dark, 0),
+      })),
+    [series],
+  );
+
   const tou = useMemo(() => {
-    const normal = Math.round(total * (38493 / 68719));
-    const off = total - normal;
+    const normal = Math.round(grandTotal * 0.56);
+    const off = Math.max(0, grandTotal - normal);
     return { peak: 0, normal, off, none: 0 };
-  }, [total]);
+  }, [grandTotal]);
+
+  function togglePoint(id: string) {
+    setSelectedIds((current) => {
+      if (current.includes(id)) {
+        return current.filter((item) => item !== id);
+      }
+      return [...current, id];
+    });
+  }
+
+  function selectAllVisible() {
+    setSelectedIds(filteredPoints.map((p) => p.id));
+  }
+
+  function clearSelection() {
+    setSelectedIds([]);
+  }
 
   const exportCsv = () => {
-    const rows = ["Thời điểm,Chi phí (VND)", ...bars.map((b) => `${b.label},${b.dark}`)].join("\n");
-    const blob = new Blob([rows], { type: "text/csv;charset=utf-8" });
+    const header = ["Thời điểm", ...selectedPoints.map((p) => `${p.code} ${p.name}`)].join(",");
+    const rows = primaryBars.map((bar, i) =>
+      [bar.label, ...series.map((s) => s.bars[i]?.dark ?? 0)].join(","),
+    );
+    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `chi-phi-${point.id}.csv`;
+    a.download = `chi-phi-${energy}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div className="flex h-full min-h-0 bg-[#f4f6f9]">
-      <aside className="flex w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white">
+      <aside className="flex w-[270px] shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-5 py-4">
           <h1 className="text-[18px] font-bold text-slate-800">Biểu Đồ Chi Phí</h1>
           <p className="mt-1 text-[10px] font-semibold tracking-[0.14em] text-slate-400">
             ANALYSIS CATEGORIES
           </p>
         </div>
+
         <div className="px-4 py-3">
-          <select
-            value={category}
-            onChange={(e) => {
-              const next = e.target.value as Category;
-              setCategory(next);
-              setEnergy(
-                next.includes("nhiệt") ? "Nhiệt" : next.includes("khí") ? "Khí nén" : next.includes("hơi") ? "Hơi" : "Điện",
-              );
-            }}
-            className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
-          >
-            {CATEGORIES.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
+          <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">
+            LOẠI CHI PHÍ
+          </p>
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700">
+            {costLabel(energy)}
+          </div>
         </div>
-        <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-          {POINTS.map((item) => {
-            const active = item.id === pointId;
-            return (
+
+        <div className="flex min-h-0 flex-1 flex-col px-4 pb-3">
+          <p className="mb-1 text-[11px] font-semibold tracking-[0.08em] text-slate-400">
+            DANH SÁCH ĐIỂM ĐO · {energy.toUpperCase()}
+          </p>
+          <p className="mb-2 text-[11px] leading-4 text-slate-500">
+            Tick chọn điểm đo cần hiển thị tham số trên biểu đồ
+          </p>
+          <label className="relative mb-2 block">
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400">
+              <SearchIcon className="h-3.5 w-3.5" />
+            </span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Tìm điểm đo..."
+              className="h-9 w-full rounded-md border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8]"
+            />
+          </label>
+          <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+            <span>Đã chọn {selectedPoints.length}/{filteredPoints.length}</span>
+            <span className="flex items-center gap-2">
               <button
-                key={item.id}
                 type="button"
-                onClick={() => setPointId(item.id)}
-                className={`mb-1 flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[13px] font-medium ${
-                  active ? "bg-[#1e4f8a] text-white" : "text-slate-700 hover:bg-slate-50"
-                }`}
+                onClick={selectAllVisible}
+                className="font-medium text-[#1a73e8] hover:underline"
               >
-                <ChartGlyph className="h-4 w-4" />
-                {item.id}. {item.name}
+                Chọn tất cả
               </button>
-            );
-          })}
-        </nav>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="font-medium text-slate-500 hover:underline"
+              >
+                Bỏ chọn
+              </button>
+            </span>
+          </div>
+          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+            {filteredPoints.length === 0 ? (
+              <li className="py-8 text-center text-sm text-slate-400">
+                Không có điểm đo loại {energy}
+              </li>
+            ) : (
+              filteredPoints.map((point, index) => {
+                const checked = selectedIds.includes(point.id);
+                return (
+                  <li key={point.id}>
+                    <label
+                      className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors ${
+                        checked
+                          ? "bg-[#1a73e8] text-white shadow-sm"
+                          : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => togglePoint(point.id)}
+                        className="h-4 w-4 shrink-0 rounded border border-white/40 bg-white accent-[#1a73e8]"
+                      />
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-[2px] ring-1 ring-black/10"
+                        style={{ backgroundColor: point.color }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={`block truncate text-[13px] font-medium ${
+                            checked ? "text-white" : "text-slate-700"
+                          }`}
+                        >
+                          {index + 1}. {point.name}
+                        </span>
+                        <span
+                          className={`block truncate text-[11px] ${
+                            checked ? "text-white/75" : "text-slate-400"
+                          }`}
+                        >
+                          ({point.code})
+                        </span>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </div>
+
         <div className="p-4">
           <button
             type="button"
@@ -156,57 +346,48 @@ export function CostCharts() {
       <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-            {ENERGIES.map((item) => {
-              const active = energy === item.id;
+            {energyKinds.map((item) => {
+              const active = energy === item;
               return (
                 <button
-                  key={item.id}
+                  key={item}
                   type="button"
-                  onClick={() => {
-                    setEnergy(item.id);
-                    setCategory(
-                      item.id === "Nhiệt"
-                        ? "Chi phí nhiệt năng"
-                        : item.id === "Khí nén"
-                          ? "Chi phí khí nén"
-                          : item.id === "Hơi"
-                            ? "Chi phí hơi"
-                            : "Chi phí điện năng",
-                    );
-                  }}
+                  onClick={() => setEnergy(item)}
                   className={`inline-flex h-10 items-center gap-1.5 px-3.5 text-[13px] font-medium ${
                     active ? "bg-[#1e4f8a] text-white" : "text-slate-500 hover:bg-slate-50"
                   }`}
                 >
-                  <EnergyGlyph type={item.icon} className="h-4 w-4" />
-                  {item.id}
+                  <EnergyGlyph type={ENERGY_KIND_META[item] ?? "bolt"} className="h-4 w-4" />
+                  {item}
                 </button>
               );
             })}
           </div>
-          <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-            {(["Ngày", "Tháng", "Năm"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setResolution(item)}
-                className={`h-10 px-4 text-[13px] font-medium ${
-                  resolution === item ? "bg-[#5aa3d9] text-white" : "text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
+              {(["Ngày", "Tháng", "Năm"] as const).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setResolution(item)}
+                  className={`h-10 px-4 text-[13px] font-medium ${
+                    resolution === item ? "bg-[#5aa3d9] text-white" : "text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+            <label className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
+              <CalendarIcon className="h-4 w-4 shrink-0" />
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
+              />
+            </label>
           </div>
-          <label className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
-            <CalendarIcon className="h-4 w-4 shrink-0" />
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
-            />
-          </label>
         </div>
 
         <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
@@ -214,13 +395,26 @@ export function CostCharts() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-[15px] font-semibold text-slate-800">Chi tiết chi phí</h2>
-                <p className="mt-1.5 inline-flex items-center gap-2 text-[12px] text-slate-600">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#3d7ec4]" />
-                  {point.code}
-                  {showSum ? (
-                    <span className="font-semibold text-[#1a73e8]">Σ {formatVnd(total)} VND</span>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-600">
+                  {selectedPoints.length === 0 ? (
+                    <span className="text-slate-400">Chọn điểm đo bên trái</span>
+                  ) : (
+                    selectedPoints.map((point) => (
+                      <span key={point.id} className="inline-flex items-center gap-1.5">
+                        <span
+                          className="h-2.5 w-2.5 rounded-[2px]"
+                          style={{ backgroundColor: point.color }}
+                        />
+                        ({point.code}) {point.name}
+                      </span>
+                    ))
+                  )}
+                  {showSum && selectedPoints.length > 0 ? (
+                    <span className="font-semibold text-[#1a73e8]">
+                      Σ {formatVnd(grandTotal)} VND
+                    </span>
                   ) : null}
-                </p>
+                </div>
               </div>
               <div className="flex items-center">
                 <IconBtn label="Biểu đồ cột" active>
@@ -237,7 +431,13 @@ export function CostCharts() {
                 </IconBtn>
               </div>
             </div>
-            <GroupedBarChart bars={bars} hover={hover} onHover={setHover} />
+            {series.length === 0 ? (
+              <p className="py-16 text-center text-sm text-slate-400">
+                Chưa có điểm đo loại {energy} để hiển thị chi phí
+              </p>
+            ) : (
+              <MultiCostBarChart series={series} hover={hover} onHover={setHover} />
+            )}
           </article>
 
           <div className="flex min-h-0 flex-col gap-4">
@@ -245,27 +445,42 @@ export function CostCharts() {
               <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
                 TỔNG HỢP CHI PHÍ THEO ĐIỂM ĐO
               </h2>
-              <Donut value={total} />
-              <div className="mt-2 rounded-md bg-[#eaf3fb] px-3 py-2.5 text-[12px] text-slate-700">
-                <p className="flex items-start gap-2">
-                  <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1e4f8a]" />
-                  <span>
-                    {point.code}
-                    <span className="mt-0.5 block font-semibold">
-                      {formatVnd(total)} VND (~100%)
-                    </span>
-                  </span>
-                </p>
+              <Donut value={grandTotal} segments={pointTotals} />
+              <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto">
+                {pointTotals.map((item) => {
+                  const pct = grandTotal > 0 ? Math.round((item.total / grandTotal) * 100) : 0;
+                  return (
+                    <div
+                      key={item.point.id}
+                      className="rounded-md bg-[#eaf3fb] px-3 py-2 text-[12px] text-slate-700"
+                    >
+                      <p className="flex items-start gap-2">
+                        <span
+                          className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: item.point.color }}
+                        />
+                        <span>
+                          ({item.point.code}) {item.point.name}
+                          <span className="mt-0.5 block font-semibold">
+                            {formatVnd(item.total)} VND (~{pct}%)
+                          </span>
+                        </span>
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             </article>
 
-            <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-              <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
-                TỔNG HỢP CHI PHÍ THEO KHUNG GIỜ
-              </h2>
-              <TouChart values={tou} />
-              <p className="mt-1 text-right text-[11px] text-slate-400">(VND)</p>
-            </article>
+            {energy === "Điện" ? (
+              <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
+                  TỔNG HỢP CHI PHÍ THEO KHUNG GIỜ
+                </h2>
+                <TouChart values={tou} />
+                <p className="mt-1 text-right text-[11px] text-slate-400">(VND)</p>
+              </article>
+            ) : null}
           </div>
         </div>
 
@@ -281,12 +496,12 @@ export function CostCharts() {
   );
 }
 
-function GroupedBarChart({
-  bars,
+function MultiCostBarChart({
+  series,
   hover,
   onHover,
 }: {
-  bars: { key: number; label: string; light: number; dark: number }[];
+  series: { point: CostPoint; bars: { key: number; label: string; light: number; dark: number }[] }[];
   hover: number | null;
   onHover: (index: number | null) => void;
 }) {
@@ -295,13 +510,17 @@ function GroupedBarChart({
   const pad = { l: 52, r: 16, t: 28, b: 32 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
+  const base = series[0]?.bars ?? [];
   const yMax = Math.max(
     10000,
-    Math.ceil(Math.max(...bars.flatMap((b) => [b.light, b.dark])) / 2000) * 2000,
+    Math.ceil(
+      Math.max(...series.flatMap((s) => s.bars.map((b) => b.dark)), 1) / 2000,
+    ) * 2000,
   );
   const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * innerH;
-  const groupW = innerW / bars.length;
-  const barW = Math.max(6, groupW * 0.32);
+  const groupW = innerW / Math.max(base.length, 1);
+  const barCount = Math.max(series.length, 1);
+  const barW = Math.max(4, groupW / (barCount + 0.8));
   const tickCount = 5;
   const ticks = Array.from({ length: tickCount + 1 }, (_, i) => (yMax * i) / tickCount);
 
@@ -325,26 +544,25 @@ function GroupedBarChart({
           </g>
         );
       })}
-      {bars.map((bar, i) => {
+      {base.map((bar, i) => {
         const gx = pad.l + i * groupW;
-        const x1 = gx + groupW * 0.16;
-        const x2 = x1 + barW + 3;
         return (
           <g key={bar.key} onMouseEnter={() => onHover(i)}>
-            <rect
-              x={x1}
-              y={yAt(bar.light)}
-              width={barW}
-              height={Math.max(0, yAt(0) - yAt(bar.light))}
-              fill={hover === i ? "#8ec0ea" : "#9ec9e8"}
-            />
-            <rect
-              x={x2}
-              y={yAt(bar.dark)}
-              width={barW}
-              height={Math.max(0, yAt(0) - yAt(bar.dark))}
-              fill={hover === i ? "#1a4f86" : "#1e5a96"}
-            />
+            {series.map((item, sIdx) => {
+              const value = item.bars[i]?.dark ?? 0;
+              const x = gx + groupW * 0.15 + sIdx * barW;
+              return (
+                <rect
+                  key={item.point.id}
+                  x={x}
+                  y={yAt(value)}
+                  width={Math.max(3, barW * 0.85)}
+                  height={Math.max(0, yAt(0) - yAt(value))}
+                  fill={item.point.color}
+                  opacity={hover == null || hover === i ? 1 : 0.4}
+                />
+              );
+            })}
             <text
               x={gx + groupW / 2}
               y={H - 10}
@@ -357,40 +575,72 @@ function GroupedBarChart({
           </g>
         );
       })}
-      {hover != null ? (
-        <g transform={`translate(${Math.min(pad.l + hover * groupW + 12, W - 150)}, ${pad.t + 6})`}>
-          <rect width="138" height="52" rx="4" fill="white" stroke="#e2e8f0" />
-          <text x="10" y="18" className="fill-slate-500" fontSize="11">
-            {bars[hover].label}
+      {hover != null && base[hover] ? (
+        <g transform={`translate(${Math.min(pad.l + hover * groupW + 12, W - 180)}, ${pad.t + 6})`}>
+          <rect
+            width="168"
+            height={20 + series.length * 16}
+            rx="4"
+            fill="white"
+            stroke="#e2e8f0"
+          />
+          <text x="10" y="16" className="fill-slate-500" fontSize="11">
+            {base[hover].label}
           </text>
-          <text x="10" y="36" className="fill-slate-700" fontSize="12" fontWeight="600">
-            {formatVnd(bars[hover].dark)} VND
-          </text>
+          {series.map((item, i) => (
+            <text
+              key={item.point.id}
+              x="10"
+              y={34 + i * 16}
+              fontSize="11"
+              fontWeight="600"
+              fill={item.point.color}
+            >
+              {item.point.code}: {formatVnd(item.bars[hover]?.dark ?? 0)} VND
+            </text>
+          ))}
         </g>
       ) : null}
     </svg>
   );
 }
 
-function Donut({ value }: { value: number }) {
+function Donut({
+  value,
+  segments,
+}: {
+  value: number;
+  segments: { point: CostPoint; total: number }[];
+}) {
   const r = 58;
   const c = 2 * Math.PI * r;
+  let offset = 0;
+
   return (
     <div className="relative mx-auto my-3 h-[168px] w-[168px]">
       <svg viewBox="0 0 160 160" className="h-full w-full">
         <circle cx="80" cy="80" r={r} fill="none" stroke="#e8eef4" strokeWidth="22" />
-        <circle
-          cx="80"
-          cy="80"
-          r={r}
-          fill="none"
-          stroke="#1e4f8a"
-          strokeWidth="22"
-          strokeDasharray={c}
-          strokeDashoffset={0}
-          strokeLinecap="butt"
-          transform="rotate(-90 80 80)"
-        />
+        {segments.map((item) => {
+          const portion = value > 0 ? item.total / value : 0;
+          const dash = portion * c;
+          const el = (
+            <circle
+              key={item.point.id}
+              cx="80"
+              cy="80"
+              r={r}
+              fill="none"
+              stroke={item.point.color}
+              strokeWidth="22"
+              strokeDasharray={`${dash} ${c - dash}`}
+              strokeDashoffset={-offset}
+              strokeLinecap="butt"
+              transform="rotate(-90 80 80)"
+            />
+          );
+          offset += dash;
+          return el;
+        })}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <p className="text-[22px] font-bold leading-none text-slate-800">{formatVnd(value)}</p>
@@ -405,9 +655,8 @@ function TouChart({ values }: { values: { peak: number; normal: number; off: num
   const H = 180;
   const pad = { l: 18, r: 18, t: 28, b: 28 };
   const innerW = W - pad.l - pad.r;
-  const innerH = H - pad.t - pad.b;
   const yMax = Math.max(values.normal, values.off, 1);
-  const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * innerH;
+  const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * (H - pad.t - pad.b);
   const items = [
     { label: "Cao", color: TOU[0].color, value: values.peak },
     { label: "Thường", color: TOU[1].color, value: values.normal },
@@ -433,7 +682,13 @@ function TouChart({ values }: { values: { peak: number; normal: number; off: num
             >
               {formatVnd(item.value)}
             </text>
-            <rect x={x} y={yAt(item.value) - (item.value === 0 ? 3 : 0)} width={barW} height={h} fill={item.color} />
+            <rect
+              x={x}
+              y={yAt(item.value) - (item.value === 0 ? 3 : 0)}
+              width={barW}
+              height={h}
+              fill={item.color}
+            />
             <text x={x + barW / 2} y={H - 6} textAnchor="middle" className="fill-slate-600" fontSize="12">
               {item.label}
             </text>
@@ -469,19 +724,11 @@ function IconBtn({
   );
 }
 
-function ChartGlyph({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M5 18V10M10 18V6M15 18v-5M20 18V8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function EnergyGlyph({
   type,
   className,
 }: {
-  type: "bolt" | "heat" | "air" | "steam";
+  type: "bolt" | "heat" | "air" | "steam" | "water";
   className?: string;
 }) {
   if (type === "heat") {
@@ -501,12 +748,14 @@ function EnergyGlyph({
   if (type === "steam") {
     return (
       <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path
-          d="M5 17c1.5-1 2.5-3 2.5-5S6.5 8 5 7M12 17c1.5-1 2.5-3 2.5-5S13.5 8 12 7M19 17c1.5-1 2.5-3 2.5-5S20.5 8 19 7"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-        />
+        <path d="M5 18h14M8 18V9l4-4 4 4v9M9.5 12h5M9.5 15h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (type === "water") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M12 4s6 7 6 11a6 6 0 1 1-12 0c0-4 6-11 6-11Z" stroke="currentColor" strokeWidth="1.7" />
       </svg>
     );
   }
@@ -556,6 +805,15 @@ function CalendarIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" strokeWidth="1.7" />
       <path d="M8 3.5V7M16 3.5V7M4 10h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SearchIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 16.5 20 20.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

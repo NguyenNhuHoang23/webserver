@@ -1,25 +1,50 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FrequencyChart } from "@/components/client/FrequencyChart";
 import { HarmonicsChart } from "@/components/client/HarmonicsChart";
 import { PowerChart } from "@/components/client/PowerChart";
 import { UiWaveform } from "@/components/client/UiWaveform";
 import { UnbalanceChart } from "@/components/client/UnbalanceChart";
+import { loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
+import { loadProjects, resolveMeterTypes } from "@/lib/projects";
 
-type EnergyKind = "Điện" | "Nhiệt" | "Khí nén" | "Nước";
-type Resolution = "Phút" | "Giờ" | "Ngày" | "Tuần" | "Tháng" | "Năm";
-type DataKind = "avg" | "max" | "min" | "instant";
+type EnergyKind = string;
 type MetricId = "energy" | "ui" | "freq" | "power" | "harm" | "unbalance" | "pst";
 type ViewMode = "chart" | "table";
 
-const RESOLUTIONS: Resolution[] = ["Phút", "Giờ", "Ngày", "Tuần", "Tháng", "Năm"];
-const ENERGY_KINDS: { id: EnergyKind; icon: "bolt" | "heat" | "air" | "water" }[] = [
-  { id: "Điện", icon: "bolt" },
-  { id: "Nhiệt", icon: "heat" },
-  { id: "Khí nén", icon: "air" },
-  { id: "Nước", icon: "water" },
+type MeterPoint = {
+  id: string;
+  code: string;
+  name: string;
+  energy: EnergyKind;
+  color: string;
+};
+
+const POINT_COLORS = ["#4f89d8", "#22c55e", "#a16207", "#ef4444", "#8b5cf6", "#06b6d4", "#f59e0b"];
+
+const FALLBACK_POINTS: MeterPoint[] = [
+  { id: "p1", code: "DB-OFF1", name: "Tủ điện văn phòng", energy: "Điện", color: POINT_COLORS[0] },
+  { id: "p2", code: "DB-PROD", name: "Dây chuyền sản xuất A", energy: "Điện", color: POINT_COLORS[1] },
+  { id: "p3", code: "DB-HVAC", name: "Hệ thống HVAC", energy: "Điện", color: POINT_COLORS[2] },
+  { id: "p4", code: "DB-MAIN", name: "Nguồn tổng nhà máy", energy: "Điện", color: POINT_COLORS[3] },
+  { id: "p5", code: "AIR-01", name: "Máy nén khí trạm 1", energy: "Khí nén", color: POINT_COLORS[0] },
+  { id: "p6", code: "AIR-02", name: "Máy nén khí trạm 2", energy: "Khí nén", color: POINT_COLORS[1] },
+  { id: "p7", code: "WTR-01", name: "Đồng hồ nước đầu nguồn", energy: "Nước", color: POINT_COLORS[0] },
+  { id: "p8", code: "WTR-02", name: "Hệ thống làm mát", energy: "Nước", color: POINT_COLORS[1] },
+  { id: "p9", code: "HT-01", name: "Cảm biến nhiệt dàn", energy: "Nhiệt", color: POINT_COLORS[0] },
+  { id: "p10", code: "STM-01", name: "Nồi hơi công nghệ", energy: "Hơi", color: POINT_COLORS[0] },
 ];
+
+const ENERGY_KIND_META: Record<string, "bolt" | "heat" | "air" | "water" | "steam"> = {
+  Điện: "bolt",
+  Nhiệt: "heat",
+  "Khí nén": "air",
+  Nước: "water",
+  Hơi: "steam",
+};
+
 const METRICS: { id: MetricId; label: string }[] = [
   { id: "energy", label: "Energy" },
   { id: "ui", label: "U / I" },
@@ -29,65 +54,75 @@ const METRICS: { id: MetricId; label: string }[] = [
   { id: "unbalance", label: "Mất cân bằng pha" },
   { id: "pst", label: "Pst/Plt" },
 ];
-const SERIES = [
-  { id: "p1", name: "Điểm đo 1", color: "#3b82f6" },
-  { id: "p2", name: "Điểm đo 2", color: "#22c55e" },
-  { id: "p3", name: "Điểm đo 3", color: "#a16207" },
-];
 
 type BarPoint = { minute: number; label: string; kwh: number };
 
-function officeBars(seed: number): BarPoint[] {
-  const points: BarPoint[] = [];
-  for (let minute = 0; minute < 24 * 60; minute += 15) {
-    const hour = minute / 60;
-    let kwh = 1.15 + 0.22 * Math.sin(hour * 0.9 + seed * 0.4);
-
-    if (hour >= 6 && hour <= 10) {
-      const p = (hour - 6) / 4;
-      kwh = 1.35 + 4.5 * Math.sin(p * Math.PI);
-    } else if (hour > 10 && hour < 12.5) {
-      kwh = 1.5 + 0.9 * Math.abs(Math.sin(hour * 2.2 + seed));
-    } else if (hour >= 12.5 && hour < 14) {
-      kwh = hour > 13 && hour < 13.4 ? 0 : 0.9 + 0.45 * Math.sin(hour);
-    } else if (hour >= 14) {
-      kwh = 0.7 + 0.35 * Math.abs(Math.sin(hour * 1.3 + seed));
-    }
-
-    if (hour < 4) kwh = Math.max(0.9, kwh);
-
-    points.push({
-      minute,
-      label: `${String(Math.floor(hour)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
-      kwh: Number(Math.max(0, Math.min(6.2, kwh)).toFixed(2)),
-    });
-  }
-  return points;
+function daysInMonth(ym: string) {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m, 0).getDate();
 }
 
-function seriesFor(metric: MetricId, seed: number): number[][] {
+function monthLabel(ym: string) {
+  const [y, m] = ym.split("-").map(Number);
+  const names = [
+    "Tháng Một",
+    "Tháng Hai",
+    "Tháng Ba",
+    "Tháng Tư",
+    "Tháng Năm",
+    "Tháng Sáu",
+    "Tháng Bảy",
+    "Tháng Tám",
+    "Tháng Chín",
+    "Tháng Mười",
+    "Tháng Mười một",
+    "Tháng Mười hai",
+  ];
+  return `${names[(m || 1) - 1]} ${y}`;
+}
+
+function monthDayBars(seed: number, days: number): BarPoint[] {
+  return Array.from({ length: days }, (_, i) => {
+    const day = i + 1;
+    const weekend = (day + Math.floor(seed)) % 7 >= 5;
+    const kwh =
+      95 +
+      55 * Math.sin(day * 0.45 + seed) +
+      35 * Math.sin(day * 0.9 + seed * 0.7) +
+      (weekend ? -25 : 18) +
+      (day % 5) * 3;
+    return {
+      minute: i,
+      label: String(day),
+      kwh: Number(Math.max(40, Math.min(250, kwh)).toFixed(1)),
+    };
+  });
+}
+
+function formatNum(n: number) {
+  return n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+function seriesFor(metric: MetricId, seed: number, count: number): number[][] {
   const wave = (base: number, amp: number, shift: number, n: number) =>
     Array.from({ length: 25 }, (_, h) => {
       const t = (h + shift) / 24;
       return (
         base +
         amp * Math.sin(t * Math.PI * 2) +
-        amp * 0.35 * Math.sin(t * Math.PI * 4 + seed) +
+        amp * 0.35 * Math.sin(t * Math.PI * 4 + n) +
         (h > 8 && h < 15 ? amp * 0.25 : 0) -
         (h < 5 ? amp * 0.2 : 0)
       );
     });
 
-  if (metric === "freq") {
-    return [wave(50.02, 0.08, 0, seed), wave(49.98, 0.06, 1, seed), wave(50.01, 0.05, 2, seed)];
-  }
-  if (metric === "ui") {
-    return [wave(398, 12, 0, seed), wave(401, 9, 1.5, seed), wave(395, 14, 2.2, seed)];
-  }
-  if (metric === "power") {
-    return [wave(180, 55, 0, seed), wave(140, 48, 1, seed), wave(120, 40, 2, seed)];
-  }
-  return [wave(165, 52, 0, seed), wave(148, 58, 1.2, seed), wave(132, 46, 2.1, seed)];
+  return Array.from({ length: Math.max(count, 1) }, (_, i) => {
+    const n = seed + i;
+    if (metric === "freq") return wave(50.02 - i * 0.01, 0.08, i, n);
+    if (metric === "ui") return wave(398 + i * 2, 12 - i, i * 0.8, n);
+    if (metric === "power") return wave(180 - i * 20, 55 - i * 5, i, n);
+    return wave(165 - i * 15, 52, i * 1.1, n);
+  });
 }
 
 function metricMeta(energy: EnergyKind, metric: MetricId) {
@@ -110,11 +145,9 @@ function metricMeta(energy: EnergyKind, metric: MetricId) {
 }
 
 export function EnergyCharts() {
-  const [hierarchy, setHierarchy] = useState("meter");
-  const [from, setFrom] = useState("2026-07-19");
-  const [to, setTo] = useState("2026-07-19");
-  const [resolution, setResolution] = useState<Resolution>("Giờ");
-  const [dataKind, setDataKind] = useState<DataKind>("avg");
+  const params = useParams<{ id: string }>();
+  const projectId = params?.id ?? "default";
+  const [energyKinds, setEnergyKinds] = useState<EnergyKind[]>(["Điện", "Nước", "Nhiệt", "Hơi"]);
   const [energy, setEnergy] = useState<EnergyKind>("Điện");
   const [metric, setMetric] = useState<MetricId>("energy");
   const [view, setView] = useState<ViewMode>("chart");
@@ -122,200 +155,351 @@ export function EnergyCharts() {
   const [zoom, setZoom] = useState(1);
   const [hover, setHover] = useState<number | null>(null);
   const [showSum, setShowSum] = useState(false);
-  const [range, setRange] = useState({ start: 8, end: 56 });
+  const [range, setRange] = useState({ start: 0, end: 30 });
+  const [allPoints, setAllPoints] = useState<MeterPoint[]>(FALLBACK_POINTS);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pointQuery, setPointQuery] = useState("");
+  const [month, setMonth] = useState("2024-08");
 
-  const [applied, setApplied] = useState({
-    hierarchy,
-    from,
-    to,
-    resolution,
-    dataKind,
-    seed,
-  });
+  useEffect(() => {
+    const project = loadProjects().find((item) => item.id === projectId);
+    const types = resolveMeterTypes(project);
+    setEnergyKinds(types);
+    setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
+
+    const reload = () => {
+      const meters = orderMetersByTree(loadClientMeters(projectId));
+      if (!meters.length) {
+        setAllPoints(FALLBACK_POINTS);
+        return;
+      }
+      setAllPoints(
+        meters.map((meter, index) => ({
+          id: meter.id,
+          code: meter.code,
+          name: meter.name,
+          energy: meter.utility,
+          color: POINT_COLORS[index % POINT_COLORS.length],
+        })),
+      );
+    };
+    reload();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "ems-client-meters") reload();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("ems-client-meters-changed", reload);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("ems-client-meters-changed", reload);
+    };
+  }, [projectId]);
+
+  const pointsForEnergy = useMemo(
+    () => allPoints.filter((p) => p.energy === energy),
+    [allPoints, energy],
+  );
+
+  const filteredPoints = useMemo(() => {
+    const q = pointQuery.trim().toLowerCase();
+    if (!q) return pointsForEnergy;
+    return pointsForEnergy.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.code.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q),
+    );
+  }, [pointQuery, pointsForEnergy]);
+
+  // Khi đổi loại năng lượng, giữ các điểm đã chọn thuộc loại đó; nếu trống thì chọn 1–2 điểm đầu
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
+      if (kept.length > 0) return kept;
+      return pointsForEnergy.slice(0, Math.min(2, pointsForEnergy.length)).map((p) => p.id);
+    });
+  }, [pointsForEnergy]);
+
+  const selectedPoints = useMemo(
+    () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
+    [pointsForEnergy, selectedIds],
+  );
 
   const values = useMemo(
-    () =>
-      seriesFor(
-        metric,
-        seed + (applied.dataKind === "max" ? 0.4 : applied.dataKind === "min" ? -0.3 : 0),
-      ),
-    [metric, seed, applied.dataKind],
+    () => seriesFor(metric, seed, Math.max(selectedPoints.length, 1)),
+    [metric, seed, selectedPoints.length],
   );
-  const bars = useMemo(() => officeBars(seed), [seed]);
-  const isEnergyChart = energy === "Điện" && metric === "energy";
-  const isUiChart = metric === "ui";
-  const isFreqChart = metric === "freq";
-  const isPowerChart = metric === "power";
-  const isHarmChart = metric === "harm";
-  const isUnbChart = metric === "unbalance";
-  const meta = metricMeta(energy, metric);
-  const yMax = isEnergyChart ? 7 : Math.max(...values.flat()) * 1.08;
-  const yMin = isEnergyChart ? 0 : Math.min(0, Math.min(...values.flat()) * 0.92);
 
-  const visibleBars = bars.slice(range.start, range.end + 1);
-  const barSum = visibleBars.reduce((s, p) => s + p.kwh, 0);
+  const dayCount = daysInMonth(month);
+
+  useEffect(() => {
+    setRange({ start: 0, end: Math.max(dayCount - 1, 0) });
+  }, [month, dayCount]);
+
+  const multiBars = useMemo(
+    () =>
+      selectedPoints.map((point, i) => ({
+        point,
+        bars: monthDayBars(seed + i * 1.7, dayCount),
+      })),
+    [selectedPoints, seed, dayCount],
+  );
+
+  const isElectric = energy === "Điện";
+  /** Tiêu thụ năng lượng/hạ tầng — áp dụng mọi loại (Điện, Nước, …) */
+  const isConsumptionChart = metric === "energy";
+  const isEnergyChart = isElectric && isConsumptionChart;
+  const isUiChart = isElectric && metric === "ui";
+  const isFreqChart = isElectric && metric === "freq";
+  const isPowerChart = isElectric && metric === "power";
+  const isHarmChart = isElectric && metric === "harm";
+  const isUnbChart = isElectric && metric === "unbalance";
+  const meta = metricMeta(energy, isElectric ? metric : "energy");
+  const yMax = isConsumptionChart ? 7 : Math.max(...values.flat(), 1) * 1.08;
+  const yMin = isConsumptionChart ? 0 : Math.min(0, Math.min(...values.flat()) * 0.92);
+
+  // Rời tab Điện → luôn về chế độ tiêu thụ, không giữ Pst/U-I/…
+  useEffect(() => {
+    if (!isElectric && metric !== "energy") {
+      setMetric("energy");
+    }
+  }, [isElectric, metric]);
+
+  const consumptionUnit =
+    energy === "Nước"
+      ? "m³"
+      : energy === "Khí nén"
+        ? "Nm³"
+        : energy === "Hơi"
+          ? "t"
+          : energy === "Nhiệt"
+            ? "kWh"
+            : "kWh";
+
+  const primaryBars = multiBars[0]?.bars ?? monthDayBars(seed, dayCount);
+  const visibleBars = primaryBars.slice(range.start, range.end + 1);
+  const barSum = multiBars.reduce(
+    (sum, series) =>
+      sum + series.bars.slice(range.start, range.end + 1).reduce((s, p) => s + p.kwh, 0),
+    0,
+  );
+
+  const pointTotals = useMemo(
+    () =>
+      multiBars.map((item) => ({
+        point: item.point,
+        total: item.bars.reduce((s, p) => s + p.kwh, 0),
+      })),
+    [multiBars],
+  );
+
+  const grandTotal = pointTotals.reduce((s, item) => s + item.total, 0);
+
+  const tou = useMemo(() => {
+    const peak = Math.round(grandTotal * 0.18 * 10) / 10;
+    const normal = Math.round(grandTotal * 0.61 * 10) / 10;
+    const off = Math.round(grandTotal * 0.16 * 10) / 10;
+    const none = Math.max(0, Math.round((grandTotal - peak - normal - off) * 10) / 10);
+    return { peak, normal, off, none };
+  }, [grandTotal]);
 
   const totals = useMemo(() => {
-    if (isEnergyChart) {
-      const sum = bars.reduce((s, p) => s + p.kwh, 0);
+    if (isConsumptionChart) {
       return {
-        total: sum.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ","),
-        peak: Math.max(...bars.map((p) => p.kwh)).toFixed(1),
-        pf: "0.94",
+        kind: "energy" as const,
+        total: formatNum(grandTotal),
+        count: selectedPoints.length,
       };
     }
-    const sum = values[0].reduce((a, b, i) => a + b + values[1][i] + values[2][i], 0);
+    const flat = values.flat();
+    if (flat.length === 0) {
+      return { kind: "stats" as const, min: "--", max: "--", avg: "--", count: selectedPoints.length };
+    }
+    const min = Math.min(...flat);
+    const max = Math.max(...flat);
+    const avg = flat.reduce((a, b) => a + b, 0) / flat.length;
     return {
-      total: (sum / 3).toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ","),
-      peak: Math.max(...values.flat()).toFixed(1),
-      pf: "0.94",
+      kind: "stats" as const,
+      min: min.toFixed(2),
+      max: max.toFixed(2),
+      avg: avg.toFixed(2),
+      count: selectedPoints.length,
     };
-  }, [values, bars, isEnergyChart]);
+  }, [grandTotal, values, isConsumptionChart, selectedPoints.length]);
+
+  const statsUnit =
+    metric === "pst"
+      ? "Pst"
+      : metric === "freq"
+        ? "Hz"
+        : metric === "ui"
+          ? "V"
+          : metric === "power"
+            ? "kW"
+            : metric === "harm" || metric === "unbalance"
+              ? "%"
+              : "";
+
+  function togglePoint(id: string) {
+    setSelectedIds((current) => {
+      if (current.includes(id)) {
+        return current.filter((item) => item !== id);
+      }
+      return [...current, id];
+    });
+  }
+
+  function selectAllVisible() {
+    setSelectedIds(filteredPoints.map((p) => p.id));
+  }
+
+  function clearSelection() {
+    setSelectedIds([]);
+  }
 
   return (
     <div className="flex h-full min-h-0 bg-[#f4f6f9]">
       <aside className="flex w-[280px] shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-4">
-          <FunnelIcon className="h-4 w-4 text-slate-400" />
-          <h2 className="text-sm font-semibold text-slate-700">Bộ lọc nâng cao</h2>
+        <div className="border-b border-slate-100 px-4 py-3">
+          <h2 className="text-sm font-semibold text-slate-800">Điểm đo trên sơ đồ</h2>
+          <p className="mt-0.5 text-[11px] leading-4 text-slate-400">
+            Tick chọn vị trí điểm đo (cùng danh sách Cấu hình / Sơ đồ) để hiển thị trên biểu đồ
+          </p>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
-          <Field label="PHÂN CẤP HỆ THỐNG">
-            <select
-              value={hierarchy}
-              onChange={(e) => setHierarchy(e.target.value)}
-              className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
-            >
-              <option value="meter">Điểm đo (Meter)</option>
-              <option value="cabinet">Tủ điện</option>
-              <option value="area">Khu vực</option>
-            </select>
-          </Field>
-
-          <Field label="KHOẢNG THỜI GIAN">
-            <div className="grid grid-cols-2 gap-2">
-              <label className="text-[11px] text-slate-400">
-                Từ
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                  className="mt-1 h-10 w-full rounded-md border border-slate-200 px-2 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
-                />
-              </label>
-              <label className="text-[11px] text-slate-400">
-                Đến
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="mt-1 h-10 w-full rounded-md border border-slate-200 px-2 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
-                />
-              </label>
-            </div>
-          </Field>
-
-          <Field label="ĐỘ PHÂN GIẢI">
-            <div className="grid grid-cols-3 gap-1.5">
-              {RESOLUTIONS.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setResolution(item)}
-                  className={`h-8 rounded-md text-[12px] font-medium ${
-                    resolution === item
-                      ? "bg-[#1a73e8] text-white"
-                      : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                  }`}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </Field>
-
-          <Field label="LOẠI DỮ LIỆU">
-            <div className="space-y-2.5">
-              {(
-                [
-                  ["avg", "Trung bình"],
-                  ["max", "Lớn nhất"],
-                  ["min", "Nhỏ nhất"],
-                  ["instant", "Tức thời"],
-                ] as const
-              ).map(([id, label]) => (
-                <label key={id} className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
-                  <input
-                    type="radio"
-                    name="data-kind"
-                    checked={dataKind === id}
-                    onChange={() => setDataKind(id)}
-                    className="accent-[#1a73e8]"
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </Field>
-
-          <button
-            type="button"
-            onClick={() => {
-              setApplied({
-                hierarchy,
-                from,
-                to,
-                resolution,
-                dataKind,
-                seed: seed + 1,
-              });
-              setSeed((n) => n + 1);
-            }}
-            className="mt-auto h-11 w-full rounded-md bg-[#1e4f8a] text-[13px] font-bold tracking-wide text-white hover:bg-[#173f6e]"
-          >
-            ÁP DỤNG BỘ LỌC
-          </button>
+        <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
+          <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">
+            DANH SÁCH ĐIỂM ĐO · {energy.toUpperCase()}
+          </p>
+          <label className="relative mb-2 block">
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400">
+              <SearchIcon className="h-3.5 w-3.5" />
+            </span>
+            <input
+              value={pointQuery}
+              onChange={(e) => setPointQuery(e.target.value)}
+              placeholder="Tìm điểm đo..."
+              className="h-9 w-full rounded-md border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8]"
+            />
+          </label>
+          <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+            <span>
+              Đã chọn {selectedPoints.length}/{filteredPoints.length}
+            </span>
+            <span className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={selectAllVisible}
+                className="font-medium text-[#1a73e8] hover:underline"
+              >
+                Chọn tất cả
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="font-medium text-slate-500 hover:underline"
+              >
+                Bỏ chọn
+              </button>
+            </span>
+          </div>
+          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+            {filteredPoints.length === 0 ? (
+              <li className="py-8 text-center text-sm text-slate-400">
+                Không có điểm đo loại {energy}. Thêm tại Cấu hình → Cụm điểm đo.
+              </li>
+            ) : (
+              filteredPoints.map((point, index) => {
+                const checked = selectedIds.includes(point.id);
+                return (
+                  <li key={point.id}>
+                    <label
+                      className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors ${
+                        checked
+                          ? "bg-[#1a73e8] text-white shadow-sm"
+                          : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => togglePoint(point.id)}
+                        className="h-4 w-4 shrink-0 rounded border border-white/40 bg-white accent-[#1a73e8]"
+                      />
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-[2px] ring-1 ring-black/10"
+                        style={{ backgroundColor: point.color }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={`block truncate text-[13px] font-medium ${
+                            checked ? "text-white" : "text-slate-700"
+                          }`}
+                        >
+                          {index + 1}. {point.name}
+                        </span>
+                        <span
+                          className={`block truncate text-[11px] ${
+                            checked ? "text-white/75" : "text-slate-400"
+                          }`}
+                        >
+                          ({point.code})
+                        </span>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })
+            )}
+          </ul>
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
-        <div className="flex flex-wrap gap-2">
-          {ENERGY_KINDS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setEnergy(item.id)}
-              className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium ${
-                energy === item.id
-                  ? "border-[#1a73e8] bg-[#1a73e8] text-white"
-                  : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
-              }`}
-            >
-              <EnergyGlyph type={item.icon} className="h-4 w-4" />
-              {item.id}
-            </button>
-          ))}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-2 sm:px-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {energyKinds.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => {
+                  setEnergy(item);
+                  setMetric("energy");
+                }}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] font-medium ${
+                  energy === item
+                    ? "border-[#1a73e8] bg-[#1a73e8] text-white"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                }`}
+              >
+                <EnergyGlyph type={ENERGY_KIND_META[item] ?? "bolt"} className="h-3.5 w-3.5" />
+                {item}
+              </button>
+            ))}
+          </div>
+          {isElectric ? (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {METRICS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setMetric(item.id)}
+                  className={`h-7 rounded-full px-2.5 text-[11.5px] font-medium ${
+                    metric === item.id
+                      ? "bg-[#1a73e8] text-white"
+                      : "bg-slate-50 text-slate-500 ring-1 ring-slate-200 hover:bg-white"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {METRICS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setMetric(item.id)}
-              className={`h-8 rounded-full px-3 text-[12px] font-medium ${
-                metric === item.id
-                  ? "bg-[#1a73e8] text-white"
-                  : "bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         {isUiChart ? (
-          <section className="mt-4 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
             <UiWaveform />
           </section>
         ) : isFreqChart ? (
@@ -326,64 +510,224 @@ export function EnergyCharts() {
           <HarmonicsChart seed={seed} />
         ) : isUnbChart ? (
           <UnbalanceChart seed={seed} />
+        ) : isConsumptionChart ? (
+          <>
+            <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
+              <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-[15px] font-semibold text-slate-800">
+                      {energy === "Điện"
+                        ? "Chi tiết tiêu thụ điện năng"
+                        : `Chi tiết tiêu thụ ${energy.toLowerCase()}`}
+                    </h2>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-600">
+                      {selectedPoints.length === 0 ? (
+                        <span className="text-slate-400">Chọn điểm đo bên trái để hiển thị</span>
+                      ) : (
+                        selectedPoints.map((point) => (
+                          <span key={point.id} className="inline-flex items-center gap-1.5">
+                            <span
+                              className="h-2.5 w-2.5 rounded-[2px]"
+                              style={{ backgroundColor: point.color }}
+                            />
+                            ({point.code}) {point.name}
+                          </span>
+                        ))
+                      )}
+                      {showSum && selectedPoints.length > 0 ? (
+                        <span className="font-semibold text-[#1a73e8]">
+                          Σ {formatNum(barSum)} {consumptionUnit}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="flex items-center">
+                    <IconBtn
+                      label="Biểu đồ cột"
+                      active={view === "chart"}
+                      onClick={() => setView("chart")}
+                    >
+                      <BarIcon className="h-4 w-4" />
+                    </IconBtn>
+                    <IconBtn label="Tổng" active={showSum} onClick={() => setShowSum((v) => !v)}>
+                      <SigmaIcon className="h-4 w-4" />
+                    </IconBtn>
+                    <IconBtn
+                      label="Bảng dữ liệu"
+                      active={view === "table"}
+                      onClick={() => setView("table")}
+                    >
+                      <TableIcon className="h-4 w-4" />
+                    </IconBtn>
+                    <IconBtn label="Làm mới" onClick={() => setSeed((n) => n + 1)}>
+                      <RefreshIcon className="h-4 w-4" />
+                    </IconBtn>
+                  </div>
+                </div>
+
+                {selectedPoints.length === 0 ? (
+                  <p className="py-16 text-center text-sm text-slate-400">
+                    Tick chọn điểm đo bên trái để xem tiêu thụ
+                  </p>
+                ) : view === "chart" ? (
+                  <MultiConsumptionBarChart
+                    series={multiBars}
+                    range={range}
+                    onRange={setRange}
+                    hover={hover}
+                    onHover={setHover}
+                    unit={consumptionUnit}
+                    yMaxHint={260}
+                  />
+                ) : (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full min-w-[480px] text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-[11px] text-slate-400">
+                          <th className="py-2 font-medium">Ngày</th>
+                          {selectedPoints.map((p) => (
+                            <th key={p.id} className="py-2 font-medium" style={{ color: p.color }}>
+                              ({p.code}) {p.name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleBars.map((point, rowIdx) => (
+                          <tr key={point.minute} className="border-b border-slate-50 text-slate-600">
+                            <td className="py-1.5">Ngày {point.label}</td>
+                            {multiBars.map((series) => (
+                              <td key={series.point.id} className="py-1.5">
+                                {series.bars[range.start + rowIdx]?.kwh.toFixed(1)} {consumptionUnit}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </article>
+
+              <div className="flex min-h-0 flex-col gap-4">
+                <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                  <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
+                    TỔNG HỢP TIÊU THỤ THEO ĐIỂM ĐO
+                  </h2>
+                  <ConsumptionDonut
+                    value={grandTotal}
+                    unit={consumptionUnit}
+                    segments={pointTotals}
+                  />
+                  <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto">
+                    {pointTotals.map((item) => {
+                      const pct = grandTotal > 0 ? Math.round((item.total / grandTotal) * 100) : 0;
+                      return (
+                        <div
+                          key={item.point.id}
+                          className="rounded-md bg-[#eaf3fb] px-3 py-2 text-[12px] text-slate-700"
+                        >
+                          <p className="flex items-start gap-2">
+                            <span
+                              className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: item.point.color }}
+                            />
+                            <span>
+                              ({item.point.code}) {item.point.name}
+                              <span className="mt-0.5 block font-semibold">
+                                {formatNum(item.total)} {consumptionUnit} (~{pct}%)
+                              </span>
+                            </span>
+                          </p>
+                        </div>
+                      );
+                    })}
+                    {pointTotals.length === 0 ? (
+                      <p className="py-4 text-center text-[12px] text-slate-400">Chưa chọn điểm đo</p>
+                    ) : null}
+                  </div>
+                </article>
+
+                {isElectric ? (
+                  <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                    <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
+                      TỔNG HỢP TIÊU THỤ THEO KHUNG GIỜ
+                    </h2>
+                    <TouConsumptionChart values={tou} />
+                    <p className="mt-1 text-right text-[11px] text-slate-400">({consumptionUnit})</p>
+                  </article>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <label className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
+                <span className="text-slate-500">Tháng</span>
+                <span className="text-slate-300">|</span>
+                <input
+                  type="month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                  className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
+                />
+                <span className="hidden text-[12px] text-slate-400 sm:inline">
+                  {monthLabel(month)}
+                </span>
+              </label>
+              <div className="flex flex-wrap items-center gap-3 text-[12px] text-slate-500">
+                <p className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  Hệ thống đang hoạt động bình thường
+                </p>
+                <p>Cập nhật: 2026-07-19 10:04:46</p>
+              </div>
+            </div>
+          </>
         ) : (
-        <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <div className="relative">
-            <h1 className="text-center text-[16px] font-semibold text-slate-800">
-              {isEnergyChart ? "Chi tiết tiêu thụ điện năng" : meta.title}
-            </h1>
-            <div className="absolute top-0 right-0 flex items-center gap-0.5">
-              <IconBtn label="Biểu đồ cột" active={view === "chart"} onClick={() => setView("chart")}>
-                <BarIcon className="h-4 w-4" />
-              </IconBtn>
-              <IconBtn label="Tổng" active={showSum} onClick={() => setShowSum((v) => !v)}>
-                <SigmaIcon className="h-4 w-4" />
-              </IconBtn>
-              <IconBtn label="Bảng dữ liệu" active={view === "table"} onClick={() => setView("table")}>
-                <TableIcon className="h-4 w-4" />
-              </IconBtn>
-              <IconBtn label="Làm mới" onClick={() => setSeed((n) => n + 1)}>
-                <RefreshIcon className="h-4 w-4" />
-              </IconBtn>
+          <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
+            <div className="relative">
+              <h1 className="text-center text-[15px] font-semibold text-slate-800 sm:text-[16px]">
+                {meta.title}
+              </h1>
+              <div className="absolute top-0 right-0 flex items-center gap-0.5">
+                <IconBtn label="Biểu đồ" active={view === "chart"} onClick={() => setView("chart")}>
+                  <BarIcon className="h-4 w-4" />
+                </IconBtn>
+                <IconBtn label="Tổng" active={showSum} onClick={() => setShowSum((v) => !v)}>
+                  <SigmaIcon className="h-4 w-4" />
+                </IconBtn>
+                <IconBtn label="Bảng dữ liệu" active={view === "table"} onClick={() => setView("table")}>
+                  <TableIcon className="h-4 w-4" />
+                </IconBtn>
+                <IconBtn label="Làm mới" onClick={() => setSeed((n) => n + 1)}>
+                  <RefreshIcon className="h-4 w-4" />
+                </IconBtn>
+              </div>
             </div>
-          </div>
 
-          {isEnergyChart ? (
-            <div className="mt-3 flex items-center justify-center gap-2 text-[13px] text-slate-600">
-              <span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-[#4f89d8]" />
-              (DB-OFF1) Tủ điện văn phòng
-              {showSum ? (
-                <span className="ml-2 text-[12px] font-medium text-[#1a73e8]">
-                  Σ {barSum.toFixed(1)} kWh
-                </span>
-              ) : null}
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[13px] text-slate-600">
+              {selectedPoints.length === 0 ? (
+                <span className="text-slate-400">Chọn điểm đo bên trái để hiển thị</span>
+              ) : (
+                selectedPoints.map((point) => (
+                  <span key={point.id} className="inline-flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-[2px]"
+                      style={{ backgroundColor: point.color }}
+                    />
+                    ({point.code}) {point.name}
+                  </span>
+                ))
+              )}
             </div>
-          ) : (
-            <div className="mt-3 flex items-center justify-center gap-4 text-[12px] text-slate-500">
-              {SERIES.map((item) => (
-                <span key={item.id} className="inline-flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  {item.name}
-                </span>
-              ))}
-            </div>
-          )}
 
-          {view === "chart" ? (
-            isEnergyChart ? (
-              <ConsumptionBarChart
-                points={bars}
-                range={range}
-                onRange={setRange}
-                hover={hover}
-                onHover={setHover}
-              />
-            ) : (
+            {view === "chart" ? (
               <div className="relative mt-2">
                 <LineChart
                   values={values}
-                  colors={SERIES.map((s) => s.color)}
-                  names={SERIES.map((s) => s.name)}
+                  colors={selectedPoints.map((p) => p.color)}
+                  names={selectedPoints.map((p) => p.name)}
                   yMin={yMin}
                   yMax={yMax}
                   zoom={zoom}
@@ -402,176 +746,320 @@ export function EnergyCharts() {
                   </IconBtn>
                 </div>
               </div>
-            )
-          ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[480px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-[11px] text-slate-400">
-                    <th className="py-2 font-medium">Thời điểm</th>
-                    {isEnergyChart ? (
-                      <th className="py-2 font-medium">(DB-OFF1) Tủ điện văn phòng</th>
-                    ) : (
-                      SERIES.map((s) => (
-                        <th key={s.id} className="py-2 font-medium" style={{ color: s.color }}>
-                          {s.name}
+            ) : (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[480px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-[11px] text-slate-400">
+                      <th className="py-2 font-medium">Thời điểm</th>
+                      {selectedPoints.map((p) => (
+                        <th key={p.id} className="py-2 font-medium" style={{ color: p.color }}>
+                          ({p.code}) {p.name}
                         </th>
-                      ))
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {isEnergyChart
-                    ? visibleBars.map((point) => (
-                        <tr key={point.minute} className="border-b border-slate-50 text-slate-600">
-                          <td className="py-1.5">{point.label}</td>
-                          <td className="py-1.5">{point.kwh.toFixed(2)} kWh</td>
-                        </tr>
-                      ))
-                    : Array.from({ length: 25 }, (_, i) => (
-                        <tr key={i} className="border-b border-slate-50 text-slate-600">
-                          <td className="py-1.5">{String(i).padStart(2, "0")}:00</td>
-                          {values.map((row, s) => (
-                            <td key={s} className="py-1.5">
-                              {row[i].toFixed(1)}
-                            </td>
-                          ))}
-                        </tr>
                       ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 25 }, (_, i) => (
+                      <tr key={i} className="border-b border-slate-50 text-slate-600">
+                        <td className="py-1.5">{String(i).padStart(2, "0")}:00</td>
+                        {values.map((row, s) => (
+                          <td key={selectedPoints[s]?.id ?? s} className="py-1.5">
+                            {row[i].toFixed(1)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {isElectric && totals.kind === "stats" ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <StatCard
+                  label={`GIÁ TRỊ NHỎ NHẤT (${totals.count} ĐIỂM)`}
+                  value={totals.min}
+                  unit={statsUnit}
+                  color="text-[#1a73e8]"
+                />
+                <StatCard
+                  label={`GIÁ TRỊ LỚN NHẤT (${totals.count} ĐIỂM)`}
+                  value={totals.max}
+                  unit={statsUnit}
+                  color="text-red-500"
+                />
+                <StatCard
+                  label={`GIÁ TRỊ TRUNG BÌNH (${totals.count} ĐIỂM)`}
+                  value={totals.avg}
+                  unit={statsUnit}
+                  color="text-emerald-600"
+                />
+              </div>
+            ) : null}
+          </section>
         )}
 
-        {isUiChart || isFreqChart || isPowerChart || isHarmChart || isUnbChart ? null : (
-          <>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <StatCard label="TỔNG TIÊU THỤ (3 ĐIỂM)" value={totals.total} unit="kWh" color="text-[#1a73e8]" />
-              <StatCard label="CÔNG SUẤT ĐỈNH" value={totals.peak} unit="kW" color="text-red-500" />
-              <StatCard label="HỆ SỐ CÔNG SUẤT TB" value={totals.pf} unit="cosφ" color="text-emerald-600" />
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[12px] text-slate-500">
-              <p className="flex items-center gap-3">
-                <span className="rounded bg-emerald-50 px-2 py-1 text-[11px] font-bold tracking-wide text-emerald-700">
-                  HỆ THỐNG: BÌNH THƯỜNG
-                </span>
-                <span>Cập nhật: 2026-07-19 10:04:46</span>
-              </p>
-              <p className="inline-flex items-center gap-1.5 font-medium text-slate-400">
-                <ShieldIcon className="h-4 w-4" />
-                DỮ LIỆU BẢO MẬT
-              </p>
-            </div>
-          </>
+        {!isUiChart &&
+        !isFreqChart &&
+        !isPowerChart &&
+        !isHarmChart &&
+        !isUnbChart &&
+        !isConsumptionChart ? null : isConsumptionChart ? null : (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[12px] text-slate-500">
+            <p className="flex items-center gap-3">
+              <span className="rounded bg-emerald-50 px-2 py-1 text-[11px] font-bold tracking-wide text-emerald-700">
+                HỆ THỐNG: BÌNH THƯỜNG
+              </span>
+              <span>Cập nhật: 2026-07-19 10:04:46</span>
+            </p>
+            <p className="inline-flex items-center gap-1.5 font-medium text-slate-400">
+              <ShieldIcon className="h-4 w-4" />
+              DỮ LIỆU BẢO MẬT
+            </p>
+          </div>
         )}
+        </div>
       </div>
     </div>
   );
 }
 
-function ConsumptionBarChart({
-  points,
+function MultiConsumptionBarChart({
+  series,
   range,
   onRange,
   hover,
   onHover,
+  unit = "kWh",
+  yMaxHint = 260,
 }: {
-  points: BarPoint[];
+  series: { point: MeterPoint; bars: BarPoint[] }[];
   range: { start: number; end: number };
   onRange: (range: { start: number; end: number }) => void;
   hover: number | null;
   onHover: (index: number | null) => void;
+  unit?: string;
+  yMaxHint?: number;
 }) {
   const W = 980;
   const H = 360;
-  const pad = { l: 42, r: 16, t: 28, b: 32 };
+  const pad = { l: 48, r: 16, t: 28, b: 32 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
-  const visible = points.slice(range.start, range.end + 1);
-  const yMax = 7;
+  const base = series[0]?.bars ?? [];
+  const visibleLen = Math.max(range.end - range.start + 1, 1);
+  const dataMax = Math.max(
+    ...series.flatMap((s) => s.bars.slice(range.start, range.end + 1).map((b) => b.kwh)),
+    1,
+  );
+  const yMax = Math.max(yMaxHint, Math.ceil(dataMax / 50) * 50);
   const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * innerH;
-  const barW = innerW / Math.max(visible.length, 1);
-  const ticks: number[] = [];
-  const startHour = Math.ceil(points[range.start].minute / 120) * 2;
-  const endHour = Math.floor(points[range.end].minute / 60);
-  for (let h = startHour; h <= endHour; h += 2) ticks.push(h);
+  const groupW = innerW / visibleLen;
+  const barCount = Math.max(series.length, 1);
+  const barW = groupW / (barCount + 0.6);
+  const tickStep = yMax <= 100 ? 20 : yMax <= 300 ? 50 : 100;
+  const yTicks = Array.from({ length: Math.floor(yMax / tickStep) + 1 }, (_, i) => i * tickStep);
 
   return (
     <div className="mt-1">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="h-[360px] w-full"
+        className="h-[320px] w-full sm:h-[360px]"
         onMouseLeave={() => onHover(null)}
       >
         <text x={pad.l} y="16" className="fill-slate-400" fontSize="12">
-          (kWh)
+          ({unit})
         </text>
-        {Array.from({ length: 8 }, (_, i) => {
-          const y = yAt(i);
+        {yTicks.map((v) => {
+          const y = yAt(v);
           return (
-            <g key={i}>
+            <g key={v}>
               <line x1={pad.l} x2={W - pad.r} y1={y} y2={y} stroke="#eceff3" />
               <text x={pad.l - 8} y={y + 4} textAnchor="end" className="fill-slate-400" fontSize="11">
-                {i}
+                {v}
               </text>
             </g>
           );
         })}
-        {visible.map((point, i) => {
+        {Array.from({ length: visibleLen }, (_, i) => {
           const globalIndex = range.start + i;
-          const x = pad.l + i * barW + barW * 0.18;
-          const h = innerH - (yAt(point.kwh) - pad.t);
-          return (
-            <rect
-              key={point.minute}
-              x={x}
-              y={yAt(point.kwh)}
-              width={Math.max(1.5, barW * 0.64)}
-              height={Math.max(0, h)}
-              fill={hover === globalIndex ? "#3b74c4" : "#4f89d8"}
-              onMouseEnter={() => onHover(globalIndex)}
-            />
-          );
+          return series.map((item, sIdx) => {
+            const point = item.bars[globalIndex];
+            if (!point) return null;
+            const x = pad.l + i * groupW + groupW * 0.15 + sIdx * barW;
+            const h = Math.max(0, yAt(0) - yAt(point.kwh));
+            return (
+              <rect
+                key={`${item.point.id}-${point.minute}`}
+                x={x}
+                y={yAt(point.kwh)}
+                width={Math.max(2, barW * 0.85)}
+                height={h}
+                fill={item.point.color}
+                opacity={hover == null || hover === globalIndex ? 1 : 0.4}
+                onMouseEnter={() => onHover(globalIndex)}
+              />
+            );
+          });
         })}
-        {ticks.map((hour) => {
-          const minute = hour * 60;
-          const idx = visible.findIndex((p) => p.minute === minute);
-          if (idx < 0) return null;
+        {Array.from({ length: visibleLen }, (_, i) => {
+          const globalIndex = range.start + i;
+          const point = base[globalIndex];
+          if (!point) return null;
+          const show =
+            visibleLen <= 16 ||
+            Number(point.label) % 2 === 1 ||
+            Number(point.label) === 1 ||
+            globalIndex === range.end;
+          if (!show) return null;
           return (
             <text
-              key={hour}
-              x={pad.l + idx * barW + barW / 2}
+              key={`lbl-${point.minute}`}
+              x={pad.l + i * groupW + groupW / 2}
               y={H - 10}
               textAnchor="middle"
               className="fill-slate-500"
               fontSize="11"
             >
-              {`${String(hour).padStart(2, "0")}:00`}
+              {point.label}
             </text>
           );
         })}
-        {hover != null && hover >= range.start && hover <= range.end ? (
-          <g
-            transform={`translate(${Math.min(
-              pad.l + (hover - range.start) * barW + 10,
-              W - 140,
-            )}, ${pad.t + 8})`}
-          >
-            <rect width="128" height="44" rx="4" fill="white" stroke="#e2e8f0" />
-            <text x="10" y="18" className="fill-slate-500" fontSize="11">
-              {points[hover].label}
+        {hover != null && base[hover] ? (
+          <g transform={`translate(${Math.min(pad.l + (hover - range.start) * groupW + 12, W - 180)}, ${pad.t + 6})`}>
+            <rect width="168" height={20 + series.length * 16} rx="4" fill="white" stroke="#e2e8f0" />
+            <text x="10" y="16" className="fill-slate-500" fontSize="11">
+              Ngày {base[hover].label}
             </text>
-            <text x="10" y="34" className="fill-slate-700" fontSize="12" fontWeight="600">
-              {points[hover].kwh.toFixed(2)} kWh
-            </text>
+            {series.map((item, i) => (
+              <text
+                key={item.point.id}
+                x="10"
+                y={34 + i * 16}
+                fontSize="11"
+                fontWeight="600"
+                fill={item.point.color}
+              >
+                {item.point.code}: {item.bars[hover]?.kwh.toFixed(1)} {unit}
+              </text>
+            ))}
           </g>
         ) : null}
       </svg>
-      <DataZoom points={points} range={range} onRange={onRange} />
+      <DataZoom
+        points={base.length ? base : monthDayBars(1, 31)}
+        range={range}
+        onRange={onRange}
+      />
     </div>
+  );
+}
+
+function ConsumptionDonut({
+  value,
+  unit,
+  segments,
+}: {
+  value: number;
+  unit: string;
+  segments: { point: MeterPoint; total: number }[];
+}) {
+  const r = 58;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+
+  return (
+    <div className="relative mx-auto my-3 h-[168px] w-[168px]">
+      <svg viewBox="0 0 160 160" className="h-full w-full">
+        <circle cx="80" cy="80" r={r} fill="none" stroke="#e8eef4" strokeWidth="22" />
+        {segments.map((item) => {
+          const portion = value > 0 ? item.total / value : 0;
+          const dash = portion * c;
+          const el = (
+            <circle
+              key={item.point.id}
+              cx="80"
+              cy="80"
+              r={r}
+              fill="none"
+              stroke={item.point.color}
+              strokeWidth="22"
+              strokeDasharray={`${dash} ${c - dash}`}
+              strokeDashoffset={-offset}
+              strokeLinecap="butt"
+              transform="rotate(-90 80 80)"
+            />
+          );
+          offset += dash;
+          return el;
+        })}
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-2 text-center">
+        <p className="text-[20px] font-bold leading-none text-slate-800">{formatNum(value)}</p>
+        <p className="mt-1 text-[12px] text-slate-500">{unit}</p>
+      </div>
+    </div>
+  );
+}
+
+const TOU_COLORS = [
+  { id: "peak", label: "Cao", color: "#e67e22" },
+  { id: "normal", label: "Trung", color: "#27ae60" },
+  { id: "off", label: "Thấp", color: "#7ec8e3" },
+  { id: "none", label: "Không", color: "#9aa3af" },
+] as const;
+
+function TouConsumptionChart({
+  values,
+}: {
+  values: { peak: number; normal: number; off: number; none: number };
+}) {
+  const W = 300;
+  const H = 180;
+  const pad = { l: 18, r: 18, t: 28, b: 28 };
+  const innerW = W - pad.l - pad.r;
+  const yMax = Math.max(values.peak, values.normal, values.off, values.none, 1);
+  const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * (H - pad.t - pad.b);
+  const items = [
+    { label: TOU_COLORS[0].label, color: TOU_COLORS[0].color, value: values.peak },
+    { label: TOU_COLORS[1].label, color: TOU_COLORS[1].color, value: values.normal },
+    { label: TOU_COLORS[2].label, color: TOU_COLORS[2].color, value: values.off },
+    { label: TOU_COLORS[3].label, color: TOU_COLORS[3].color, value: values.none },
+  ];
+  const groupW = innerW / items.length;
+  const barW = 28;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 h-[180px] w-full">
+      {items.map((item, i) => {
+        const x = pad.l + i * groupW + (groupW - barW) / 2;
+        const h = Math.max(item.value === 0 ? 3 : 0, yAt(0) - yAt(item.value));
+        return (
+          <g key={item.label}>
+            <text
+              x={x + barW / 2}
+              y={item.value === 0 ? H - pad.b - 10 : yAt(item.value) - 8}
+              textAnchor="middle"
+              className="fill-slate-600"
+              fontSize="11"
+            >
+              {formatNum(item.value)}
+            </text>
+            <rect
+              x={x}
+              y={yAt(item.value) - (item.value === 0 ? 3 : 0)}
+              width={barW}
+              height={h}
+              fill={item.color}
+            />
+            <text x={x + barW / 2} y={H - 6} textAnchor="middle" className="fill-slate-600" fontSize="12">
+              {item.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -764,13 +1252,19 @@ function LineChart({
             <circle key={names[i]} cx={xAt(hover)} cy={yAt(row[hover])} r="4" fill={colors[i]} />
           ))}
           <g transform={`translate(${Math.min(xAt(hover) + 12, W - 170)}, ${pad.t + 8})`}>
-            <rect width="158" height="78" rx="6" fill="white" stroke="#e2e8f0" />
+            <rect
+              width="158"
+              height={22 + Math.max(names.length, 1) * 14}
+              rx="6"
+              fill="white"
+              stroke="#e2e8f0"
+            />
             <text x="10" y="18" className="fill-slate-500" fontSize="11">
               {hover === 24 ? "23:59" : `${String(hover).padStart(2, "0")}:00`}
             </text>
-            {SERIES.map((s, i) => (
-              <text key={s.id} x="10" y={36 + i * 14} fontSize="11" fill={s.color}>
-                {s.name}: {values[i][hover].toFixed(1)}
+            {names.map((name, i) => (
+              <text key={`${name}-${i}`} x="10" y={36 + i * 14} fontSize="11" fill={colors[i]}>
+                {name}: {values[i][hover].toFixed(1)}
               </text>
             ))}
           </g>
@@ -795,15 +1289,6 @@ function toSmoothPath(points: number[][]) {
     d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2[0]} ${p2[1]}`;
   }
   return d;
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-5">
-      <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">{label}</p>
-      {children}
-    </div>
-  );
 }
 
 function StatCard({
@@ -857,7 +1342,7 @@ function EnergyGlyph({
   type,
   className,
 }: {
-  type: "bolt" | "heat" | "air" | "water";
+  type: "bolt" | "heat" | "air" | "water" | "steam";
   className?: string;
 }) {
   if (type === "heat") {
@@ -881,6 +1366,13 @@ function EnergyGlyph({
       </svg>
     );
   }
+  if (type === "steam") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M5 18h14M8 18V9l4-4 4 4v9M9.5 12h5M9.5 15h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <path d="M13 2 4.5 13.5h6.2L9.2 22 19.5 10h-6.2L13 2Z" />
@@ -888,10 +1380,11 @@ function EnergyGlyph({
   );
 }
 
-function FunnelIcon({ className }: { className?: string }) {
+function SearchIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M4 6h16l-6 7v5l-4 2v-7L4 6Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 16.5 20 20.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

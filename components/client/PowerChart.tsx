@@ -18,10 +18,15 @@ function toggleIn<T>(list: T[], value: T) {
   return [...list, value];
 }
 
-function timeLabel(index: number, kind: "full" | "min" | "sec") {
+function timeLabel(index: number, kind: "full" | "min" | "sec" | "tooltip") {
   const d = new Date(T0 + (index / (N - 1)) * 240000);
+  const yyyy = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  if (kind === "tooltip") return `${yyyy}-${mo}-${dd} ${hh}:${mm}:${ss}`;
   if (kind === "full") return `1-27(Tue) ${hh}:${mm}`;
   if (kind === "min") return `${hh}:${mm}`;
   return kind === "sec" ? "30" : "00";
@@ -72,10 +77,14 @@ export function PowerChart({ seed }: { seed: number }) {
   const [topCh, setTopCh] = useState<Channel[]>(["sum"]);
   const [botCh, setBotCh] = useState<Channel[]>(["sum"]);
   const [pq, setPq] = useState<PqKind[]>(["P"]);
-  const [aggs, setAggs] = useState<Agg[]>(["AVG"]);
+  const [aggs] = useState<Agg[]>(["AVG"]);
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
+  const [resolution, setResolution] = useState<"Phút" | "Giờ" | "Ngày" | "Tuần" | "Tháng" | "Năm">(
+    "Phút",
+  );
+  const [date, setDate] = useState("2026-07-19");
 
   const pSeries = useMemo(
     () =>
@@ -124,8 +133,8 @@ export function PowerChart({ seed }: { seed: number }) {
   const yLabel = pq.length === 1 ? `${pq[0]} [kW]` : "P/S/Q [kW]";
 
   return (
-    <section className="mt-4 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
+      <div className="mb-3 flex flex-wrap items-start gap-4">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-slate-600">
             <QtyGroup
@@ -158,88 +167,103 @@ export function PowerChart({ seed }: { seed: number }) {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-3 rounded border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600">
-          {AGGS.map((agg) => (
-            <Check key={agg} checked={aggs.includes(agg)} onChange={() => setAggs((list) => toggleIn(list, agg))}>
-              {agg}
-            </Check>
-          ))}
-        </div>
       </div>
 
-      <div className="flex items-stretch gap-3">
-        <div className="min-w-0 flex-1 overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-          <div className="relative h-4 border-b border-slate-300 bg-slate-50">
-            <div
-              className="absolute inset-y-0 bg-[#d7e2ef]"
-              style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
-            />
-            <input
-              type="range"
-              min={0}
-              max={N - 21}
-              value={viewWin.start}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                setViewWin({ start: next, end: Math.min(N - 1, next + span) });
-              }}
-              className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
-            />
-            <span
-              className="pointer-events-none absolute -top-px text-[10px] leading-none text-[#1a73e8]"
-              style={{ left: `calc(${left}% - 5px)` }}
-            >
-              ▼
-            </span>
-            <span
-              className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
-              style={{ left: `calc(${left + width}% - 5px)` }}
-            >
-              ▲
-            </span>
+      <div className="-mx-1 min-w-0 overflow-hidden rounded-[2px] border border-slate-400 bg-white sm:-mx-2">
+        <div className="relative h-4 border-b border-slate-300 bg-slate-50">
+          <div
+            className="absolute inset-y-0 bg-[#d7e2ef]"
+            style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
+          />
+          <input
+            type="range"
+            min={0}
+            max={N - 21}
+            value={viewWin.start}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setViewWin({ start: next, end: Math.min(N - 1, next + span) });
+            }}
+            className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
+          />
+          <span
+            className="pointer-events-none absolute -top-px text-[10px] leading-none text-[#1a73e8]"
+            style={{ left: `calc(${left}% - 5px)` }}
+          >
+            ▼
+          </span>
+          <span
+            className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
+            style={{ left: `calc(${left + width}% - 5px)` }}
+          >
+            ▲
+          </span>
+        </div>
+        <PowerPane
+          title={yLabel}
+          series={pSeries}
+          viewWin={viewWin}
+          hover={crosshair ? hover : null}
+          onHover={setHover}
+          domain={[300, 400]}
+          ticks={[300, 350, 400]}
+          formatTick={(v) => String(v)}
+        />
+        <div className="h-px bg-slate-400" />
+        <PowerPane
+          title={botQty}
+          series={dpfSeries}
+          viewWin={viewWin}
+          hover={crosshair ? hover : null}
+          onHover={setHover}
+          domain={[-0.988, -1]}
+          ticks={[-0.99, -0.995, -1]}
+          formatTick={(v) => (v === -1 ? "±1.000" : v.toFixed(3))}
+          axis
+        />
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-1">
+          <ToolBtn label="Phóng to" onClick={zoomIn}>
+            <ZoomIcon plus />
+          </ToolBtn>
+          <ToolBtn label="Thu nhỏ" onClick={zoomOut}>
+            <ZoomIcon plus={false} />
+          </ToolBtn>
+          <ToolBtn label="Vừa khung" onClick={() => setViewWin({ start: 0, end: N - 1 })}>
+            <FitIcon />
+          </ToolBtn>
+          <ToolBtn label="Con trỏ" active={crosshair} onClick={() => setCrosshair((v) => !v)}>
+            <CursorIcon />
+          </ToolBtn>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
+            {(["Phút", "Giờ", "Ngày", "Tuần", "Tháng", "Năm"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setResolution(item)}
+                className={`h-9 px-2.5 text-[12px] font-medium sm:px-3 ${
+                  resolution === item
+                    ? "bg-[#5aa3d9] text-white"
+                    : "text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
           </div>
-          <PowerPane
-            title={yLabel}
-            series={pSeries}
-            viewWin={viewWin}
-            hover={crosshair ? hover : null}
-            onHover={setHover}
-            domain={[300, 400]}
-            ticks={[300, 350, 400]}
-            formatTick={(v) => String(v)}
-          />
-          <div className="h-px bg-slate-400" />
-          <PowerPane
-            title={botQty}
-            series={dpfSeries}
-            viewWin={viewWin}
-            hover={crosshair ? hover : null}
-            onHover={setHover}
-            domain={[-0.988, -1]}
-            ticks={[-0.99, -0.995, -1]}
-            formatTick={(v) => (v === -1 ? "±1.000" : v.toFixed(3))}
-            axis
-          />
+          <label className="inline-flex h-9 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
+            />
+          </label>
         </div>
-        <div className="flex w-[128px] shrink-0 flex-col justify-around py-8 text-[11px] leading-5">
-          <Legend series={pSeries} hover={crosshair ? hover : null} digits={1} />
-          <Legend series={dpfSeries} hover={crosshair ? hover : null} digits={4} />
-        </div>
-      </div>
-
-      <div className="mt-2 flex w-[68px] flex-wrap gap-1">
-        <ToolBtn label="Phóng to" onClick={zoomIn}>
-          <ZoomIcon plus />
-        </ToolBtn>
-        <ToolBtn label="Thu nhỏ" onClick={zoomOut}>
-          <ZoomIcon plus={false} />
-        </ToolBtn>
-        <ToolBtn label="Vừa khung" onClick={() => setViewWin({ start: 0, end: N - 1 })}>
-          <FitIcon />
-        </ToolBtn>
-        <ToolBtn label="Con trỏ" active={crosshair} onClick={() => setCrosshair((v) => !v)}>
-          <CursorIcon />
-        </ToolBtn>
       </div>
     </section>
   );
@@ -319,10 +343,14 @@ function PowerPane({
 }) {
   const W = 820;
   const H = 240;
-  const pad = { l: 58, r: 10, t: 12, b: axis ? 40 : 12 };
+  const pad = { l: 58, r: 10, t: 12, b: axis ? 40 : 28 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const [yMin, yMax] = domain;
+  const filterId = `pwr-tip-${title.replace(/[^a-z0-9]/gi, "")}`;
+  const tipW = 168;
+  const tipH = 22 + Math.max(series.length, 1) * 18;
+  const digits = Math.abs(yMax - yMin) < 1 ? 3 : 1;
   const xAt = (i: number) =>
     pad.l + ((i - viewWin.start) / Math.max(1, viewWin.end - viewWin.start)) * innerW;
   const yAt = (v: number) => pad.t + ((yMax - v) / (yMax - yMin || 1)) * innerH;
@@ -383,15 +411,82 @@ function PowerPane({
           />
         );
       })}
+      <defs>
+        <filter id={filterId} x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.12" />
+        </filter>
+      </defs>
       {hover != null ? (
-        <line
-          x1={xAt(hover)}
-          x2={xAt(hover)}
-          y1={pad.t}
-          y2={H - pad.b}
-          stroke="#94a3b8"
-          strokeDasharray="3 3"
-        />
+        <g pointerEvents="none">
+          <line
+            x1={xAt(hover)}
+            x2={xAt(hover)}
+            y1={pad.t}
+            y2={H - pad.b}
+            stroke="#64748b"
+            strokeDasharray="4 3"
+          />
+          {series.map((s) => (
+            <circle
+              key={`${s.key}-dot`}
+              cx={xAt(hover)}
+              cy={yAt(s.values[hover])}
+              r="3.5"
+              fill={s.color}
+              stroke="white"
+              strokeWidth="1.5"
+            />
+          ))}
+          <rect
+            x={Math.min(Math.max(xAt(hover) - 68, pad.l), W - pad.r - 136)}
+            y={H - pad.b + 2}
+            width="136"
+            height="16"
+            rx="2"
+            fill="#334155"
+          />
+          <text
+            x={Math.min(Math.max(xAt(hover), pad.l + 68), W - pad.r - 68)}
+            y={H - pad.b + 13}
+            textAnchor="middle"
+            fill="white"
+            fontSize="10"
+            fontWeight="600"
+          >
+            {timeLabel(hover, "tooltip")}
+          </text>
+          {(() => {
+            const hx = xAt(hover);
+            const tipX = hx + 12 + tipW > W - pad.r - 4 ? hx - tipW - 12 : hx + 12;
+            const tipY = Math.min(pad.t + 8, H - pad.b - tipH - 4);
+            return (
+              <g transform={`translate(${Math.max(pad.l, tipX)}, ${Math.max(pad.t, tipY)})`}>
+                <rect
+                  width={tipW}
+                  height={tipH}
+                  rx="6"
+                  fill="white"
+                  stroke="#e2e8f0"
+                  filter={`url(#${filterId})`}
+                />
+                <text x="10" y="16" className="fill-slate-600" fontSize="11" fontWeight="600">
+                  {timeLabel(hover, "tooltip")}
+                </text>
+                {series.map((s, i) => (
+                  <g key={`${s.key}-tip`} transform={`translate(10, ${28 + i * 18})`}>
+                    <circle cx="4" cy="-3" r="3.5" fill={s.color} />
+                    <text x="14" y="0" fontSize="11" fill="#475569">
+                      {s.name}
+                    </text>
+                    <text x={tipW - 12} y="0" textAnchor="end" fontSize="11" fontWeight="700" fill="#0f172a">
+                      {s.values[hover].toFixed(digits)}
+                    </text>
+                  </g>
+                ))}
+              </g>
+            );
+          })()}
+        </g>
       ) : null}
       {timeTicks.map((tick) => (
         <text

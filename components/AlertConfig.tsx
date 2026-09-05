@@ -43,10 +43,14 @@ const presetCategories: Category[] = [
   { id: "imbalance", label: "Mất cân bằng pha", icon: ImbalanceIcon },
 ];
 
-const extraCategoryPool: Category[] = [
+const extraCategories: Category[] = [
   { id: "temperature", label: "Nhiệt độ", icon: ThermoIcon },
   { id: "quality", label: "Chất lượng điện", icon: QualityIcon },
+  { id: "water", label: "Nước", icon: DropIcon },
+  { id: "steam", label: "Hơi", icon: SteamIcon },
 ];
+
+const catalogCategories: Category[] = [...presetCategories, ...extraCategories];
 
 const initialAlarms: Record<string, Alarm[]> = {
   energy: [
@@ -91,20 +95,47 @@ const initialAlarms: Record<string, Alarm[]> = {
     {
       id: "u1",
       alarmId: "1",
-      name: "Điện áp pha A",
-      description: "Ngưỡng theo dõi điện áp pha L1-N",
-      threshold: "230",
+      name: "Quá áp pha",
+      description: "Cảnh báo khi điện áp pha vượt ngưỡng an toàn",
+      threshold: "240",
       unit: "V",
       current: "228.6 V",
     },
     {
       id: "u2",
       alarmId: "2",
+      name: "Thấp áp pha",
+      description: "Cảnh báo khi điện áp pha giảm dưới mức cho phép",
+      threshold: "200",
+      unit: "V",
+      current: "228.6 V",
+    },
+    {
+      id: "u3",
+      alarmId: "3",
       name: "Dòng điện pha A",
       description: "Ngưỡng theo dõi dòng pha L1",
       threshold: "80",
       unit: "A",
       current: "41.8 A",
+    },
+    {
+      id: "u4",
+      alarmId: "4",
+      name: "Dòng điện pha B",
+      description: "Ngưỡng theo dõi dòng pha L2",
+      threshold: "80",
+      unit: "A",
+      current: "39.6 A",
+    },
+    {
+      id: "u5",
+      alarmId: "5",
+      name: "Dòng điện pha C",
+      description: "Ngưỡng theo dõi dòng pha L3",
+      threshold: "80",
+      unit: "A",
+      current: "42.1 A",
     },
   ],
   frequency: [
@@ -187,7 +218,112 @@ const initialAlarms: Record<string, Alarm[]> = {
       current: "4.1 %",
     },
   ],
+  temperature: [
+    {
+      id: "t1",
+      alarmId: "1",
+      name: "Nhiệt độ cao",
+      description: "Cảnh báo khi nhiệt độ thiết bị/môi trường vượt ngưỡng",
+      threshold: "80",
+      unit: "°C",
+      current: "46.2 °C",
+    },
+    {
+      id: "t2",
+      alarmId: "2",
+      name: "Nhiệt độ thấp",
+      description: "Cảnh báo khi nhiệt độ giảm dưới mức vận hành",
+      threshold: "5",
+      unit: "°C",
+      current: "46.2 °C",
+    },
+  ],
+  quality: [
+    {
+      id: "q1",
+      alarmId: "1",
+      name: "Sụt áp (Voltage sag)",
+      description: "Cảnh báo khi điện áp sụt đột ngột dưới ngưỡng",
+      threshold: "10",
+      unit: "%",
+      current: "2.4 %",
+    },
+    {
+      id: "q2",
+      alarmId: "2",
+      name: "Tăng áp (Voltage swell)",
+      description: "Cảnh báo khi điện áp tăng đột ngột vượt ngưỡng",
+      threshold: "10",
+      unit: "%",
+      current: "1.1 %",
+    },
+    {
+      id: "q3",
+      alarmId: "3",
+      name: "Flicker",
+      description: "Cảnh báo khi độ nhấp nháy điện áp vượt tiêu chuẩn",
+      threshold: "1",
+      unit: "Pst",
+      current: "0.32 Pst",
+    },
+  ],
+  water: [
+    {
+      id: "w1",
+      alarmId: "1",
+      name: "Áp lực thấp",
+      description: "Cảnh báo khi áp lực nước giảm dưới mức cấp",
+      threshold: "2.0",
+      unit: "bar",
+      current: "3.1 bar",
+    },
+    {
+      id: "w2",
+      alarmId: "2",
+      name: "Lưu lượng vượt ngưỡng",
+      description: "Cảnh báo khi lưu lượng nước vượt định mức",
+      threshold: "50",
+      unit: "m³/h",
+      current: "18.4 m³/h",
+    },
+  ],
+  steam: [
+    {
+      id: "s1",
+      alarmId: "1",
+      name: "Áp suất hơi cao",
+      description: "Cảnh báo khi áp suất hơi vượt ngưỡng an toàn",
+      threshold: "10",
+      unit: "bar",
+      current: "6.8 bar",
+    },
+    {
+      id: "s2",
+      alarmId: "2",
+      name: "Nhiệt độ hơi thấp",
+      description: "Cảnh báo khi nhiệt độ hơi giảm dưới mức công nghệ",
+      threshold: "160",
+      unit: "°C",
+      current: "178 °C",
+    },
+  ],
 };
+
+function defaultAlarmsFor(categoryId: string, label?: string): Alarm[] {
+  return (
+    initialAlarms[categoryId] ?? [
+      {
+        id: `${categoryId}-1`,
+        alarmId: "1",
+        name: label ? `Cảnh báo ${label}` : "",
+        description: "Mô tả điều kiện kích hoạt cảnh báo",
+        threshold: "0",
+        unit: "V",
+        current: "--.-",
+      },
+    ]
+  );
+}
 
 const allHistory: HistoryItem[] = [
   {
@@ -215,13 +351,14 @@ export function AlertConfig() {
   const [activeId, setActiveId] = useState<CategoryId>("energy");
   const [alarmsByCategory, setAlarmsByCategory] = useState(initialAlarms);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   const active = categories.find((item) => item.id === activeId) ?? categories[0];
   const alarms = alarmsByCategory[active?.id ?? "energy"] ?? [];
   const history = showAllHistory ? allHistory : allHistory.slice(0, 1);
-
-  const nextExtra = useMemo(
-    () => extraCategoryPool.find((item) => !categories.some((cat) => cat.id === item.id)),
+  const unusedCatalog = useMemo(
+    () => catalogCategories.filter((item) => !categories.some((cat) => cat.id === item.id)),
     [categories],
   );
 
@@ -256,48 +393,46 @@ export function AlertConfig() {
   function removeCategory(id: CategoryId) {
     setCategories((current) => {
       const next = current.filter((item) => item.id !== id);
-      if (activeId === id) setActiveId(next[0]?.id ?? "energy");
+      if (activeId === id) setActiveId(next[0]?.id ?? "");
       return next;
     });
   }
 
-  function addCategory() {
-    if (!nextExtra) return;
-    setCategories((current) => [...current, nextExtra]);
-    setAlarmsByCategory((current) =>
-      current[nextExtra.id]
-        ? current
-        : {
-            ...current,
-            [nextExtra.id]: [
-              {
-                id: `${nextExtra.id}-1`,
-                alarmId: "1",
-                name: `Cảnh báo ${nextExtra.label}`,
-                description: "Ngưỡng cảnh báo mặc định",
-                threshold: "0",
-                unit: nextExtra.id === "temperature" ? "°C" : "%",
-                current: "--.-",
-              },
-            ],
-          },
+  function addExistingCategory(category: Category) {
+    setCategories((current) =>
+      current.some((item) => item.id === category.id) ? current : [...current, category],
     );
-    setActiveId(nextExtra.id);
+    setAlarmsByCategory((current) =>
+      current[category.id] ? current : { ...current, [category.id]: defaultAlarmsFor(category.id, category.label) },
+    );
+    setActiveId(category.id);
+    setAddingCategory(false);
+    setNewCategoryName("");
   }
 
-  if (!active) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
-        Chưa có nhóm cảnh báo. Thêm mới để bắt đầu cấu hình.
-      </div>
-    );
+  function addCustomCategory() {
+    const label = newCategoryName.trim();
+    if (!label) return;
+    const exists = categories.find((item) => item.label.toLowerCase() === label.toLowerCase());
+    if (exists) {
+      setActiveId(exists.id);
+      setAddingCategory(false);
+      setNewCategoryName("");
+      return;
+    }
+    const fromCatalog = catalogCategories.find((item) => item.label.toLowerCase() === label.toLowerCase());
+    if (fromCatalog) {
+      addExistingCategory(fromCatalog);
+      return;
+    }
+    addExistingCategory({ id: `custom-${Date.now()}`, label, icon: TagIcon });
   }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
         {categories.map((category) => {
-          const selected = category.id === active.id;
+          const selected = category.id === active?.id;
           const Icon = category.icon;
           return (
             <div
@@ -331,16 +466,69 @@ export function AlertConfig() {
             </div>
           );
         })}
-        <button
-          type="button"
-          onClick={addCategory}
-          disabled={!nextExtra}
-          className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-dashed border-slate-300 bg-white px-3 text-sm font-medium text-slate-500 hover:border-[#1a73e8] hover:text-[#1a73e8] disabled:opacity-40"
-        >
-          <span className="text-base leading-none">+</span>
-          Thêm mới
-        </button>
+        {addingCategory ? (
+          <div className="flex min-w-[280px] flex-1 flex-wrap items-center gap-2 rounded-xl border border-dashed border-[#1a73e8] bg-[#f3f8ff] p-2">
+            {unusedCatalog.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => addExistingCategory(item)}
+                className="inline-flex h-8 items-center rounded-lg bg-white px-2.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:text-[#1a73e8] hover:ring-[#1a73e8]"
+              >
+                {item.label}
+              </button>
+            ))}
+            <input
+              autoFocus
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addCustomCategory();
+                if (e.key === "Escape") {
+                  setAddingCategory(false);
+                  setNewCategoryName("");
+                }
+              }}
+              placeholder="Tên nhóm cảnh báo mới"
+              className="h-8 min-w-[160px] flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:border-[#1a73e8]"
+            />
+            <button
+              type="button"
+              onClick={addCustomCategory}
+              disabled={!newCategoryName.trim()}
+              className="h-8 rounded-lg bg-[#1a73e8] px-3 text-xs font-medium text-white disabled:opacity-40"
+            >
+              Thêm
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddingCategory(false);
+                setNewCategoryName("");
+              }}
+              className="h-8 rounded-lg px-2 text-xs font-medium text-slate-500 hover:bg-white"
+            >
+              Hủy
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAddingCategory(true)}
+            className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-dashed border-slate-300 bg-white px-3 text-sm font-medium text-slate-500 hover:border-[#1a73e8] hover:text-[#1a73e8]"
+          >
+            <span className="text-base leading-none">+</span>
+            Thêm mới
+          </button>
+        )}
       </div>
+
+      {!active ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
+          Chưa có nhóm cảnh báo. Thêm mới để bắt đầu cấu hình.
+        </div>
+      ) : (
+        <>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -450,6 +638,8 @@ export function AlertConfig() {
           ))}
         </ul>
       </section>
+        </>
+      )}
     </div>
   );
 }
@@ -539,6 +729,31 @@ function QualityIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
       <path d="M8 12.5 11 15.5 16.5 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DropIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M12 3s6 7 6 11a6 6 0 1 1-12 0c0-4 6-11 6-11Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SteamIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M5 18h14M8 18V9l4-4 4 4v9M9.5 12h5M9.5 15h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TagIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M4 12V5h7l9 9-7 7-9-9Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="8" cy="8" r="1.2" fill="currentColor" />
     </svg>
   );
 }

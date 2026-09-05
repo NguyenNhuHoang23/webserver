@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import type { Project } from "@/lib/projects";
+import { loadProjects, type Project } from "@/lib/projects";
 
 const navItems = [
   { href: "", label: "Trang chủ", icon: HomeIcon },
@@ -23,78 +24,87 @@ export function ClientShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const [resolved, setResolved] = useState(project);
   const base = `/du-an/${project.id}`;
+
+  useEffect(() => {
+    const stored = loadProjects().find((item) => item.id === project.id);
+    setResolved(stored ?? project);
+  }, [project]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#e8edf3]">
-      <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5">
+      <header className="flex min-h-[52px] shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 sm:px-4">
         <Link
           href="/"
-          title="Quay lại danh sách dự án"
-          className="flex items-center gap-2.5"
+          title={resolved.customer}
+          className="flex min-w-0 max-w-[min(280px,32vw)] shrink items-center gap-2 sm:max-w-[240px] lg:max-w-[280px]"
         >
-          <FactoryIcon className="h-8 w-8 text-[#1a5fbe]" />
-          <span className="text-[20px] font-bold tracking-wide text-[#1a5fbe] uppercase">
-            {project.customer}
+          <FactoryIcon className="h-7 w-7 shrink-0 text-[#1a5fbe] sm:h-8 sm:w-8" />
+          <span className="truncate text-[15px] font-bold tracking-wide text-[#1a5fbe] uppercase sm:text-[17px]">
+            {resolved.customer}
           </span>
         </Link>
-        <div className="flex items-center gap-5">
+
+        <nav
+          className="flex min-h-[52px] min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto"
+          aria-label="Điều hướng dự án"
+        >
+          {navItems.map((item) => {
+            const href = `${base}${item.href}`;
+            const active =
+              item.href === ""
+                ? pathname === base
+                : pathname === href || pathname.startsWith(`${href}/`);
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.href || "home"}
+                href={href}
+                title={item.label}
+                className={`flex shrink-0 items-center gap-1.5 border-b-[3px] px-2.5 text-[12.5px] font-medium whitespace-nowrap sm:px-3 sm:text-[13px] ${
+                  active
+                    ? "border-[#1a73e8] text-[#1a73e8]"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Icon className="h-4 w-4 shrink-0 sm:h-[17px] sm:w-[17px]" />
+                <span className="hidden md:inline">{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 sm:h-9 sm:w-9"
             aria-label="Thông báo"
           >
             <BellIcon className="h-5 w-5" />
           </button>
-          <div className="flex items-center gap-3">
-            <div className="text-right leading-tight">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden text-right leading-tight sm:block">
               <p className="text-sm font-semibold text-slate-800">Admin User</p>
-              <p className="text-[11px] tracking-wide text-slate-400">
-                HỆ THỐNG EMS
-              </p>
+              <p className="text-[11px] tracking-wide text-slate-400">HỆ THỐNG EMS</p>
             </div>
             <img
               src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=80&h=80&fit=crop&crop=faces"
               alt="Ảnh đại diện"
-              className="h-10 w-10 rounded-full object-cover"
+              className="h-8 w-8 rounded-full object-cover sm:h-9 sm:w-9"
             />
           </div>
         </div>
       </header>
 
-      <nav className="flex h-[52px] shrink-0 items-stretch gap-1 overflow-x-auto border-b border-slate-200 bg-white px-4">
-        {navItems.map((item) => {
-          const href = `${base}${item.href}`;
-          const active =
-            item.href === ""
-              ? pathname === base
-              : pathname === href || pathname.startsWith(`${href}/`);
-          const Icon = item.icon;
-
-          return (
-            <Link
-              key={item.href || "home"}
-              href={href}
-              className={`flex shrink-0 items-center gap-2 border-b-[3px] px-3.5 text-[13.5px] font-medium ${
-                active
-                  ? "border-[#1a73e8] text-[#1a73e8]"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              <Icon className="h-[18px] w-[18px]" />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
       <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
 
-      <footer className="flex h-11 shrink-0 items-center justify-between gap-4 border-t border-slate-200 bg-white px-5 text-[11px] text-slate-400">
+      <footer className="flex h-10 shrink-0 items-center justify-between gap-4 border-t border-slate-200 bg-white px-4 text-[11px] text-slate-400 sm:px-5">
         <p className="truncate">
-          © 2024 {project.customer} EMS. Data Source: Scada System Node-04
+          © 2024 {resolved.customer} EMS. Data Source: Scada System Node-04
         </p>
-        <div className="hidden items-center gap-5 md:flex">
+        <div className="hidden items-center gap-5 lg:flex">
           <a href="#" className="hover:text-slate-600">
             Privacy Policy
           </a>
@@ -105,7 +115,7 @@ export function ClientShell({
             Technical Support
           </a>
         </div>
-        <p className="flex shrink-0 items-center gap-1.5">
+        <p className="hidden shrink-0 items-center gap-1.5 sm:flex">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
           Cập nhật lần cuối: 2026-07-19 09:42:23
         </p>

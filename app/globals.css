@@ -28,6 +28,15 @@ body {
   cursor: grabbing;
 }
 
+.diagram-flow .react-flow__handle {
+  z-index: 2;
+}
+
+.diagram-flow .react-flow__edge.selected .react-flow__edge-path,
+.diagram-flow .react-flow__edge:focus .react-flow__edge-path {
+  stroke: #1a73e8;
+}
+
 .diagram-flow .react-flow__attribution {
   display: none;
 }

@@ -34,7 +34,9 @@ export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!h-2 !w-2 !border-0 !bg-slate-300"
+        id="parent"
+        className="!-top-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#1a73e8]"
+        title="Nối từ điểm cha"
       />
 
       <div className="mb-2 flex items-start justify-between text-slate-300">
@@ -91,32 +93,46 @@ export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!h-2 !w-2 !border-0 !bg-slate-300"
+        id="child"
+        className="!-bottom-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#1a73e8]"
+        title="Kéo xuống để gắn điểm con"
       />
     </div>
   );
 }
 
-export function JunctionNode(_props: NodeProps<JunctionFlowNode>) {
+export function JunctionNode({ selected }: NodeProps<JunctionFlowNode>) {
   return (
-    <div className="h-3 w-3 rounded-full bg-slate-300">
+    <div
+      className={`relative flex h-8 w-8 items-center justify-center rounded-md border-2 bg-white shadow-sm ${
+        selected ? "border-[#1a73e8] ring-2 ring-[#1a73e8]/25" : "border-slate-300"
+      }`}
+      title="Điểm nhánh — kéo để chỉnh cây cha-con"
+    >
+      <span className="h-2 w-2 rounded-full bg-slate-400" />
       <Handle
         id="in"
         type="target"
         position={Position.Top}
-        className="!h-2 !w-2 !border-0 !bg-slate-300"
+        className="!-top-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#64748b]"
       />
       <Handle
         id="left"
         type="source"
         position={Position.Left}
-        className="!h-2 !w-2 !border-0 !bg-slate-300"
+        className="!-left-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#64748b]"
       />
       <Handle
         id="right"
         type="source"
         position={Position.Right}
-        className="!h-2 !w-2 !border-0 !bg-slate-300"
+        className="!-right-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#64748b]"
+      />
+      <Handle
+        id="out"
+        type="source"
+        position={Position.Bottom}
+        className="!-bottom-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#64748b]"
       />
     </div>
   );

@@ -9,30 +9,24 @@ import {
   todaySyncLabel,
   typeLabelFromDeviceType,
   upsertDevice,
+  type DeviceExtraField,
+  type DeviceRegister,
 } from "@/lib/devices";
 
-type ExtraField = { id: string; label: string; value: string };
-type RegisterRow = {
-  id: string;
-  address: string;
-  name: string;
-  dataType: string;
-  multiplier: string;
-};
-
-const deviceTypes = [
-  "Đồng hồ điện (Power Meter)",
-  "Đồng hồ nước (Water Meter)",
-  "Cảm biến nhiệt",
-  "Đồng hồ hơi",
-  "Inverter PV",
-];
+type ExtraField = DeviceExtraField;
+type RegisterRow = DeviceRegister;
 
 const protocols = ["Modbus TCP", "Modbus RTU", "M-Bus", "BACnet", "MQTT"];
 const dataTypes = ["UINT16", "UINT32", "INT32", "FLOAT32", "FLOAT64"];
 
 function nextId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function emptyRegisterRows(): RegisterRow[] {
+  return [
+    { id: "r1", address: "", name: "", dataType: "FLOAT32", multiplier: "1.0" },
+  ];
 }
 
 export function AddCustomDeviceForm() {
@@ -42,7 +36,7 @@ export function AddCustomDeviceForm() {
 
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
-  const [deviceType, setDeviceType] = useState(deviceTypes[0]);
+  const [deviceType, setDeviceType] = useState("");
   const [protocol, setProtocol] = useState(protocols[0]);
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
@@ -50,29 +44,7 @@ export function AddCustomDeviceForm() {
   const [existingName, setExistingName] = useState("");
   const [existingSn, setExistingSn] = useState("");
   const [extraFields, setExtraFields] = useState<ExtraField[]>([]);
-  const [rows, setRows] = useState<RegisterRow[]>([
-    {
-      id: "r1",
-      address: "3001",
-      name: "Tổng năng lượng hữu công",
-      dataType: "UINT32",
-      multiplier: "0.1",
-    },
-    {
-      id: "r2",
-      address: "3005",
-      name: "Điện áp pha L1-N",
-      dataType: "FLOAT32",
-      multiplier: "1.0",
-    },
-    {
-      id: "r3",
-      address: "3009",
-      name: "Dòng điện pha A",
-      dataType: "FLOAT32",
-      multiplier: "0.001",
-    },
-  ]);
+  const [rows, setRows] = useState<RegisterRow[]>(emptyRegisterRows());
 
   const lastEdited = useMemo(() => "Vừa xong", []);
 
@@ -90,13 +62,13 @@ export function AddCustomDeviceForm() {
     setExistingName(existing.name);
     setExistingSn(existing.sn);
     setBrand(existing.brand);
-    setModel(existing.brandModel.replace(`${existing.brand} `, ""));
+    setModel(existing.brandModel.replace(`${existing.brand} `, "").trim() || existing.name);
     setProtocol(existing.protocol || protocols[0]);
-    const matchedType =
-      deviceTypes.find((type) =>
-        type.toLowerCase().includes(existing.type.toLowerCase().split(" ")[0]),
-      ) ?? deviceTypes[0];
-    setDeviceType(matchedType);
+    setDeviceType(existing.type);
+    setNotes(existing.notes ?? "");
+    setPreview(existing.image ?? null);
+    setExtraFields(existing.extraFields ?? []);
+    setRows(existing.registers?.length ? existing.registers : emptyRegisterRows());
   }, [editingId]);
 
   function addExtraField() {
@@ -139,14 +111,18 @@ export function AddCustomDeviceForm() {
       sn:
         isEdit && existingSn
           ? existingSn
-          : `SN: ${brandName.slice(0, 2).toUpperCase()}-${String(Date.now()).slice(-6)}`,
+          : `TYPE: ${brandName.slice(0, 2).toUpperCase()}-${modelName.slice(0, 8).toUpperCase()}`,
       brandModel,
       brand: brandName,
       type: typeLabelFromDeviceType(deviceType),
-      kind: kindFromDeviceType(deviceType),
+      kind: kindFromDeviceType(deviceType || modelName),
       status: "active",
       lastSync: todaySyncLabel(),
       protocol,
+      notes: notes.trim(),
+      image: preview ?? undefined,
+      extraFields,
+      registers: rows.filter((row) => row.address.trim() || row.name.trim()),
     });
 
     router.push("/thiet-bi");
@@ -170,10 +146,10 @@ export function AddCustomDeviceForm() {
         </Link>
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            {isEdit ? "Cập nhật thiết bị tùy chỉnh" : "Thêm mới Thiết bị Tùy chỉnh"}
+            {isEdit ? "Cập nhật loại đồng hồ" : "Thêm loại đồng hồ"}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Cấu hình thông số kỹ thuật và bản đồ dữ liệu cho thiết bị mới.
+            Cấu hình chung cho loại đồng hồ nhận dữ liệu từ gateway, dùng lại cho nhiều dự án.
           </p>
         </div>
       </div>
@@ -211,15 +187,12 @@ export function AddCustomDeviceForm() {
             />
           </Field>
           <Field label="Loại thiết bị">
-            <select
+            <input
               value={deviceType}
               onChange={(e) => setDeviceType(e.target.value)}
+              placeholder="VD: Đồng hồ điện 3 pha, cảm biến lưu lượng, inverter..."
               className="input"
-            >
-              {deviceTypes.map((type) => (
-                <option key={type}>{type}</option>
-              ))}
-            </select>
+            />
           </Field>
           <Field label="Giao thức kết nối">
             <select
@@ -233,36 +206,46 @@ export function AddCustomDeviceForm() {
             </select>
           </Field>
           {extraFields.map((field) => (
-            <Field key={field.id} label={field.label}>
-              <div className="flex gap-2">
+            <div key={field.id} className="sm:col-span-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] items-end gap-2">
+              <Field label="TÊN TRƯỜNG">
+                <input
+                  value={field.label}
+                  onChange={(e) =>
+                    setExtraFields((current) =>
+                      current.map((item) =>
+                        item.id === field.id ? { ...item, label: e.target.value } : item,
+                      ),
+                    )
+                  }
+                  placeholder="VD: Điện áp định mức"
+                  className="input"
+                />
+              </Field>
+              <Field label="GIÁ TRỊ">
                 <input
                   value={field.value}
                   onChange={(e) =>
                     setExtraFields((current) =>
                       current.map((item) =>
-                        item.id === field.id
-                          ? { ...item, value: e.target.value }
-                          : item,
+                        item.id === field.id ? { ...item, value: e.target.value } : item,
                       ),
                     )
                   }
                   placeholder="Nhập giá trị"
                   className="input"
                 />
-                <button
-                  type="button"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
-                  onClick={() =>
-                    setExtraFields((current) =>
-                      current.filter((item) => item.id !== field.id),
-                    )
-                  }
-                  aria-label="Xóa trường"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </button>
-              </div>
-            </Field>
+              </Field>
+              <button
+                type="button"
+                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
+                onClick={() =>
+                  setExtraFields((current) => current.filter((item) => item.id !== field.id))
+                }
+                aria-label="Xóa trường"
+              >
+                <TrashIcon className="h-4 w-4" />
+              </button>
+            </div>
           ))}
         </div>
       </section>
@@ -271,7 +254,7 @@ export function AddCustomDeviceForm() {
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-sm font-bold tracking-wide text-slate-700 uppercase">
             <DocIcon className="h-4 w-4 text-[#1a73e8]" />
-            Bản đồ thanh ghi / Điểm dữ liệu
+            Hàm nhận dữ liệu từ gateway
           </h2>
           <button
             type="button"
@@ -281,6 +264,9 @@ export function AddCustomDeviceForm() {
             + THÊM DÒNG
           </button>
         </div>
+        <p className="mb-4 text-sm text-slate-500">
+          Khai báo thanh ghi/điểm dữ liệu để hệ thống đọc từ gateway. Cấu hình này dùng chung cho mọi dự án gắn loại đồng hồ này.
+        </p>
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px] text-left text-sm">
@@ -360,7 +346,7 @@ export function AddCustomDeviceForm() {
               <CameraIcon className="mb-3 h-8 w-8 text-slate-400" />
             )}
             <span className="text-xs font-bold tracking-wide text-slate-600">
-              TẢI ẢNH LÊN
+              ẢNH ĐỒNG HỒ
             </span>
             <input
               type="file"
@@ -369,13 +355,14 @@ export function AddCustomDeviceForm() {
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                const url = URL.createObjectURL(file);
-                setPreview(url);
+                const reader = new FileReader();
+                reader.onload = () => setPreview(String(reader.result ?? ""));
+                reader.readAsDataURL(file);
               }}
             />
           </label>
           <p className="mt-3 text-center text-xs leading-5 text-slate-400">
-            Thêm ảnh thiết bị để nhân viên hiện trường dễ dàng nhận diện.
+            Ảnh mẫu của loại đồng hồ để dễ nhận diện. Không phải ảnh hiện trường của một dự án.
           </p>
         </section>
 
@@ -388,7 +375,7 @@ export function AddCustomDeviceForm() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={7}
-            placeholder="Chỉ định các ràng buộc đấu nối hoặc yêu cầu lắp đặt..."
+            placeholder="Ghi chú kỹ thuật của loại đồng hồ: đơn vị, cách đọc thanh ghi, lưu ý khi kết nối gateway..."
             className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/15"
           />
         </section>
@@ -410,7 +397,7 @@ export function AddCustomDeviceForm() {
             type="submit"
             className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
           >
-            {isEdit ? "Cập nhật thiết bị" : "Lưu thiết bị"}
+            {isEdit ? "Cập nhật loại đồng hồ" : "Lưu loại đồng hồ"}
           </button>
         </div>
       </div>

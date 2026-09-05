@@ -1,19 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertConfig } from "@/components/AlertConfig";
 import { GhgConfig } from "@/components/GhgConfig";
-import type { Project } from "@/lib/projects";
+import {
+  EXTRA_METER_TYPE_SUGGESTIONS,
+  METER_TYPES,
+  resolveMeterTypes,
+  upsertProject,
+  type MeterType,
+  type Project,
+} from "@/lib/projects";
 
-type Energy = "Điện" | "Nước" | "Nhiệt" | "Hơi";
-type DeviceKind = "meter" | "inverter" | "thermo" | "water" | "wind" | "steam";
+type Energy = string;
+type DeviceKind = "meter" | "inverter" | "thermo" | "water" | "wind" | "steam" | "air";
 type Status = "connected" | "disconnected";
 
 type MeterPoint = {
   id: string;
   name: string;
-  sn: string; 
+  sn: string;
   type: string;
   energy: Energy;
   kind: DeviceKind;
@@ -22,8 +29,6 @@ type MeterPoint = {
   unit: string;
   children?: MeterPoint[];
 };
-
-const ENERGY_OPTIONS: Energy[] = ["Điện", "Nước", "Nhiệt", "Hơi"];
 
 const seeds: MeterPoint[] = [
   {
@@ -105,6 +110,17 @@ const seeds: MeterPoint[] = [
     value: 219.4,
     unit: "m³",
   },
+  {
+    id: "MP-006",
+    name: "MP-006 - Máy nén khí trạm 1",
+    sn: "SN: 66112004567",
+    type: "Compressed Air Flow Meter",
+    energy: "Khí nén",
+    kind: "air",
+    status: "connected",
+    value: 320.5,
+    unit: "Nm³/h",
+  },
 ];
 
 const extraPoints: MeterPoint[] = Array.from({ length: 37 }, (_, i) => {
@@ -166,11 +182,30 @@ function flatten(points: MeterPoint[]): MeterPoint[] {
 
 export function ProjectMeterConfig({ project }: { project: Project }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("points");
-  const [energies, setEnergies] = useState<Energy[]>(["Điện", "Nước", "Nhiệt", "Hơi"]);
+  const [energies, setEnergies] = useState<MeterType[]>(() => resolveMeterTypes(project));
+  const [addingType, setAddingType] = useState(false);
+  const [newType, setNewType] = useState("");
   const [query, setQuery] = useState("");
   const [deviceType, setDeviceType] = useState("all");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["MP-001"]));
+
+  useEffect(() => {
+    setEnergies(resolveMeterTypes(project));
+  }, [project]);
+
+  function persistEnergies(next: MeterType[]) {
+    setEnergies(next);
+    upsertProject({ ...project, meterTypes: next });
+  }
+
+  const suggestions = useMemo(
+    () =>
+      [...METER_TYPES, ...EXTRA_METER_TYPE_SUGGESTIONS].filter(
+        (item) => !energies.includes(item),
+      ),
+    [energies],
+  );
 
   const deviceTypes = useMemo(
     () => Array.from(new Set(flatten(allPoints).map((p) => p.type))).sort(),
@@ -208,13 +243,13 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
   const start = (currentPage - 1) * PAGE_SIZE;
   const pageRows = filteredRoots.slice(start, start + PAGE_SIZE);
 
-  function toggleEnergy(energy: Energy) {
+  function addEnergyType(raw: string) {
+    const label = raw.trim();
+    if (!label || energies.includes(label)) return;
     setPage(1);
-    setEnergies((current) =>
-      current.includes(energy)
-        ? current.filter((item) => item !== energy)
-        : [...current, energy],
-    );
+    persistEnergies([...energies, label]);
+    setNewType("");
+    setAddingType(false);
   }
 
   function toggleExpand(id: string) {
@@ -270,7 +305,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
           })}
         </div>
         <Link
-          href={`/tao-du-an?project=${project.id}`}
+          href={`/them-diem-do?project=${project.id}`}
           className="mb-2 inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
         >
           <span className="text-lg leading-none">+</span>
@@ -316,42 +351,83 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
           </div>
 
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            {ENERGY_OPTIONS.map((energy) => {
-              const active = energies.includes(energy);
-              return (
-                <div
-                  key={energy}
-                  className={`inline-flex h-8 items-center rounded-full pl-3 text-sm font-medium ${
-                    active
-                      ? "bg-[#1a73e8] text-white"
-                      : "bg-white text-slate-600 ring-1 ring-slate-200"
-                  }`}
+            {energies.map((energy) => (
+              <div
+                key={energy}
+                className="inline-flex h-8 items-center rounded-full bg-[#1a73e8] pl-3 text-sm font-medium text-white"
+              >
+                <span className="pr-1">{energy}</span>
+                <button
+                  type="button"
+                  aria-label={`Bỏ loại ${energy}`}
+                  className="px-2 text-base leading-none text-white/80 hover:text-white"
+                  onClick={() => {
+                    persistEnergies(energies.filter((item) => item !== energy));
+                    setPage(1);
+                  }}
                 >
-                  <button type="button" onClick={() => toggleEnergy(energy)} className="pr-1">
-                    {energy}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Bỏ lọc ${energy}`}
-                    className={`px-2 text-base leading-none ${active ? "text-white/80" : "text-slate-400"}`}
-                    onClick={() => {
-                      setEnergies((current) => current.filter((item) => item !== energy));
-                      setPage(1);
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50"
-              aria-label="Thêm loại năng lượng"
-            >
-              +
-            </button>
+                  ×
+                </button>
+              </div>
+            ))}
+            {addingType ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addEnergyType(newType);
+                    }
+                    if (e.key === "Escape") {
+                      setAddingType(false);
+                      setNewType("");
+                    }
+                  }}
+                  placeholder="VD: Khí nén"
+                  list="meter-type-suggestions"
+                  className="h-8 w-36 rounded-full border border-[#1a73e8] bg-white px-3 text-sm outline-none"
+                />
+                <datalist id="meter-type-suggestions">
+                  {suggestions.map((item) => (
+                    <option key={item} value={item} />
+                  ))}
+                </datalist>
+                <button
+                  type="button"
+                  onClick={() => addEnergyType(newType)}
+                  className="h-8 rounded-full bg-[#1a73e8] px-3 text-xs font-semibold text-white"
+                >
+                  Thêm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingType(false);
+                    setNewType("");
+                  }}
+                  className="h-8 rounded-full px-2 text-xs text-slate-500 hover:bg-slate-100"
+                >
+                  Hủy
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAddingType(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-[#1a73e8] ring-1 ring-slate-200 hover:bg-slate-50"
+                aria-label="Thêm loại năng lượng"
+                title="Thêm loại điểm đo (hiển thị trên thanh công cụ Sơ đồ)"
+              >
+                +
+              </button>
+            )}
           </div>
+          <p className="mb-3 text-xs text-slate-400">
+            Các loại điểm đo này sẽ hiển thị trên thanh công cụ trang Sơ đồ của khách.
+          </p>
 
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <label className="relative min-w-[240px] flex-1">
@@ -404,6 +480,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                     return (
                       <DeviceRows
                         key={point.id}
+                        projectId={project.id}
                         point={point}
                         depth={0}
                         hasChildren={hasChildren}
@@ -457,12 +534,14 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
 }
 
 function DeviceRows({
+  projectId,
   point,
   depth,
   hasChildren,
   isOpen,
   onToggle,
 }: {
+  projectId: string;
   point: MeterPoint;
   depth: number;
   hasChildren: boolean;
@@ -525,7 +604,7 @@ function DeviceRows({
         <td className="px-5 py-3.5">
           <div className="flex justify-end">
             <Link
-              href="/tao-du-an"
+              href={`/them-diem-do?project=${projectId}`}
               className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
               aria-label="Chỉnh sửa điểm đo"
             >
@@ -539,6 +618,7 @@ function DeviceRows({
         point.children?.map((child) => (
           <DeviceRows
             key={child.id}
+            projectId={projectId}
             point={child}
             depth={depth + 1}
             hasChildren={Boolean(child.children?.length)}
@@ -610,6 +690,7 @@ const kindIcons: Record<DeviceKind, (props: { className?: string }) => ReactNode
   water: DropIcon,
   wind: WindIcon,
   steam: SteamIcon,
+  air: WindIcon,
 };
 
 function SearchIcon({ className }: { className?: string }) {

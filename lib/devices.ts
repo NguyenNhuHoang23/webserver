@@ -1,6 +1,20 @@
 export type DeviceKind = "power" | "flow" | "temp" | "steam";
 export type DeviceStatus = "active" | "maintenance" | "offline";
 
+export type DeviceRegister = {
+  id: string;
+  address: string;
+  name: string;
+  dataType: string;
+  multiplier: string;
+};
+
+export type DeviceExtraField = {
+  id: string;
+  label: string;
+  value: string;
+};
+
 export type CatalogDevice = {
   id: string;
   name: string;
@@ -12,6 +26,10 @@ export type CatalogDevice = {
   status: DeviceStatus;
   lastSync: string;
   protocol?: string;
+  notes?: string;
+  image?: string;
+  extraFields?: DeviceExtraField[];
+  registers?: DeviceRegister[];
 };
 
 const STORAGE_KEY = "ems-devices";
@@ -196,10 +214,5 @@ export function kindFromDeviceType(deviceType: string): DeviceKind {
 }
 
 export function typeLabelFromDeviceType(deviceType: string) {
-  const value = deviceType.toLowerCase();
-  if (value.includes("nước") || value.includes("water")) return "Flow Meter";
-  if (value.includes("nhiệt") || value.includes("temp")) return "Temperature";
-  if (value.includes("hơi") || value.includes("steam")) return "Steam Meter";
-  if (value.includes("inverter")) return "Inverter";
-  return "Power Meter";
+  return deviceType.trim() || "Chưa phân loại";
 }

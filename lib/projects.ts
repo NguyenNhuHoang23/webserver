@@ -1,4 +1,16 @@
 export type ProjectStatus = "active" | "maintenance" | "paused";
+/** Loại năng lượng / điểm đo — có thể mở rộng (vd: Khí nén) từ cấu hình dự án */
+export type MeterType = string;
+
+export const METER_TYPES: MeterType[] = ["Điện", "Nước", "Nhiệt", "Hơi"];
+export const EXTRA_METER_TYPE_SUGGESTIONS: MeterType[] = ["Khí nén"];
+
+export type AlertRecipient = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+};
 
 export type Project = {
   id: string;
@@ -8,9 +20,24 @@ export type Project = {
   customer: string;
   status: ProjectStatus;
   startDate: string;
+  contactName?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  meterTypes?: MeterType[];
+  recipients?: AlertRecipient[];
 };
 
-export const projects: Project[] = [
+export function resolveMeterTypes(project?: Pick<Project, "meterTypes"> | null): MeterType[] {
+  const list = project?.meterTypes?.filter(Boolean);
+  if (list && list.length > 0) return list;
+  return [...METER_TYPES];
+}
+
+const STORAGE_KEY = "ems-projects";
+const ACCENTS = ["#1a73e8", "#0f9d58", "#7c3aed", "#ea580c", "#0284c7", "#0d9488", "#dc2626", "#2563eb"];
+
+export const INITIAL_PROJECTS: Project[] = [
   {
     id: "PRJ-2401",
     initials: "SN",
@@ -19,6 +46,7 @@ export const projects: Project[] = [
     customer: "Sunrise Group",
     status: "active",
     startDate: "12/03/2023",
+    meterTypes: ["Điện", "Nước", "Nhiệt", "Hơi", "Khí nén"],
   },
   {
     id: "PRJ-2402",
@@ -135,6 +163,76 @@ export const projects: Project[] = [
   }),
 ];
 
+export const projects = INITIAL_PROJECTS;
+
 export function getProject(id: string) {
-  return projects.find((project) => project.id === id);
+  const found = INITIAL_PROJECTS.find((project) => project.id === id);
+  if (found) return found;
+  if (/^PRJ-/i.test(id)) {
+    return {
+      id,
+      initials: "DA",
+      accent: "#1a73e8",
+      name: "Dự án mới",
+      customer: "Khách hàng",
+      status: "active",
+      startDate: new Date().toLocaleDateString("vi-VN"),
+    } satisfies Project;
+  }
+  return undefined;
+}
+
+export function loadProjects(): Project[] {
+  if (typeof window === "undefined") return INITIAL_PROJECTS;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return INITIAL_PROJECTS;
+    const parsed = JSON.parse(raw) as Project[];
+    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_PROJECTS;
+  } catch {
+    return INITIAL_PROJECTS;
+  }
+}
+
+export function saveProjects(list: Project[]) {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
+export function upsertProject(project: Project) {
+  const list = loadProjects();
+  const exists = list.some((item) => item.id === project.id);
+  const next = exists
+    ? list.map((item) => (item.id === project.id ? project : item))
+    : [project, ...list];
+  saveProjects(next);
+  return next;
+}
+
+export function nextProjectId(list: Project[] = loadProjects()) {
+  const nums = list.map((item) => {
+    const match = item.id.match(/(\d+)$/);
+    return match ? Number(match[1]) : 0;
+  });
+  const max = nums.length ? Math.max(...nums) : 2400;
+  return `PRJ-${max + 1}`;
+}
+
+export function projectInitials(source: string) {
+  const parts = source.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return source.trim().slice(0, 2).toUpperCase() || "DA";
+}
+
+export function projectAccent(id: string) {
+  let hash = 0;
+  for (const ch of id) hash += ch.charCodeAt(0);
+  return ACCENTS[hash % ACCENTS.length];
+}
+
+export function formatProjectDate(iso: string) {
+  const [year, month, day] = iso.split("-");
+  if (year && month && day) return `${day}/${month}/${year}`;
+  return new Date().toLocaleDateString("vi-VN");
 }

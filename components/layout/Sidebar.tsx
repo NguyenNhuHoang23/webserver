@@ -11,7 +11,7 @@ const navItems = [
   },
   {
     href: "/thiet-bi",
-    label: "Danh sách thiết bị đo",
+    label: "Thư viện loại đồng hồ",
     icon: DeviceIcon,
   },
   {
@@ -47,7 +47,10 @@ export function Sidebar() {
         {navItems.map((item) => {
           const active =
             item.href === "/"
-              ? pathname === "/" || pathname.startsWith("/tao-du-an")
+              ? pathname === "/" ||
+                pathname.startsWith("/tao-du-an") ||
+                pathname.startsWith("/chinh-sua-du-an") ||
+                pathname.startsWith("/them-diem-do")
               : pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
 

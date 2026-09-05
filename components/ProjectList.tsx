@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
-import { projects, type ProjectStatus } from "@/lib/projects";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { INITIAL_PROJECTS, loadProjects, type Project, type ProjectStatus } from "@/lib/projects";
 
 const statusMeta: Record<
   ProjectStatus,
@@ -25,22 +25,30 @@ const statusMeta: Record<
 const PAGE_SIZE = 10;
 
 export function ProjectList() {
+  const [items, setItems] = useState<Project[]>(INITIAL_PROJECTS);
   const [customer, setCustomer] = useState("all");
   const [status, setStatus] = useState<"all" | ProjectStatus>("all");
   const [page, setPage] = useState(1);
 
+  useEffect(() => {
+    setItems(loadProjects());
+  }, []);
+
   const customers = useMemo(
-    () => Array.from(new Set(projects.map((p) => p.customer))).sort(),
-    [],
+    () => Array.from(new Set(items.map((p) => p.customer))).sort(),
+    [items],
   );
 
   const filtered = useMemo(() => {
-    return projects.filter((p) => {
+    return items.filter((p) => {
       const matchCustomer = customer === "all" || p.customer === customer;
       const matchStatus = status === "all" || p.status === status;
       return matchCustomer && matchStatus;
     });
-  }, [customer, status]);
+  }, [customer, status, items]);
+
+  const activeCount = items.filter((p) => p.status === "active").length;
+  const maintenanceCount = items.filter((p) => p.status === "maintenance").length;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -70,7 +78,7 @@ export function ProjectList() {
       <div className="mb-6 grid gap-4 md:grid-cols-3">
         <StatCard
           label="TỔNG SỐ DỰ ÁN"
-          value="42"
+          value={String(items.length).padStart(2, "0")}
           hint={
             <span className="text-emerald-600">+12% so với tháng trước</span>
           }
@@ -79,10 +87,10 @@ export function ProjectList() {
         />
         <StatCard
           label="DỰ ÁN ĐANG HOẠT ĐỘNG"
-          value="38"
+          value={String(activeCount).padStart(2, "0")}
           hint={
             <span className="text-emerald-600">
-              ● 90.4% Hiệu suất vận hành
+              ● {items.length ? `${((activeCount / items.length) * 100).toFixed(1)}% Hiệu suất vận hành` : "Chưa có dữ liệu"}
             </span>
           }
           icon={<BoltIcon className="h-5 w-5" />}
@@ -90,7 +98,7 @@ export function ProjectList() {
         />
         <StatCard
           label="DỰ ÁN CẦN BẢO TRÌ"
-          value="04"
+          value={String(maintenanceCount).padStart(2, "0")}
           valueClass="text-red-500"
           hint={<span className="text-red-500">Cần kiểm tra thiết bị ngay</span>}
           icon={<WarningIcon className="h-5 w-5" />}

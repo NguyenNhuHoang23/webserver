@@ -11,7 +11,7 @@ import {
 
 const energyTypes = ["Điện", "Nước", "Nhiệt", "Hơi"] as const;
 
-export function AddMeterPointForm() {
+export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string }) {
   const [energy, setEnergy] = useState<(typeof energyTypes)[number]>("Điện");
   const [query, setQuery] = useState("");
   const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
@@ -161,7 +161,7 @@ export function AddMeterPointForm() {
 
             <div className="flex justify-end gap-3 pt-4">
               <Link
-                href="/"
+                href={cancelHref}
                 className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
                 Hủy
@@ -179,7 +179,7 @@ export function AddMeterPointForm() {
         <aside className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <div className="mb-4 flex items-center gap-2">
             <h2 className="text-[15px] font-semibold text-slate-800">
-              Thư viện thiết bị
+              Thư viện loại đồng hồ
             </h2>
             <InfoIcon className="h-4 w-4 text-slate-400" />
           </div>

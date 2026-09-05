@@ -8,14 +8,13 @@ import {
   removeDevice as removeStoredDevice,
   type CatalogDevice,
   type DeviceKind,
-  type DeviceStatus,
 } from "@/lib/devices";
 
 const PAGE_SIZE = 10;
 
 export function DeviceList() {
   const [brand, setBrand] = useState("all");
-  const [status, setStatus] = useState<"all" | DeviceStatus>("all");
+  const [type, setType] = useState("all");
   const [view, setView] = useState<"list" | "grid">("list");
   const [page, setPage] = useState(1);
   const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
@@ -29,13 +28,18 @@ export function DeviceList() {
     [devices],
   );
 
+  const types = useMemo(
+    () => Array.from(new Set(devices.map((d) => d.type).filter(Boolean))).sort(),
+    [devices],
+  );
+
   const filtered = useMemo(() => {
     return devices.filter((d) => {
       const matchBrand = brand === "all" || d.brand === brand;
-      const matchStatus = status === "all" || d.status === status;
-      return matchBrand && matchStatus;
+      const matchType = type === "all" || d.type === type;
+      return matchBrand && matchType;
     });
-  }, [brand, devices, status]);
+  }, [brand, devices, type]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -43,10 +47,10 @@ export function DeviceList() {
   const rows = filtered.slice(start, start + PAGE_SIZE);
 
   const stats = useMemo(() => {
-    const active = devices.filter((d) => d.status === "active").length;
-    const maintenance = devices.filter((d) => d.status === "maintenance").length;
-    const offline = devices.filter((d) => d.status === "offline").length;
-    return { total: devices.length, active, maintenance, offline };
+    const mapped = devices.filter((d) => (d.registers?.length ?? 0) > 0).length;
+    const withImage = devices.filter((d) => Boolean(d.image)).length;
+    const brandsCount = new Set(devices.map((d) => d.brand)).size;
+    return { total: devices.length, mapped, withImage, brandsCount };
   }, [devices]);
 
   function removeDevice(id: string) {
@@ -58,10 +62,10 @@ export function DeviceList() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#0f2b5b]">
-            Quản lý thiết bị đo
+            Thư viện loại đồng hồ
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Giám sát và quản lý danh mục thiết bị đo lường trong toàn hệ thống.
+            Cấu hình loại đồng hồ nhận dữ liệu từ gateway, dùng chung cho nhiều dự án.
           </p>
         </div>
         <Link
@@ -69,37 +73,36 @@ export function DeviceList() {
           className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
         >
           <span className="text-lg leading-none">+</span>
-          Thêm thiết bị mới
+          Thêm loại đồng hồ
         </Link>
       </div>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="TỔNG THIẾT BỊ"
+          label="TỔNG LOẠI ĐỒNG HỒ"
           value={String(stats.total)}
           icon={<BoxIcon className="h-5 w-5" />}
           iconWrap="bg-[#e8f1fd] text-[#1a73e8]"
         />
         <StatCard
-          label="ĐANG HOẠT ĐỘNG"
-          value={String(stats.active)}
+          label="ĐÃ CẤU HÌNH HÀM DỮ LIỆU"
+          value={String(stats.mapped)}
           valueClass="text-emerald-600"
           icon={<CheckIcon className="h-5 w-5" />}
           iconWrap="bg-emerald-50 text-emerald-600"
         />
         <StatCard
-          label="BẢO TRÌ"
-          value={String(stats.maintenance)}
-          valueClass="text-orange-500"
-          icon={<WrenchIcon className="h-5 w-5" />}
-          iconWrap="bg-orange-50 text-orange-500"
+          label="CÓ ẢNH NHẬN DIỆN"
+          value={String(stats.withImage)}
+          valueClass="text-[#1a73e8]"
+          icon={<CameraIcon className="h-5 w-5" />}
+          iconWrap="bg-[#e8f1fd] text-[#1a73e8]"
         />
         <StatCard
-          label="NGOẠI TUYẾN"
-          value={String(stats.offline)}
-          valueClass="text-red-500"
-          icon={<OfflineIcon className="h-5 w-5" />}
-          iconWrap="bg-red-50 text-red-500"
+          label="THƯƠNG HIỆU"
+          value={String(stats.brandsCount)}
+          icon={<BoxIcon className="h-5 w-5" />}
+          iconWrap="bg-slate-100 text-slate-600"
         />
       </div>
 
@@ -122,16 +125,14 @@ export function DeviceList() {
               ]}
             />
             <FilterSelect
-              value={status}
+              value={type}
               onChange={(v) => {
-                setStatus(v as "all" | DeviceStatus);
+                setType(v);
                 setPage(1);
               }}
               options={[
-                { value: "all", label: "Tất cả trạng thái" },
-                { value: "active", label: "Đang hoạt động" },
-                { value: "maintenance", label: "Bảo trì" },
-                { value: "offline", label: "Ngoại tuyến" },
+                { value: "all", label: "Tất cả loại" },
+                ...types.map((item) => ({ value: item, label: item })),
               ]}
             />
           </div>
@@ -158,10 +159,11 @@ export function DeviceList() {
             <table className="w-full min-w-[820px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-[#f8fafc] text-[11px] font-semibold tracking-wide text-slate-400">
-                  <th className="px-5 py-3">TÊN THIẾT BỊ</th>
-                  <th className="px-5 py-3">THƯƠNG HIỆU / MODEL</th>
+                  <th className="px-5 py-3">TÊN MODEL</th>
+                  <th className="px-5 py-3">THƯƠNG HIỆU</th>
                   <th className="px-5 py-3">LOẠI</th>
-                  <th className="px-5 py-3">ĐỒNG BỘ CUỐI</th>
+                  <th className="px-5 py-3">GIAO THỨC</th>
+                  <th className="px-5 py-3">HÀM DỮ LIỆU</th>
                   <th className="px-5 py-3 text-right">THAO TÁC</th>
                 </tr>
               </thead>
@@ -175,21 +177,25 @@ export function DeviceList() {
                     >
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
-                            <Icon className="h-4 w-4" />
+                          <span className="flex h-9 w-9 shrink-0 overflow-hidden items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                            {device.image ? (
+                              <img src={device.image} alt="" className="h-9 w-9 object-cover" />
+                            ) : (
+                              <Icon className="h-4 w-4" />
+                            )}
                           </span>
                           <span>
                             <span className="block font-semibold text-slate-800">
                               {device.name}
                             </span>
                             <span className="block text-xs text-slate-400">
-                              {device.sn}
+                              {device.brandModel}
                             </span>
                           </span>
                         </div>
                       </td>
                       <td className="px-5 py-3.5 text-slate-600">
-                        {device.brandModel}
+                        {device.brand}
                       </td>
                       <td className="px-5 py-3.5">
                         <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
@@ -197,14 +203,19 @@ export function DeviceList() {
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-slate-600">
-                        {device.lastSync}
+                        {device.protocol || "—"}
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-600">
+                        {(device.registers?.length ?? 0) > 0
+                          ? `${device.registers?.length} điểm`
+                          : "Chưa cấu hình"}
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex justify-end gap-1">
                           <Link
                             href={`/thiet-bi/them-moi?id=${device.id}`}
                             className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
-                            aria-label="Sửa thiết bị"
+                            aria-label="Sửa loại đồng hồ"
                           >
                             <EditIcon className="h-4 w-4" />
                           </Link>
@@ -212,7 +223,7 @@ export function DeviceList() {
                             type="button"
                             onClick={() => removeDevice(device.id)}
                             className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
-                            aria-label="Xóa thiết bị"
+                            aria-label="Xóa loại đồng hồ"
                           >
                             <TrashIcon className="h-4 w-4" />
                           </button>
@@ -234,23 +245,29 @@ export function DeviceList() {
                   className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
                 >
                   <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
-                      <Icon className="h-5 w-5" />
+                    <span className="flex h-10 w-10 shrink-0 overflow-hidden items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                      {device.image ? (
+                        <img src={device.image} alt="" className="h-10 w-10 object-cover" />
+                      ) : (
+                        <Icon className="h-5 w-5" />
+                      )}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-semibold text-slate-800">
                         {device.name}
                       </p>
-                      <p className="text-xs text-slate-400">{device.sn}</p>
+                      <p className="text-xs text-slate-400">{device.brand}</p>
                       <p className="mt-2 text-sm text-slate-600">
-                        {device.brandModel}
+                        {device.protocol || "Chưa chọn giao thức"}
                       </p>
                       <div className="mt-3 flex items-center justify-between gap-2">
                         <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
                           {device.type}
                         </span>
                         <span className="text-xs text-slate-400">
-                          {device.lastSync}
+                          {(device.registers?.length ?? 0) > 0
+                            ? `${device.registers?.length} điểm dữ liệu`
+                            : "Chưa cấu hình"}
                         </span>
                       </div>
                     </div>
@@ -265,7 +282,7 @@ export function DeviceList() {
           <p>
             Hiển thị {filtered.length === 0 ? 0 : start + 1}-
             {Math.min(start + PAGE_SIZE, filtered.length)} trên tổng số{" "}
-            {filtered.length} thiết bị
+            {filtered.length} loại đồng hồ
           </p>
           <Pagination
             page={currentPage}
@@ -277,8 +294,8 @@ export function DeviceList() {
         <div className="flex items-start gap-2.5 rounded-b-xl border-t border-[#d6e6fb] bg-[#eef5ff] px-5 py-3.5 text-sm text-[#1a5fbe]">
           <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            <span className="font-semibold">Mẹo:</span> Bạn có thể nhấp đúp vào
-            một hàng để xem biểu đồ dữ liệu thời gian thực của thiết bị đó.
+            <span className="font-semibold">Mẹo:</span> Đây là cấu hình dùng chung.
+            Gán loại đồng hồ vào điểm đo của từng dự án khi thêm điểm đo — không lưu thông tin dự án ở đây.
           </p>
         </div>
       </section>
@@ -475,36 +492,16 @@ function CheckIcon({ className }: { className?: string }) {
   );
 }
 
-function WrenchIcon({ className }: { className?: string }) {
+function CameraIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
-        d="M14.5 6.5a3.5 3.5 0 0 0 4.7 4.7L15 15.4 8.6 9l4.2-4.2a3.5 3.5 0 0 0 1.7 1.7Z"
+        d="M4 8.5h3l1.5-2h7l1.5 2h3A1.5 1.5 0 0 1 21.5 10v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5Z"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinejoin="round"
       />
-      <path
-        d="m8.6 9-4.1 4.1a2 2 0 0 0 0 2.8l1.6 1.6a2 2 0 0 0 2.8 0L13 13.4"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function OfflineIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M5 12.5a9 9 0 0 1 14 0M8 15.5a5 5 0 0 1 8 0"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <circle cx="12" cy="19" r="1.2" fill="currentColor" />
-      <path d="m5 5 14 14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="12" cy="14" r="3.2" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }

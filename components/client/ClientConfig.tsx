@@ -1,10 +1,23 @@
 "use client";
 
-import { useMemo, useState, type DragEvent } from "react";
+import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
+import {
+  buildMeterDepthMap,
+  defaultClientMeters,
+  isMeterDescendant,
+  loadClientMeters,
+  orderMetersByTree,
+  saveClientMeters,
+  type ClientMeter,
+} from "@/lib/client-meters";
+import { loadDevices, type CatalogDevice } from "@/lib/devices";
+import { loadProjects, resolveMeterTypes } from "@/lib/projects";
 
 type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
-type Utility = "Điện" | "Nước" | "Nhiệt" | "Hơi";
+type Utility = string;
 type DropPosition = "before" | "after" | "child";
+type Meter = ClientMeter;
 
 const NAV: { id: TabId; n: number; label: string; icon: "doc" | "nodes" | "cash" | "warn" | "user" }[] = [
   { id: "project", n: 1, label: "Dự án", icon: "doc" },
@@ -14,18 +27,10 @@ const NAV: { id: TabId; n: number; label: string; icon: "doc" | "nodes" | "cash"
   { id: "accounts", n: 5, label: "Quản lý tài khoản", icon: "user" },
 ];
 
-const UTILITIES: Utility[] = ["Điện", "Nước", "Nhiệt", "Hơi"];
+const FALLBACK_UTILITIES = ["Điện", "Nước", "Nhiệt", "Hơi"];
 
 const ALERT_TAGS = ["Energy", "U/I", "Tần số", "Công suất", "Sóng hài", "Mất cân bằng pha"];
 
-type Meter = {
-  id: string;
-  name: string;
-  code: string;
-  type: string;
-  parentId: string | null;
-  utility: Utility;
-};
 type Slot = { id: string; name: string; color: string; from: string; to: string; price: string };
 type AccountRow = {
   id: string;
@@ -35,16 +40,6 @@ type AccountRow = {
   email: string;
   status: "Đang hoạt động" | "Ngoại tuyến";
 };
-
-const INITIAL_METERS: Meter[] = [
-  { id: "m1", name: "Main Feed (Tổng trạm)", code: "MF-001", type: "Đồng hồ tổng 3 pha", parentId: null, utility: "Điện" },
-  { id: "m2", name: "Production Line A", code: "PLA-01", type: "Smart Meter V3", parentId: "m1", utility: "Điện" },
-  { id: "m3", name: "HVAC System", code: "HVAC-02", type: "Power Analyzer", parentId: "m1", utility: "Điện" },
-  { id: "m4", name: "Chiller Unit 1", code: "CHL-01-A", type: "Sub-meter Modbus", parentId: "m2", utility: "Điện" },
-  { id: "m5", name: "Nhà máy nước", code: "WTR-01", type: "Đồng hồ lưu lượng", parentId: null, utility: "Nước" },
-  { id: "m6", name: "Lò hơi trung tâm", code: "STM-01", type: "Cảm biến hơi", parentId: null, utility: "Hơi" },
-  { id: "m7", name: "Bộ trao đổi nhiệt", code: "HT-01", type: "Nhiệt kế IoT", parentId: null, utility: "Nhiệt" },
-];
 
 const INITIAL_SLOTS: Slot[] = [
   { id: "s1", name: "Giờ cao điểm", color: "#ef4444", from: "09:30", to: "11:30", price: "4,581" },
@@ -80,11 +75,15 @@ const INITIAL_ACCOUNTS: AccountRow[] = [
 ];
 
 export function ClientConfig() {
+  const params = useParams<{ id: string }>();
+  const projectId = params?.id ?? "default";
   const [tab, setTab] = useState<TabId>("meters");
   const [openParams, setOpenParams] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [utilities, setUtilities] = useState<string[]>(FALLBACK_UTILITIES);
   const [utility, setUtility] = useState<Utility>("Điện");
-  const [meters, setMeters] = useState(INITIAL_METERS);
+  const [meters, setMeters] = useState<ClientMeter[]>(() => defaultClientMeters());
+  const [devices, setDevices] = useState<CatalogDevice[]>([]);
   const [slots, setSlots] = useState(INITIAL_SLOTS);
   const [applyDate, setApplyDate] = useState("2025-10-01");
   const [accounts, setAccounts] = useState(INITIAL_ACCOUNTS);
@@ -106,7 +105,17 @@ export function ClientConfig() {
   const [dailyLimit, setDailyLimit] = useState(150);
   const [peakWarn, setPeakWarn] = useState(true);
 
+  useEffect(() => {
+    const project = loadProjects().find((item) => item.id === projectId);
+    const types = resolveMeterTypes(project);
+    setUtilities(types.length ? types : FALLBACK_UTILITIES);
+    setUtility((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
+    setMeters(loadClientMeters(projectId));
+    setDevices(loadDevices());
+  }, [projectId]);
+
   const markSaved = () => {
+    saveClientMeters(projectId, meters);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1600);
   };
@@ -118,7 +127,10 @@ export function ClientConfig() {
 
   const meta = {
     project: { title: "Thông tin dự án", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
-    meters: { title: "Cụm điểm đo", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
+    meters: {
+      title: "Cụm điểm đo",
+      hint: `Thêm điểm đo và gán ID thiết bị tại đây (hiển thị cây cha–con trên Sơ đồ) · Dự án ${projectId}`,
+    },
     cost: { title: "Cấu hình chi phí", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
     alerts: { title: "Cấu hình cảnh báo", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
     accounts: { title: "Quản lý tài khoản", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
@@ -200,8 +212,10 @@ export function ClientConfig() {
           {tab === "meters" ? (
             <MetersPanel
               utility={utility}
+              utilities={utilities}
               onUtility={setUtility}
               meters={visibleMeters}
+              devices={devices}
               onMetersChange={(nextVisible) => {
                 setMeters((current) => {
                   const other = current.filter((item) => item.utility !== utility);
@@ -214,6 +228,7 @@ export function ClientConfig() {
           {tab === "cost" ? (
             <CostPanel
               utility={utility}
+              utilities={utilities}
               onUtility={setUtility}
               applyDate={applyDate}
               onApplyDate={setApplyDate}
@@ -265,7 +280,7 @@ export function ClientConfig() {
               <button
                 type="button"
                 onClick={() => {
-                  setMeters(INITIAL_METERS);
+                  setMeters(defaultClientMeters());
                   setSlots(INITIAL_SLOTS);
                   setAccounts(INITIAL_ACCOUNTS);
                 }}
@@ -407,19 +422,38 @@ function ProjectForm({
 
 function MetersPanel({
   utility,
+  utilities,
   onUtility,
   meters,
+  devices,
   onMetersChange,
 }: {
   utility: Utility;
+  utilities: string[];
   onUtility: (v: Utility) => void;
   meters: Meter[];
+  devices: CatalogDevice[];
   onMetersChange: (rows: Meter[]) => void;
 }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ id: string; position: DropPosition } | null>(null);
+  const [showAdd, setShowAdd] = useState(true);
+  const [draft, setDraft] = useState({
+    name: "",
+    code: "",
+    parentId: "",
+    deviceId: "",
+  });
 
-  const depthMap = useMemo(() => buildDepthMap(meters), [meters]);
+  const depthMap = useMemo(() => buildMeterDepthMap(meters), [meters]);
+
+  const usedDeviceIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const meter of meters) {
+      if (meter.deviceId) set.add(meter.deviceId);
+    }
+    return set;
+  }, [meters]);
 
   function resolveDropPosition(event: DragEvent<HTMLTableRowElement>): DropPosition {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -438,99 +472,308 @@ function MetersPanel({
     setDropHint(null);
   }
 
+  function addMeter() {
+    const name = draft.name.trim();
+    if (!name) return;
+    const device = devices.find((item) => item.id === draft.deviceId);
+    const id = `m-${Date.now()}`;
+    const code =
+      draft.code.trim() ||
+      `${utility.slice(0, 2).toUpperCase()}-${String(meters.length + 1).padStart(3, "0")}`;
+    const parentId = draft.parentId || null;
+    const next: Meter = {
+      id,
+      name,
+      code,
+      type: device?.brandModel || device?.type || "Chưa gán thiết bị",
+      parentId,
+      utility,
+      deviceId: draft.deviceId || null,
+    };
+    const ordered = [...meters];
+    if (parentId) {
+      const insertAt = findChildInsertIndex(ordered, parentId);
+      ordered.splice(insertAt, 0, next);
+      onMetersChange(ordered);
+    } else {
+      onMetersChange([...ordered, next]);
+    }
+    setDraft({ name: "", code: "", parentId: draft.parentId, deviceId: "" });
+  }
+
+  function patchMeter(id: string, patch: Partial<Meter>) {
+    onMetersChange(
+      meters.map((meter) => {
+        if (meter.id !== id) return meter;
+        const next = { ...meter, ...patch };
+        if (patch.deviceId !== undefined) {
+          const device = devices.find((item) => item.id === patch.deviceId);
+          if (device) {
+            next.type = device.brandModel || device.type;
+          } else if (!patch.deviceId) {
+            next.type = "Chưa gán thiết bị";
+          }
+        }
+        return next;
+      }),
+    );
+  }
+
+  function changeParent(id: string, parentId: string | null) {
+    if (parentId === id) return;
+    if (parentId && isMeterDescendant(meters, id, parentId)) return;
+    const ordered = orderMetersByTree(meters);
+    const drag = ordered.find((meter) => meter.id === id);
+    if (!drag) return;
+    const without = ordered.filter((meter) => meter.id !== id);
+    const moved: Meter = { ...drag, parentId };
+    if (!parentId) {
+      onMetersChange([...without, moved]);
+      return;
+    }
+    const insertAt = findChildInsertIndex(without, parentId);
+    const next = [...without.slice(0, insertAt), moved, ...without.slice(insertAt)];
+    const depth = buildMeterDepthMap(next).get(id) ?? 0;
+    if (depth > 2) return;
+    onMetersChange(next);
+  }
+
+  function removeMeter(id: string) {
+    const ids = new Set<string>([id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const meter of meters) {
+        if (meter.parentId && ids.has(meter.parentId) && !ids.has(meter.id)) {
+          ids.add(meter.id);
+          changed = true;
+        }
+      }
+    }
+    onMetersChange(meters.filter((meter) => !ids.has(meter.id)));
+  }
+
   return (
     <div>
-      <UtilityTabs value={utility} onChange={onUtility} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <UtilityTabs value={utility} options={utilities} onChange={onUtility} />
+        <button
+          type="button"
+          onClick={() => setShowAdd((v) => !v)}
+          className="inline-flex h-9 items-center gap-1 rounded-md bg-[#3b82f6] px-3 text-[12px] font-semibold text-white hover:bg-[#2563eb]"
+        >
+          {showAdd ? "Ẩn form thêm" : "+ Thêm điểm đo"}
+        </button>
+      </div>
       <p className="mt-3 text-[12px] text-slate-500">
-        Kéo thả để sắp xếp thứ tự. Thả vào giữa dòng để đặt làm điểm đo con.
+        Thêm điểm đo và gán điểm đo đó vào <span className="font-semibold text-slate-700">ID thiết bị</span> tại
+        đây. Kéo thả hoặc chọn điểm cha để tạo cây — Sơ đồ chỉ hiển thị, không thêm điểm trên Sơ đồ.
       </p>
+
+      {showAdd ? (
+        <div className="mt-3 rounded-lg border border-[#bfdbfe] bg-[#f8fbff] p-3">
+          <p className="mb-2 text-[12px] font-semibold text-[#1d4ed8]">Thêm điểm đo mới</p>
+          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-5">
+            <input
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              placeholder="Tên điểm đo *"
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
+            />
+            <input
+              value={draft.code}
+              onChange={(e) => setDraft({ ...draft, code: e.target.value })}
+              placeholder="Mã ID (vd: MP-001)"
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
+            />
+            <select
+              value={draft.parentId}
+              onChange={(e) => setDraft({ ...draft, parentId: e.target.value })}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
+            >
+              <option value="">Điểm gốc (không có cha)</option>
+              {meters.map((meter) => (
+                <option key={meter.id} value={meter.id}>
+                  Con của: {meter.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={draft.deviceId}
+              onChange={(e) => setDraft({ ...draft, deviceId: e.target.value })}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
+            >
+              <option value="">Gán ID thiết bị...</option>
+              {devices.map((device) => (
+                <option key={device.id} value={device.id} disabled={usedDeviceIds.has(device.id)}>
+                  {device.name} · {device.sn}
+                  {usedDeviceIds.has(device.id) ? " (đã gán)" : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={addMeter}
+              disabled={!draft.name.trim()}
+              className="h-9 rounded-md bg-[#3b82f6] text-sm font-medium text-white hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Thêm điểm đo
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-[13px]">
+        <table className="w-full min-w-[900px] text-left text-[13px]">
           <thead>
             <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
-              <th className="py-2 font-semibold">TÊN ĐIỂM ĐO</th>
-              <th className="py-2 font-semibold">MÃ ID</th>
-              <th className="py-2 font-semibold">LOẠI THIẾT BỊ</th>
+              <th className="py-2 pr-2 font-semibold">TÊN ĐIỂM ĐO</th>
+              <th className="py-2 pr-2 font-semibold">MÃ ID</th>
+              <th className="py-2 pr-2 font-semibold">ĐIỂM CHA</th>
+              <th className="py-2 pr-2 font-semibold">GÁN ID THIẾT BỊ</th>
+              <th className="py-2 pr-2 font-semibold">LOẠI THIẾT BỊ</th>
               <th className="py-2 text-right font-semibold">THAO TÁC</th>
             </tr>
           </thead>
           <tbody>
-            {meters.map((item) => {
-              const depth = depthMap.get(item.id) ?? 0;
-              const isDragging = dragId === item.id;
-              const hint = dropHint?.id === item.id ? dropHint.position : null;
-              return (
-                <tr
-                  key={item.id}
-                  draggable
-                  onDragStart={(event) => {
-                    setDragId(item.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", item.id);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    if (!dragId || dragId === item.id) return;
-                    if (isDescendant(meters, dragId, item.id)) return;
-                    event.dataTransfer.dropEffect = "move";
-                    setDropHint({ id: item.id, position: resolveDropPosition(event) });
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (!dragId || dragId === item.id) return;
-                    handleDrop(item.id, resolveDropPosition(event));
-                  }}
-                  onDragEnd={() => {
-                    setDragId(null);
-                    setDropHint(null);
-                  }}
-                  className={`border-b border-slate-50 text-slate-700 transition-colors ${
-                    isDragging ? "opacity-40" : ""
-                  } ${
-                    hint === "child"
-                      ? "bg-[#eef5ff] ring-1 ring-inset ring-[#3b82f6]/30"
-                      : hint
-                        ? "bg-slate-50"
-                        : "hover:bg-slate-50/70"
-                  }`}
-                >
-                  <td className="relative py-3">
-                    {hint === "before" ? (
-                      <span className="absolute inset-x-0 top-0 h-0.5 bg-[#3b82f6]" />
-                    ) : null}
-                    {hint === "after" ? (
-                      <span className="absolute inset-x-0 bottom-0 h-0.5 bg-[#3b82f6]" />
-                    ) : null}
-                    <span className="inline-flex items-center gap-2" style={{ paddingLeft: depth * 22 }}>
-                      <span className="cursor-grab active:cursor-grabbing">
-                        <DragHandle />
+            {meters.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="py-8 text-center text-sm text-slate-400">
+                  Chưa có điểm đo loại {utility}. Thêm điểm và gán ID thiết bị phía trên.
+                </td>
+              </tr>
+            ) : (
+              meters.map((item) => {
+                const depth = depthMap.get(item.id) ?? 0;
+                const isDragging = dragId === item.id;
+                const hint = dropHint?.id === item.id ? dropHint.position : null;
+                const assigned = devices.find((device) => device.id === item.deviceId);
+                return (
+                  <tr
+                    key={item.id}
+                    draggable
+                    onDragStart={(event) => {
+                      setDragId(item.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", item.id);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (!dragId || dragId === item.id) return;
+                      if (isMeterDescendant(meters, dragId, item.id)) return;
+                      event.dataTransfer.dropEffect = "move";
+                      setDropHint({ id: item.id, position: resolveDropPosition(event) });
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      if (!dragId || dragId === item.id) return;
+                      handleDrop(item.id, resolveDropPosition(event));
+                    }}
+                    onDragEnd={() => {
+                      setDragId(null);
+                      setDropHint(null);
+                    }}
+                    className={`border-b border-slate-50 text-slate-700 transition-colors ${
+                      isDragging ? "opacity-40" : ""
+                    } ${
+                      hint === "child"
+                        ? "bg-[#eef5ff] ring-1 ring-inset ring-[#3b82f6]/30"
+                        : hint
+                          ? "bg-slate-50"
+                          : "hover:bg-slate-50/70"
+                    }`}
+                  >
+                    <td className="relative py-2.5 pr-2">
+                      {hint === "before" ? (
+                        <span className="absolute inset-x-0 top-0 h-0.5 bg-[#3b82f6]" />
+                      ) : null}
+                      {hint === "after" ? (
+                        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-[#3b82f6]" />
+                      ) : null}
+                      <span
+                        className="inline-flex w-full items-center gap-2"
+                        style={{ paddingLeft: depth * 18 }}
+                      >
+                        <span className="cursor-grab text-slate-300 active:cursor-grabbing">
+                          <DragHandle />
+                        </span>
+                        {depth > 0 ? <span className="text-slate-300">↳</span> : null}
+                        <input
+                          value={item.name}
+                          onChange={(e) => patchMeter(item.id, { name: e.target.value })}
+                          className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-[13px] font-medium outline-none hover:border-slate-200 focus:border-[#3b82f6] focus:bg-white"
+                        />
+                        {hint === "child" ? (
+                          <span className="shrink-0 rounded bg-[#dbeafe] px-1.5 py-0.5 text-[10px] font-semibold text-[#2563eb]">
+                            Làm con
+                          </span>
+                        ) : null}
                       </span>
-                      {depth > 0 ? <span className="text-slate-300">↳</span> : null}
-                      <span className="font-medium">{item.name}</span>
-                      {hint === "child" ? (
-                        <span className="rounded bg-[#dbeafe] px-1.5 py-0.5 text-[10px] font-semibold text-[#2563eb]">
-                          Làm con
+                    </td>
+                    <td className="py-2.5 pr-2">
+                      <input
+                        value={item.code}
+                        onChange={(e) => patchMeter(item.id, { code: e.target.value })}
+                        className="h-8 w-[100px] rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-600 outline-none focus:border-[#3b82f6]"
+                      />
+                    </td>
+                    <td className="py-2.5 pr-2">
+                      <select
+                        value={item.parentId ?? ""}
+                        onChange={(e) => changeParent(item.id, e.target.value || null)}
+                        className="h-8 max-w-[160px] rounded-md border border-slate-200 bg-white px-2 text-[12px] outline-none focus:border-[#3b82f6]"
+                      >
+                        <option value="">— Gốc —</option>
+                        {meters
+                          .filter((meter) => meter.id !== item.id && !isMeterDescendant(meters, item.id, meter.id))
+                          .map((meter) => (
+                            <option key={meter.id} value={meter.id}>
+                              {meter.name}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                    <td className="py-2.5 pr-2">
+                      <select
+                        value={item.deviceId ?? ""}
+                        onChange={(e) =>
+                          patchMeter(item.id, { deviceId: e.target.value || null })
+                        }
+                        className={`h-8 max-w-[240px] rounded-md border px-2 text-[12px] outline-none focus:border-[#3b82f6] ${
+                          item.deviceId
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : "border-amber-200 bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        <option value="">Chưa gán thiết bị</option>
+                        {devices.map((device) => {
+                          const taken = usedDeviceIds.has(device.id) && device.id !== item.deviceId;
+                          return (
+                            <option key={device.id} value={device.id} disabled={taken}>
+                              {device.name} · {device.sn}
+                              {taken ? " (đã gán)" : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {assigned ? (
+                        <span className="mt-0.5 block truncate text-[10px] text-slate-400">
+                          {assigned.id}
                         </span>
                       ) : null}
-                    </span>
-                  </td>
-                  <td className="py-3 text-slate-500">{item.code}</td>
-                  <td className="py-3">{item.type}</td>
-                  <td className="py-3">
-                    <span className="flex justify-end gap-1 text-slate-400">
-                      {depth > 0 && depth < 2 ? (
-                        <IconBtn label="Xem">
-                          <EyeIcon />
+                    </td>
+                    <td className="py-2.5 pr-2 text-slate-600">{item.type}</td>
+                    <td className="py-2.5">
+                      <span className="flex justify-end gap-1 text-slate-400">
+                        <IconBtn label="Xóa điểm đo" onClick={() => removeMeter(item.id)}>
+                          <TrashIcon />
                         </IconBtn>
-                      ) : null}
-                      <IconBtn label="Chi tiết">
-                        <ListIcon />
-                      </IconBtn>
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -538,65 +781,13 @@ function MetersPanel({
   );
 }
 
-function orderMetersByTree(meters: Meter[]) {
-  const byParent = new Map<string | null, Meter[]>();
-  for (const meter of meters) {
-    const key = meter.parentId;
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key)!.push(meter);
-  }
-  for (const group of byParent.values()) {
-    group.sort((a, b) => meters.indexOf(a) - meters.indexOf(b));
-  }
-
-  const ordered: Meter[] = [];
-  function walk(parentId: string | null) {
-    for (const meter of byParent.get(parentId) ?? []) {
-      ordered.push(meter);
-      walk(meter.id);
-    }
-  }
-  walk(null);
-  return ordered;
-}
-
-function buildDepthMap(meters: Meter[]) {
-  const map = new Map<string, Meter>(meters.map((meter) => [meter.id, meter]));
-  const depths = new Map<string, number>();
-
-  function depthFor(id: string): number {
-    if (depths.has(id)) return depths.get(id)!;
-    const meter = map.get(id);
-    if (!meter?.parentId || !map.has(meter.parentId)) {
-      depths.set(id, 0);
-      return 0;
-    }
-    const next = depthFor(meter.parentId) + 1;
-    depths.set(id, next);
-    return next;
-  }
-
-  for (const meter of meters) depthFor(meter.id);
-  return depths;
-}
-
-function isDescendant(meters: Meter[], ancestorId: string, nodeId: string) {
-  const map = new Map(meters.map((meter) => [meter.id, meter]));
-  let current = map.get(nodeId);
-  while (current?.parentId) {
-    if (current.parentId === ancestorId) return true;
-    current = map.get(current.parentId);
-  }
-  return false;
-}
-
 function findChildInsertIndex(ordered: Meter[], parentId: string) {
   const parentIndex = ordered.findIndex((meter) => meter.id === parentId);
   if (parentIndex < 0) return ordered.length;
 
-  const parentDepth = buildDepthMap(ordered).get(parentId) ?? 0;
+  const parentDepth = buildMeterDepthMap(ordered).get(parentId) ?? 0;
   let index = parentIndex + 1;
-  const depths = buildDepthMap(ordered);
+  const depths = buildMeterDepthMap(ordered);
   while (index < ordered.length && (depths.get(ordered[index].id) ?? 0) > parentDepth) {
     index += 1;
   }
@@ -610,7 +801,7 @@ function applyMeterDrop(
   position: DropPosition,
 ): Meter[] | null {
   if (dragId === targetId) return null;
-  if (isDescendant(meters, dragId, targetId)) return null;
+  if (isMeterDescendant(meters, dragId, targetId)) return null;
 
   const drag = meters.find((meter) => meter.id === dragId);
   const target = meters.find((meter) => meter.id === targetId);
@@ -618,7 +809,7 @@ function applyMeterDrop(
 
   const ordered = orderMetersByTree(meters);
   const without = ordered.filter((meter) => meter.id !== dragId);
-  const depths = buildDepthMap(without);
+  const depths = buildMeterDepthMap(without);
   const targetDepth = depths.get(targetId) ?? 0;
 
   let parentId: string | null;
@@ -638,7 +829,7 @@ function applyMeterDrop(
   const next = [...without.slice(0, insertAt), moved, ...without.slice(insertAt)];
 
   for (const meter of next) {
-    const depth = buildDepthMap(next).get(meter.id) ?? 0;
+    const depth = buildMeterDepthMap(next).get(meter.id) ?? 0;
     if (depth > 2) return null;
   }
 
@@ -647,6 +838,7 @@ function applyMeterDrop(
 
 function CostPanel({
   utility,
+  utilities,
   onUtility,
   applyDate,
   onApplyDate,
@@ -654,103 +846,185 @@ function CostPanel({
   onSlots,
 }: {
   utility: Utility;
+  utilities: string[];
   onUtility: (v: Utility) => void;
   applyDate: string;
   onApplyDate: (v: string) => void;
   slots: Slot[];
   onSlots: (rows: Slot[]) => void;
 }) {
+  const isElectric = utility === "Điện";
+  const unitMeta: Record<string, { title: string; hint: string; unit: string; defaultPrice: string }> = {
+    Điện: {
+      title: "Giá điện theo khung giờ",
+      hint: "Cấu hình đơn giá cho từng khung giờ tiêu thụ (VNĐ/kWh)",
+      unit: "VNĐ/kWh",
+      defaultPrice: "0",
+    },
+    Nước: {
+      title: "Đơn giá nước",
+      hint: "Cấu hình đơn giá tiêu thụ nước (VNĐ/m³)",
+      unit: "VNĐ/m³",
+      defaultPrice: "12,500",
+    },
+    Nhiệt: {
+      title: "Đơn giá nhiệt",
+      hint: "Cấu hình đơn giá năng lượng nhiệt (VNĐ/kWh)",
+      unit: "VNĐ/kWh",
+      defaultPrice: "2,100",
+    },
+    Hơi: {
+      title: "Đơn giá hơi",
+      hint: "Cấu hình đơn giá hơi công nghệ (VNĐ/tấn)",
+      unit: "VNĐ/tấn",
+      defaultPrice: "850,000",
+    },
+  };
+  const meta = unitMeta[utility] ?? {
+    title: `Đơn giá ${utility}`,
+    hint: `Cấu hình đơn giá cho ${utility}`,
+    unit: "VNĐ",
+    defaultPrice: "0",
+  };
+  const [flatPrice, setFlatPrice] = useState(meta.defaultPrice);
+
+  useEffect(() => {
+    setFlatPrice((unitMeta[utility] ?? meta).defaultPrice);
+  }, [utility]);
+
   return (
     <div>
-      <UtilityTabs value={utility} onChange={onUtility} />
+      <UtilityTabs value={utility} options={utilities} onChange={onUtility} />
       <div className="mt-5 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-5">
         <div>
           <p className="text-[15px] font-semibold text-slate-800">Ngày bắt đầu áp dụng</p>
-          <p className="mt-1 text-[12px] text-slate-500">Thời gian chi phí mới bắt đầu có hiệu lực trong hệ thống</p>
+          <p className="mt-1 text-[12px] text-slate-500">
+            Thời gian chi phí mới bắt đầu có hiệu lực trong hệ thống
+          </p>
         </div>
         <DateInput value={applyDate} onChange={onApplyDate} />
       </div>
-      <div className="mt-5">
-        <p className="text-[15px] font-semibold text-slate-800">Giá điện theo khung giờ</p>
-        <p className="mt-1 text-[12px] text-slate-500">Cấu hình đơn giá cho từng khung giờ tiêu thụ (VNĐ/kWh)</p>
-        <div className="mt-4 overflow-hidden rounded-md border border-slate-200">
-          <div className="grid grid-cols-[1.2fr_1.2fr_1fr_40px] bg-slate-50 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400">
-            <span>TÊN KHUNG GIỜ</span>
-            <span>KHOẢNG THỜI GIAN</span>
-            <span>ĐƠN GIÁ (VNĐ/KWH)</span>
-            <span />
+
+      {isElectric ? (
+        <div className="mt-5">
+          <p className="text-[15px] font-semibold text-slate-800">{meta.title}</p>
+          <p className="mt-1 text-[12px] text-slate-500">{meta.hint}</p>
+          <div className="mt-4 overflow-hidden rounded-md border border-slate-200">
+            <div className="grid grid-cols-[1.2fr_1.2fr_1fr_40px] bg-slate-50 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400">
+              <span>TÊN KHUNG GIỜ</span>
+              <span>KHOẢNG THỜI GIAN</span>
+              <span>ĐƠN GIÁ (VNĐ/KWH)</span>
+              <span />
+            </div>
+            {slots.map((slot) => (
+              <div
+                key={slot.id}
+                className="grid grid-cols-[1.2fr_1.2fr_1fr_40px] items-center gap-2 border-t border-slate-100 px-4 py-3"
+              >
+                <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <span className="h-8 w-1 rounded-full" style={{ backgroundColor: slot.color }} />
+                  {slot.name}
+                </span>
+                <span className="flex items-center gap-2">
+                  <input
+                    type="time"
+                    value={slot.from}
+                    onChange={(e) =>
+                      onSlots(
+                        slots.map((item) =>
+                          item.id === slot.id ? { ...item, from: e.target.value } : item,
+                        ),
+                      )
+                    }
+                    className="h-9 w-[108px] rounded-md border border-slate-200 px-2 text-sm"
+                  />
+                  <span className="text-slate-400">–</span>
+                  <input
+                    type="time"
+                    value={slot.to}
+                    onChange={(e) =>
+                      onSlots(
+                        slots.map((item) =>
+                          item.id === slot.id ? { ...item, to: e.target.value } : item,
+                        ),
+                      )
+                    }
+                    className="h-9 w-[108px] rounded-md border border-slate-200 px-2 text-sm"
+                  />
+                </span>
+                <span className="relative">
+                  <input
+                    value={slot.price}
+                    onChange={(e) =>
+                      onSlots(
+                        slots.map((item) =>
+                          item.id === slot.id ? { ...item, price: e.target.value } : item,
+                        ),
+                      )
+                    }
+                    className="h-9 w-full rounded-md border border-slate-200 pr-12 pl-3 text-sm font-semibold"
+                  />
+                  <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[11px] text-slate-400">
+                    VNĐ
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  title="Xóa"
+                  onClick={() => onSlots(slots.filter((item) => item.id !== slot.id))}
+                  className="flex h-8 w-8 items-center justify-center text-slate-400 hover:text-red-500"
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+            ))}
           </div>
-          {slots.map((slot) => (
-            <div
-              key={slot.id}
-              className="grid grid-cols-[1.2fr_1.2fr_1fr_40px] items-center gap-2 border-t border-slate-100 px-4 py-3"
-            >
-              <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
-                <span className="h-8 w-1 rounded-full" style={{ backgroundColor: slot.color }} />
-                {slot.name}
+          <button
+            type="button"
+            onClick={() =>
+              onSlots([
+                ...slots,
+                {
+                  id: `s${Date.now()}`,
+                  name: `Khung giờ ${slots.length + 1}`,
+                  color: "#64748b",
+                  from: "00:00",
+                  to: "01:00",
+                  price: "0",
+                },
+              ])
+            }
+            className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-md border border-dashed border-slate-300 text-sm font-medium text-slate-500 hover:bg-slate-50"
+          >
+            + Thêm khung giờ
+          </button>
+        </div>
+      ) : (
+        <div className="mt-5">
+          <p className="text-[15px] font-semibold text-slate-800">{meta.title}</p>
+          <p className="mt-1 text-[12px] text-slate-500">{meta.hint}</p>
+          <p className="mt-2 rounded-md bg-slate-50 px-3 py-2 text-[12px] text-slate-500">
+            {utility} không dùng khung giờ cao điểm / thấp điểm — chỉ cấu hình đơn giá cố định.
+          </p>
+          <div className="mt-4 max-w-md rounded-md border border-slate-200 p-4">
+            <label className="block">
+              <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-400">
+                ĐƠN GIÁ ({meta.unit})
               </span>
-              <span className="flex items-center gap-2">
+              <span className="relative block">
                 <input
-                  type="time"
-                  value={slot.from}
-                  onChange={(e) =>
-                    onSlots(slots.map((item) => (item.id === slot.id ? { ...item, from: e.target.value } : item)))
-                  }
-                  className="h-9 w-[108px] rounded-md border border-slate-200 px-2 text-sm"
-                />
-                <span className="text-slate-400">–</span>
-                <input
-                  type="time"
-                  value={slot.to}
-                  onChange={(e) =>
-                    onSlots(slots.map((item) => (item.id === slot.id ? { ...item, to: e.target.value } : item)))
-                  }
-                  className="h-9 w-[108px] rounded-md border border-slate-200 px-2 text-sm"
-                />
-              </span>
-              <span className="relative">
-                <input
-                  value={slot.price}
-                  onChange={(e) =>
-                    onSlots(slots.map((item) => (item.id === slot.id ? { ...item, price: e.target.value } : item)))
-                  }
-                  className="h-9 w-full rounded-md border border-slate-200 pr-12 pl-3 text-sm font-semibold"
+                  value={flatPrice}
+                  onChange={(e) => setFlatPrice(e.target.value)}
+                  className="h-10 w-full rounded-md border border-slate-200 pr-14 pl-3 text-sm font-semibold text-slate-800 outline-none focus:border-[#3b82f6]"
                 />
                 <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[11px] text-slate-400">
                   VNĐ
                 </span>
               </span>
-              <button
-                type="button"
-                title="Xóa"
-                onClick={() => onSlots(slots.filter((item) => item.id !== slot.id))}
-                className="flex h-8 w-8 items-center justify-center text-slate-400 hover:text-red-500"
-              >
-                <TrashIcon />
-              </button>
-            </div>
-          ))}
+            </label>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() =>
-            onSlots([
-              ...slots,
-              {
-                id: `s${Date.now()}`,
-                name: `Khung giờ ${slots.length + 1}`,
-                color: "#64748b",
-                from: "00:00",
-                to: "01:00",
-                price: "0",
-              },
-            ])
-          }
-          className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-md border border-dashed border-slate-300 text-sm font-medium text-slate-500 hover:bg-slate-50"
-        >
-          + Thêm khung giờ
-        </button>
-      </div>
+      )}
     </div>
   );
 }
@@ -978,10 +1252,18 @@ function AccountsPanel({
   );
 }
 
-function UtilityTabs({ value, onChange }: { value: Utility; onChange: (v: Utility) => void }) {
+function UtilityTabs({
+  value,
+  options,
+  onChange,
+}: {
+  value: Utility;
+  options: string[];
+  onChange: (v: Utility) => void;
+}) {
   return (
     <div className="flex gap-5 border-b border-slate-200">
-      {UTILITIES.map((item) => (
+      {options.map((item) => (
         <button
           key={item}
           type="button"
@@ -1145,6 +1427,20 @@ function DragHandle() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
+      <path
+        d="M5 7h14M10 11v6M14 11v6M9 7V5h6v2M7 7l1 12h8l1-12"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function EyeIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
@@ -1158,14 +1454,6 @@ function ListIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
       <path d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
-      <path d="M5 7h14M10 7V5h4v2M8 7v12h8V7" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
     </svg>
   );
 }
