@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/components/auth/useAuth";
+import { logout } from "@/lib/auth";
 import { loadProjects, type Project } from "@/lib/projects";
 
 const navItems = [
@@ -24,8 +26,11 @@ export function ClientShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { session } = useAuth();
   const [resolved, setResolved] = useState(project);
   const base = `/du-an/${project.id}`;
+  const homeHref = session?.portal === "admin" ? "/" : base;
 
   useEffect(() => {
     const stored = loadProjects().find((item) => item.id === project.id);
@@ -36,7 +41,7 @@ export function ClientShell({
     <div className="flex h-full min-h-0 flex-col bg-[#e8edf3]">
       <header className="flex min-h-[52px] shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 sm:px-4">
         <Link
-          href="/"
+          href={homeHref}
           title={resolved.customer}
           className="flex min-w-0 max-w-[min(280px,32vw)] shrink items-center gap-2 sm:max-w-[240px] lg:max-w-[280px]"
         >
@@ -86,14 +91,29 @@ export function ClientShell({
           </button>
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden text-right leading-tight sm:block">
-              <p className="text-sm font-semibold text-slate-800">Admin User</p>
-              <p className="text-[11px] tracking-wide text-slate-400">HỆ THỐNG EMS</p>
+              <p className="text-sm font-semibold text-slate-800">
+                {session?.displayName ?? session?.username ?? resolved.customer}
+              </p>
+              <p className="text-[11px] tracking-wide text-slate-400">
+                {session?.portal === "admin" ? "QUẢN TRỊ VIÊN" : "KHÁCH HÀNG"}
+              </p>
             </div>
             <img
               src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=80&h=80&fit=crop&crop=faces"
               alt="Ảnh đại diện"
               className="h-8 w-8 rounded-full object-cover sm:h-9 sm:w-9"
             />
+            <button
+              type="button"
+              onClick={() => {
+                const portal = session?.portal;
+                logout();
+                if (portal === "admin") router.replace("/");
+              }}
+              className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-[#d94848] hover:bg-red-50"
+            >
+              Đăng xuất
+            </button>
           </div>
         </div>
       </header>

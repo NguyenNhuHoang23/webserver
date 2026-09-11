@@ -8,8 +8,10 @@ import {
   loadAccounts,
   todayLabel,
   upsertAccount,
+  type Account,
   type AccountRole,
 } from "@/lib/accounts";
+import { DEFAULT_PASSWORD } from "@/lib/auth";
 
 export function AddAccountForm() {
   const router = useRouter();
@@ -22,22 +24,26 @@ export function AddAccountForm() {
   const [password, setPassword] = useState("");
   const [createdAt, setCreatedAt] = useState(todayLabel());
   const [isEdit, setIsEdit] = useState(false);
+  const [existing, setExisting] = useState<Account | null>(null);
 
   useEffect(() => {
     if (!editingId) {
       setIsEdit(false);
+      setExisting(null);
       return;
     }
-    const existing = loadAccounts().find((item) => item.id === editingId);
-    if (!existing) {
+    const found = loadAccounts().find((item) => item.id === editingId);
+    if (!found) {
       setIsEdit(false);
+      setExisting(null);
       return;
     }
     setIsEdit(true);
-    setUsername(existing.username);
-    setEmail(existing.email);
-    setRole(existing.role);
-    setCreatedAt(existing.createdAt);
+    setExisting(found);
+    setUsername(found.username);
+    setEmail(found.email);
+    setRole(found.role);
+    setCreatedAt(found.createdAt);
     setPassword("");
   }, [editingId]);
 
@@ -52,6 +58,7 @@ export function AddAccountForm() {
       email: mail,
       role,
       createdAt: isEdit ? createdAt : todayLabel(),
+      password: password.trim() || existing?.password || DEFAULT_PASSWORD,
     });
     router.push("/tai-khoan");
   }

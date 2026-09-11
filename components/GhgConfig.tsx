@@ -47,12 +47,13 @@ const initialSources: EmissionSource[] = INITIAL_GHG_SOURCES;
 
 export function GhgConfig() {
   const [activeScope, setActiveScope] = useState<ScopeId>(1);
-  const [tableFilter, setTableFilter] = useState<"all" | ScopeId>(1);
+  const [tableFilter, setTableFilter] = useState<ScopeId>(1);
   const [query, setQuery] = useState("");
   const [factors, setFactors] = useState<LibraryFactor[]>(() =>
     flattenFactorGroups(INITIAL_FACTOR_GROUPS),
   );
   const [sources, setSources] = useState<EmissionSource[]>(initialSources);
+  const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropHover, setDropHover] = useState(false);
   const formulaRef = useRef<HTMLTextAreaElement>(null);
@@ -63,10 +64,39 @@ export function GhgConfig() {
   const [formula, setFormula] = useState("{Giá trị điểm đo} * {Hệ số phát thải}");
   const [factorValue, setFactorValue] = useState("74100");
   const [appliedAt, setAppliedAt] = useState("2024-01-01");
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
     setFactors(flattenFactorGroups(loadFactorGroups()));
     setSources(loadGhgSources());
+    if (window.location.hash === "#them-nguon-phat-thai") {
+      const url = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(null, "", url);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("ems-ghg-form-open", { detail: formOpen }));
+  }, [formOpen]);
+
+  useEffect(() => {
+    function startNewSource() {
+      setEditingId(null);
+      setName("");
+      setMethod("meter");
+      setFactorId("");
+      setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
+      setFactorValue("74100");
+      setAppliedAt("2024-01-01");
+      setFormError("");
+      setTableFilter((current) => {
+        setActiveScope(current);
+        return current;
+      });
+      setFormOpen(true);
+    }
+    window.addEventListener("ems-ghg-open-form", startNewSource);
+    return () => window.removeEventListener("ems-ghg-open-form", startNewSource);
   }, []);
 
   function persistSources(next: EmissionSource[]) {
@@ -87,10 +117,7 @@ export function GhgConfig() {
   }, [factors, query]);
 
   const visibleSources = useMemo(
-    () =>
-      tableFilter === "all"
-        ? sources
-        : sources.filter((item) => item.scope === tableFilter),
+    () => sources.filter((item) => item.scope === tableFilter),
     [sources, tableFilter],
   );
 
@@ -104,7 +131,7 @@ export function GhgConfig() {
     );
   }
 
-  function resetForm() {
+  function closeForm() {
     setEditingId(null);
     setName("");
     setMethod("meter");
@@ -112,6 +139,12 @@ export function GhgConfig() {
     setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
     setFactorValue(factors[0] ? String(factors[0].value) : "0");
     setAppliedAt("2024-01-01");
+    setFormError("");
+    setFormOpen(false);
+  }
+
+  function handleCancel() {
+    closeForm();
   }
 
   function insertToken(token: string) {
@@ -133,14 +166,19 @@ export function GhgConfig() {
 
   function handleSave() {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setFormError("Vui lòng nhập tên nguồn phát thải.");
+      return;
+    }
     const parsed = Number(factorValue);
+    const existing = editingId ? sources.find((item) => item.id === editingId) : undefined;
     const next: EmissionSource = {
-      id: editingId ?? `src-${Date.now()}`,
+      ...existing,
+      id: existing?.id ?? `src-${Date.now()}`,
       scope: activeScope,
       name: trimmed,
       method,
-      factorId: factorId || factors[0]?.id || "",
+      factorId: factorId || existing?.factorId || factors[0]?.id || "",
       factorValue: Number.isFinite(parsed) ? parsed : 0,
       formula,
       appliedAt,
@@ -151,22 +189,27 @@ export function GhgConfig() {
         : [next, ...sources],
     );
     setTableFilter(activeScope);
-    resetForm();
+    closeForm();
   }
 
   function handleEdit(source: EmissionSource) {
     setEditingId(source.id);
     setActiveScope(source.scope);
+    setTableFilter(source.scope);
     setName(source.name);
     setMethod(source.method);
     setFactorId(source.factorId);
     setFormula(source.formula);
     setFactorValue(String(source.factorValue));
     setAppliedAt(source.appliedAt);
+    setFormError("");
+    setFormOpen(true);
   }
 
   return (
     <div className="space-y-5">
+      {formOpen ? (
+      <>
       <div className="flex flex-wrap items-center gap-2">
         {SCOPES.map((scope) => {
           const active = activeScope === scope.id;
@@ -195,6 +238,7 @@ export function GhgConfig() {
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section
+          id="them-nguon-phat-thai"
           onDragOver={(e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
@@ -217,7 +261,7 @@ export function GhgConfig() {
               <LeafIcon className="h-4 w-4" />
             </span>
             <h2 className="text-[15px] font-semibold text-slate-800">
-              Thiết lập Nguồn phát thải &amp; Hệ số
+              {editingId ? "Chỉnh sửa nguồn phát thải" : "Thêm mới nguồn phát thải"}
             </h2>
           </div>
 
@@ -231,7 +275,10 @@ export function GhgConfig() {
             <Field label="TÊN NGUỒN PHÁT THẢI">
               <input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (formError) setFormError("");
+                }}
                 placeholder="VD: Tiêu thụ điện sản xuất - Xưởng A"
                 className="input"
               />
@@ -351,20 +398,22 @@ export function GhgConfig() {
               </Field>
             </div>
 
-            <div className="flex items-center gap-4 pt-1">
+            {formError ? <p className="text-sm font-medium text-red-500">{formError}</p> : null}
+
+            <div className="flex items-center gap-3 pt-1">
               <button
                 type="submit"
                 className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
               >
                 <SaveIcon className="h-4 w-4" />
-                {editingId ? "Cập nhật cấu hình" : "Lưu cấu hình"}
+                Lưu
               </button>
               <button
                 type="button"
-                onClick={resetForm}
-                className="text-sm font-medium text-slate-500 hover:text-slate-700 hover:underline"
+                onClick={handleCancel}
+                className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
-                Hủy bỏ
+                Hủy
               </button>
             </div>
           </form>
@@ -428,21 +477,22 @@ export function GhgConfig() {
           </p>
         </aside>
       </div>
-
+      </>
+      ) : (
       <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <h2 className="text-[15px] font-semibold text-slate-800">
-            Danh sách nguồn phát thải đã thêm
+            Danh sách nguồn phát thải
           </h2>
           <div className="flex flex-wrap items-center gap-2">
-            <FilterChip active={tableFilter === "all"} onClick={() => setTableFilter("all")}>
-              Tất cả
-            </FilterChip>
             {SCOPES.map((scope) => (
               <FilterChip
                 key={scope.id}
                 active={tableFilter === scope.id}
-                onClick={() => setTableFilter(scope.id)}
+                onClick={() => {
+                  setTableFilter(scope.id);
+                  setActiveScope(scope.id);
+                }}
               >
                 {scope.label}
               </FilterChip>
@@ -522,6 +572,7 @@ export function GhgConfig() {
           </table>
         </div>
       </section>
+      )}
     </div>
   );
 }

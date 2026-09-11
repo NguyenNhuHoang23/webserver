@@ -10,6 +10,7 @@ export type Account = {
   email: string;
   role: AccountRole;
   createdAt: string;
+  password?: string;
 };
 
 export const ACCOUNT_ROLES: AccountRole[] = [

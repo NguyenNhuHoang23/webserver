@@ -1,4 +1,10 @@
+"use client";
+
+import { useAuth } from "@/components/auth/useAuth";
+
 export function Header() {
+  const { session } = useAuth();
+
   return (
     <header className="flex h-16 shrink-0 items-center justify-between gap-6 border-b border-slate-200 bg-white px-6">
       <label className="relative flex min-w-0 max-w-xl flex-1 items-center">
@@ -33,6 +39,10 @@ export function Header() {
           <GearIcon className="h-5 w-5" />
         </button>
 
+        <div className="hidden text-right leading-tight sm:block">
+          <p className="text-sm font-semibold text-slate-800">{session?.username ?? "Quản trị viên"}</p>
+          <p className="text-[11px] tracking-wide text-slate-400">{session?.role ?? "HỆ THỐNG EMS"}</p>
+        </div>
         <img
           src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=80&h=80&fit=crop&crop=faces"
           alt="Ảnh đại diện người dùng"

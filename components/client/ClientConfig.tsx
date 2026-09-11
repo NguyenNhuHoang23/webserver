@@ -591,7 +591,7 @@ function MetersPanel({
               onChange={(e) => setDraft({ ...draft, parentId: e.target.value })}
               className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
             >
-              <option value="">Điểm gốc (không có cha)</option>
+              <option value="">Không có điểm đo cha</option>
               {meters.map((meter) => (
                 <option key={meter.id} value={meter.id}>
                   Con của: {meter.name}
@@ -723,7 +723,7 @@ function MetersPanel({
                         onChange={(e) => changeParent(item.id, e.target.value || null)}
                         className="h-8 max-w-[160px] rounded-md border border-slate-200 bg-white px-2 text-[12px] outline-none focus:border-[#3b82f6]"
                       >
-                        <option value="">— Gốc —</option>
+                        <option value="">Không có điểm đo cha</option>
                         {meters
                           .filter((meter) => meter.id !== item.id && !isMeterDescendant(meters, item.id, meter.id))
                           .map((meter) => (

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { customerPassword, ensureCustomerAccount } from "@/lib/customer-accounts";
 import { INITIAL_PROJECTS, loadProjects, type Project, type ProjectStatus } from "@/lib/projects";
 
 const statusMeta: Record<
@@ -29,6 +30,7 @@ export function ProjectList() {
   const [customer, setCustomer] = useState("all");
   const [status, setStatus] = useState<"all" | ProjectStatus>("all");
   const [page, setPage] = useState(1);
+  const [copiedId, setCopiedId] = useState("");
 
   useEffect(() => {
     setItems(loadProjects());
@@ -204,9 +206,19 @@ export function ProjectList() {
                         href={`/du-an/${project.id}`}
                         className="flex h-8 w-8 items-center justify-center rounded-md text-[#1a73e8] hover:bg-blue-50"
                         aria-label="Xem dự án"
+                        title="Xem dự án khách hàng"
                       >
                         <EyeIcon className="h-4 w-4" />
                       </Link>
+                      <button
+                        type="button"
+                        onClick={() => copyCustomerInvite(project, setCopiedId)}
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
+                        aria-label="Sao chép link khách hàng"
+                        title={copiedId === project.id ? "Đã sao chép" : "Sao chép link và tài khoản khách hàng"}
+                      >
+                        <LinkIcon className="h-4 w-4" />
+                      </button>
                       <Link
                         href={`/chinh-sua-du-an/${project.id}`}
                         className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
@@ -243,8 +255,29 @@ export function ProjectList() {
       >
         <BoltIcon className="h-5 w-5" />
       </Link>
+
+      {copiedId ? (
+        <p className="fixed right-8 bottom-36 z-10 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white shadow-lg">
+          Đã sao chép link và tài khoản khách hàng
+        </p>
+      ) : null}
     </div>
   );
+}
+
+function copyCustomerInvite(project: Project, setCopiedId: (id: string) => void) {
+  const account = ensureCustomerAccount(project);
+  const link = `${window.location.origin}/du-an/${project.id}`;
+  const text = [
+    `Link dự án: ${link}`,
+    `Tài khoản: ${account.username}`,
+    `Mật khẩu: ${customerPassword(account)}`,
+  ].join("\n");
+
+  void navigator.clipboard.writeText(text).then(() => {
+    setCopiedId(project.id);
+    window.setTimeout(() => setCopiedId(""), 2200);
+  });
 }
 
 function StatCard({
@@ -471,6 +504,25 @@ function EyeIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M3 12s3.5-7 9-7 9 7 9 7-3.5 7-9 7-9-7-9-7Z" stroke="currentColor" strokeWidth="1.8" />
       <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function LinkIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5.93"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14 11a5 5 0 0 0-7.07 0L5.52 12.41a5 5 0 0 0 7.07 7.07L14 18.07"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   deviceSpec,
@@ -8,20 +9,44 @@ import {
   loadDevices,
   type CatalogDevice,
 } from "@/lib/devices";
+import {
+  loadClientMeters,
+  saveClientMeters,
+  type ClientMeter,
+} from "@/lib/client-meters";
+import { loadMeterTypeDefs, type MeterTypeDef } from "@/lib/meter-types";
 
-const energyTypes = ["Điện", "Nước", "Nhiệt", "Hơi"] as const;
-
-export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string }) {
-  const [energy, setEnergy] = useState<(typeof energyTypes)[number]>("Điện");
+export function AddMeterPointForm({
+  cancelHref = "/",
+  projectId,
+}: {
+  cancelHref?: string;
+  projectId?: string;
+}) {
+  const router = useRouter();
+  const [energyTypes, setEnergyTypes] = useState<MeterTypeDef[]>(loadMeterTypeDefs);
+  const [energy, setEnergy] = useState("Điện");
+  const [parentId, setParentId] = useState("");
   const [query, setQuery] = useState("");
   const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
+  const [existingMeters, setExistingMeters] = useState<ClientMeter[]>([]);
   const [droppedDevice, setDroppedDevice] = useState<CatalogDevice | null>(null);
   const [pointId, setPointId] = useState("");
   const [pointName, setPointName] = useState("");
+  const [interval, setInterval] = useState("15");
+  const [formula, setFormula] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     setDevices(loadDevices());
-  }, []);
+    setEnergyTypes(loadMeterTypeDefs());
+    if (projectId) setExistingMeters(loadClientMeters(projectId));
+  }, [projectId]);
+
+  const parentOptions = useMemo(
+    () => existingMeters.filter((meter) => meter.utility === energy),
+    [energy, existingMeters],
+  );
 
   const filteredDevices = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -38,16 +63,53 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
 
   function applyDevice(device: CatalogDevice) {
     setDroppedDevice(device);
-    setPointName(device.name);
+    setPointName((current) => current || device.name);
     setPointId((current) => current || device.id.toUpperCase());
+  }
+
+  function selectParent(nextParentId: string) {
+    setParentId(nextParentId);
+    if (!nextParentId) return;
+    const parent = existingMeters.find((meter) => meter.id === nextParentId);
+    if (parent) setEnergy(parent.utility);
+  }
+
+  function selectEnergy(nextEnergy: string) {
+    setEnergy(nextEnergy);
+    const parent = existingMeters.find((meter) => meter.id === parentId);
+    if (parent && parent.utility !== nextEnergy) setParentId("");
+  }
+
+  function handleSubmit() {
+    const id = pointId.trim();
+    const name = pointName.trim();
+    if (!id || !name) {
+      setError("Vui lòng nhập mã điểm đo và tên điểm đo.");
+      return;
+    }
+    if (!projectId) {
+      router.push(cancelHref);
+      return;
+    }
+
+    const meters = loadClientMeters(projectId);
+    const next: ClientMeter = {
+      id: `m-${Date.now()}`,
+      name,
+      code: id,
+      type: droppedDevice?.brandModel || droppedDevice?.type || "Chưa gán thiết bị",
+      parentId: parentId || null,
+      utility: energy,
+      deviceId: droppedDevice?.id ?? null,
+    };
+    saveClientMeters(projectId, [...meters, next]);
+    router.push(cancelHref);
   }
 
   return (
     <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          Thêm mới điểm đo
-        </h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Thêm mới điểm đo</h1>
         <p className="mt-1 text-sm text-slate-500">
           Cấu hình điểm thu thập dữ liệu mới cho hệ thống giám sát năng lượng.
         </p>
@@ -55,37 +117,38 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              const id = e.dataTransfer.getData("text/plain");
-              const device = devices.find((d) => d.id === id);
-              if (device) applyDevice(device);
-            }}
-            className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#8bb4ee] bg-[#f3f8ff] px-6 py-10 text-center"
-          >
-            <ImportIcon className="mb-3 h-8 w-8 text-[#1a73e8]" />
-            <p className="max-w-md text-sm text-slate-500">
-              {droppedDevice
-                ? `Đã gắn thiết bị: ${droppedDevice.name}`
-                : "Kéo thiết bị từ thư viện vào đây để tự động cấu hình..."}
-            </p>
-          </div>
-
-          <h2 className="mt-8 text-[15px] font-semibold text-slate-800">
-            Thông số cơ bản
-          </h2>
+          <h2 className="text-[15px] font-semibold text-slate-800">Thông số cơ bản</h2>
 
           <form
             className="mt-4 space-y-4"
             onSubmit={(e) => {
               e.preventDefault();
+              handleSubmit();
             }}
           >
+            <Field label="LOẠI ĐIỂM ĐO">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {energyTypes.map((type) => {
+                  const active = energy === type.name;
+                  return (
+                    <button
+                      key={type.name}
+                      type="button"
+                      onClick={() => selectEnergy(type.name)}
+                      title={type.description}
+                      className={`h-10 rounded-lg border text-sm font-medium transition-colors ${
+                        active
+                          ? "border-[#1a73e8] bg-white text-[#1a73e8]"
+                          : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
+                      }`}
+                    >
+                      {type.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="MÃ ĐIỂM ĐO (ID)">
                 <input
@@ -93,6 +156,7 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
                   onChange={(e) => setPointId(e.target.value)}
                   placeholder="VD: MP-001"
                   className="input"
+                  required
                 />
               </Field>
               <Field label="TÊN ĐIỂM ĐO">
@@ -101,47 +165,61 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
                   onChange={(e) => setPointName(e.target.value)}
                   placeholder="Nhập tên điểm đo"
                   className="input"
+                  required
                 />
               </Field>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {energyTypes.map((type) => {
-                const active = energy === type;
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => setEnergy(type)}
-                    className={`h-10 rounded-lg border text-sm font-medium transition-colors ${
-                      active
-                        ? "border-[#1a73e8] bg-white text-[#1a73e8]"
-                        : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
-                    }`}
-                  >
-                    {type}
-                  </button>
-                );
-              })}
-            </div>
+            <Field label="THIẾT BỊ">
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const id = e.dataTransfer.getData("text/plain");
+                  const device = devices.find((d) => d.id === id);
+                  if (device) applyDevice(device);
+                }}
+                className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#8bb4ee] bg-[#f3f8ff] px-6 py-10 text-center"
+              >
+                <ImportIcon className="mb-3 h-8 w-8 text-[#1a73e8]" />
+                <p className="max-w-md text-sm text-slate-500">
+                  {droppedDevice
+                    ? `Đã gắn thiết bị: ${droppedDevice.name}`
+                    : "Kéo thiết bị từ thư viện vào đây để tự động cấu hình..."}
+                </p>
+              </div>
+            </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="ĐIỂM ĐO CHA (PARENT POINT)">
+              <Field label="ĐIỂM ĐO CHA">
                 <div className="relative">
-                  <select className="input appearance-none pr-9">
-                    <option value="">Chọn điểm đo cha</option>
-                    <option value="plant">Nhà máy chính</option>
-                    <option value="line-a">Dây chuyền A</option>
-                    <option value="line-b">Dây chuyền B</option>
+                  <select
+                    value={parentId}
+                    onChange={(e) => selectParent(e.target.value)}
+                    className="input appearance-none pr-9"
+                  >
+                    <option value="">Không có điểm đo cha</option>
+                    {parentOptions.map((meter) => (
+                      <option key={meter.id} value={meter.id}>
+                        {meter.name} ({meter.code})
+                      </option>
+                    ))}
                   </select>
-                  <ChevronIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 </div>
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Chỉ chọn nếu điểm đo này có quan hệ cha–con. Nếu không, giữ “Không có điểm đo cha”.
+                </p>
               </Field>
               <Field label="CHU KỲ LẤY MẪU (PHÚT)">
                 <input
                   type="number"
                   min={1}
-                  defaultValue={15}
+                  value={interval}
+                  onChange={(e) => setInterval(e.target.value)}
                   className="input"
                 />
               </Field>
@@ -150,14 +228,18 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
             <Field label="CÔNG THỨC CHUYỂN ĐỔI (DATA TRANSFORM)">
               <div className="relative">
                 <input
+                  value={formula}
+                  onChange={(e) => setFormula(e.target.value)}
                   placeholder="VD: kWh * 0.85"
                   className="input pr-10"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-lg font-semibold text-slate-400">
+                <span className="absolute top-1/2 right-3 -translate-y-1/2 text-lg font-semibold text-slate-400">
                   Σ
                 </span>
               </div>
             </Field>
+
+            {error ? <p className="text-sm font-medium text-red-500">{error}</p> : null}
 
             <div className="flex justify-end gap-3 pt-4">
               <Link
@@ -178,9 +260,7 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
 
         <aside className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <div className="mb-4 flex items-center gap-2">
-            <h2 className="text-[15px] font-semibold text-slate-800">
-              Thư viện loại đồng hồ
-            </h2>
+            <h2 className="text-[15px] font-semibold text-slate-800">Thư viện loại đồng hồ</h2>
             <InfoIcon className="h-4 w-4 text-slate-400" />
           </div>
 
@@ -192,7 +272,7 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Tìm thiết bị..."
-              className="h-9 w-full rounded-lg border border-slate-200 bg-[#f8fafc] pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:bg-white"
+              className="h-9 w-full rounded-lg border border-slate-200 bg-[#f8fafc] pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:bg-white"
             />
           </label>
 
@@ -213,9 +293,7 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
                     <MeterIcon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-slate-800">
-                      {device.name}
-                    </span>
+                    <span className="block truncate text-sm font-medium text-slate-800">{device.name}</span>
                     <span className="block truncate text-xs text-slate-400">
                       {device.brandModel} • {deviceSpec(device)}
                     </span>
@@ -224,9 +302,7 @@ export function AddMeterPointForm({ cancelHref = "/" }: { cancelHref?: string })
               </li>
             ))}
             {filteredDevices.length === 0 && (
-              <li className="py-6 text-center text-sm text-slate-400">
-                Không tìm thấy thiết bị
-              </li>
+              <li className="py-6 text-center text-sm text-slate-400">Không tìm thấy thiết bị</li>
             )}
           </ul>
         </aside>
@@ -244,9 +320,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">
-        {label}
-      </span>
+      <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">{label}</span>
       {children}
     </label>
   );

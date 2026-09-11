@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { logout } from "@/lib/auth";
+import { useAuth } from "@/components/auth/useAuth";
+import { matchProjectConfig, projectConfigPath, type ProjectConfigModule } from "@/lib/project-config";
+import { getProject, loadProjects, type Project } from "@/lib/projects";
 
 const navItems = [
   {
@@ -26,8 +31,30 @@ const navItems = [
   },
 ];
 
+const configItems: { module: ProjectConfigModule; label: string; icon: typeof ChartIcon }[] = [
+  { module: "points", label: "Cấu hình điểm đo", icon: MeterConfigIcon },
+  { module: "ghg", label: "Cấu hình khí nhà kính", icon: EmissionIcon },
+  { module: "alerts", label: "Cấu hình cảnh báo", icon: AlertConfigIcon },
+  { module: "add-meter", label: "Thêm mới điểm đo", icon: DeviceIcon },
+];
+
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { session } = useAuth();
+  const config = matchProjectConfig(pathname);
+  const [project, setProject] = useState<Project | undefined>(() =>
+    config ? getProject(config.projectId) : undefined,
+  );
+
+  useEffect(() => {
+    if (!config) {
+      setProject(undefined);
+      return;
+    }
+    const stored = loadProjects().find((item) => item.id === config.projectId);
+    setProject(stored ?? getProject(config.projectId));
+  }, [config?.projectId]);
 
   return (
     <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -38,53 +65,99 @@ export function Sidebar() {
             EMS Console
           </p>
           <p className="mt-0.5 text-[10px] font-semibold tracking-[0.12em] text-slate-400">
-            OPERATOR LEVEL 1
+            {config ? "CẤU HÌNH DỰ ÁN" : "OPERATOR LEVEL 1"}
           </p>
         </div>
       </div>
 
-      <nav className="mt-1 flex flex-1 flex-col gap-1 px-3">
-        {navItems.map((item) => {
-          const active =
-            item.href === "/"
-              ? pathname === "/" ||
-                pathname.startsWith("/tao-du-an") ||
-                pathname.startsWith("/chinh-sua-du-an") ||
-                pathname.startsWith("/them-diem-do")
-              : pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const Icon = item.icon;
+      {config ? (
+        <nav className="mt-1 flex flex-1 flex-col gap-1 px-3">
+          {project ? (
+            <div className="mb-3 rounded-lg bg-[#f3f8ff] px-3 py-2.5">
+              <p className="truncate text-[13px] font-semibold text-slate-800">{project.name}</p>
+              <p className="truncate text-[11px] text-slate-500">{project.id}</p>
+            </div>
+          ) : null}
+          {configItems.map((item) => {
+            const href = projectConfigPath(config.projectId, item.module);
+            const active = config.module === item.module;
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.module}
+                href={href}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] font-medium transition-colors ${
+                  active
+                    ? "bg-[#1a73e8] text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-200/60"
+                }`}
+              >
+                <Icon className="h-[18px] w-[18px] shrink-0" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+      ) : (
+        <nav className="mt-1 flex flex-1 flex-col gap-1 px-3">
+          {navItems.map((item) => {
+            const active =
+              item.href === "/"
+                ? pathname === "/" || pathname.startsWith("/tao-du-an")
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const Icon = item.icon;
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] font-medium transition-colors ${
-                active
-                  ? "bg-[#1a73e8] text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-200/60"
-              }`}
-            >
-              <Icon className="h-[18px] w-[18px] shrink-0" />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] font-medium transition-colors ${
+                  active
+                    ? "bg-[#1a73e8] text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-200/60"
+                }`}
+              >
+                <Icon className="h-[18px] w-[18px] shrink-0" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
 
       <div className="px-3 pb-5">
-        <Link
-          href="/ho-tro"
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] font-medium text-slate-600 hover:bg-slate-200/60"
-        >
-          <SupportIcon className="h-[18px] w-[18px]" />
-          Support
-        </Link>
+        {config ? (
+          <Link
+            href="/"
+            className="mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] font-medium text-slate-600 hover:bg-slate-200/60"
+          >
+            <ChartIcon className="h-[18px] w-[18px]" />
+            Danh sách dự án
+          </Link>
+        ) : (
+          <Link
+            href="/ho-tro"
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] font-medium text-slate-600 hover:bg-slate-200/60"
+          >
+            <SupportIcon className="h-[18px] w-[18px]" />
+            Support
+          </Link>
+        )}
+        {session ? (
+          <p className="mb-2 truncate px-3 text-[11px] text-slate-400">
+            Đăng nhập: <span className="font-medium text-slate-600">{session.username}</span>
+          </p>
+        ) : null}
         <button
           type="button"
+          onClick={() => {
+            logout();
+            router.replace("/");
+          }}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13.5px] font-medium text-[#d94848] hover:bg-red-50"
         >
           <LogoutIcon className="h-[18px] w-[18px]" />
-          Logout
+          Đăng xuất
         </button>
       </div>
     </aside>
@@ -120,6 +193,24 @@ function ChartIcon({ className }: { className?: string }) {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function MeterConfigIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 15V9M12 15v-4M16 15v-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AlertConfigIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M12 4 3.5 19h17L12 4Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M12 10v5M12 17.4v.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

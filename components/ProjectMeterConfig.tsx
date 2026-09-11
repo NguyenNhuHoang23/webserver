@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { AlertConfig } from "@/components/AlertConfig";
-import { GhgConfig } from "@/components/GhgConfig";
+import { ProjectConfigHeader } from "@/components/ProjectConfigHeader";
 import {
   EXTRA_METER_TYPE_SUGGESTIONS,
   METER_TYPES,
@@ -12,6 +11,8 @@ import {
   type MeterType,
   type Project,
 } from "@/lib/projects";
+import { upsertMeterTypeDef } from "@/lib/meter-types";
+import { projectConfigPath } from "@/lib/project-config";
 
 type Energy = string;
 type DeviceKind = "meter" | "inverter" | "thermo" | "water" | "wind" | "steam" | "air";
@@ -170,18 +171,12 @@ const extraPoints: MeterPoint[] = Array.from({ length: 37 }, (_, i) => {
 
 const allPoints: MeterPoint[] = [...seeds, ...extraPoints];
 const PAGE_SIZE = 10;
-const TABS = [
-  { id: "points", label: "Cấu hình điểm đo" },
-  { id: "ghg", label: "Cấu hình khí nhà kính" },
-  { id: "alerts", label: "Cấu hình cảnh báo" },
-] as const;
 
 function flatten(points: MeterPoint[]): MeterPoint[] {
   return points.flatMap((p) => [p, ...(p.children ?? [])]);
 }
 
 export function ProjectMeterConfig({ project }: { project: Project }) {
-  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("points");
   const [energies, setEnergies] = useState<MeterType[]>(() => resolveMeterTypes(project));
   const [addingType, setAddingType] = useState(false);
   const [newType, setNewType] = useState("");
@@ -248,6 +243,11 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
     if (!label || energies.includes(label)) return;
     setPage(1);
     persistEnergies([...energies, label]);
+    try {
+      upsertMeterTypeDef({ name: label, description: "" });
+    } catch {
+      // Loại đã có trong catalog thì chỉ cần gán vào dự án.
+    }
     setNewType("");
     setAddingType(false);
   }
@@ -263,62 +263,18 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
 
   return (
     <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold tracking-wide text-slate-400">
-            CHỈNH SỬA DỰ ÁN
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
-            {project.name}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {project.id} · {project.customer}
-          </p>
-        </div>
-        <Link
-          href="/"
-          className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
-          ← Quay lại danh sách dự án
-        </Link>
-      </div>
-
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200">
-        <div className="flex gap-6">
-          {TABS.map((item) => {
-            const active = tab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setTab(item.id)}
-                className={`relative pb-3 text-sm font-semibold ${
-                  active ? "text-[#1a73e8]" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                {item.label}
-                {active && (
-                  <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[#1a73e8]" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <Link
-          href={`/them-diem-do?project=${project.id}`}
-          className="mb-2 inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
-        >
-          <span className="text-lg leading-none">+</span>
-          Thêm mới điểm đo
-        </Link>
-      </div>
-
-      {tab === "ghg" ? (
-        <GhgConfig />
-      ) : tab === "alerts" ? (
-        <AlertConfig />
-      ) : (
-        <>
+      <ProjectConfigHeader
+        project={project}
+        actions={
+          <Link
+            href={projectConfigPath(project.id, "add-meter")}
+            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+          >
+            <span className="text-lg leading-none">+</span>
+            Thêm mới điểm đo
+          </Link>
+        }
+      />
           <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               label="TỔNG ĐIỂM ĐO"
@@ -527,8 +483,6 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
               </div>
             </div>
           </section>
-        </>
-      )}
     </div>
   );
 }
@@ -604,7 +558,7 @@ function DeviceRows({
         <td className="px-5 py-3.5">
           <div className="flex justify-end">
             <Link
-              href={`/them-diem-do?project=${projectId}`}
+              href={projectConfigPath(projectId, "add-meter")}
               className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
               aria-label="Chỉnh sửa điểm đo"
             >

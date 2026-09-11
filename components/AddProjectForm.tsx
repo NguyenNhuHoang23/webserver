@@ -14,13 +14,14 @@ import {
   type MeterType,
   type ProjectStatus,
 } from "@/lib/projects";
-
-const METER_META: { id: MeterType; hint: string; icon: "bolt" | "drop" | "thermo" | "steam" }[] = [
-  { id: "Điện", hint: "Điện năng, công suất, chất lượng điện", icon: "bolt" },
-  { id: "Nước", hint: "Lưu lượng và sản lượng nước", icon: "drop" },
-  { id: "Nhiệt", hint: "Nhiệt độ và năng lượng nhiệt", icon: "thermo" },
-  { id: "Hơi", hint: "Áp suất và lưu lượng hơi", icon: "steam" },
-];
+import { ensureCustomerAccount } from "@/lib/customer-accounts";
+import {
+  loadMeterTypeDefs,
+  removeMeterTypeDef,
+  upsertMeterTypeDef,
+  type MeterTypeDef,
+  type MeterTypeIconId,
+} from "@/lib/meter-types";
 
 function nextRecipient(): AlertRecipient {
   return { id: `rcpt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: "", email: "", phone: "" };
@@ -46,6 +47,11 @@ export function AddProjectForm() {
   const [startDate, setStartDate] = useState(todayIso);
   const [status, setStatus] = useState<ProjectStatus>("active");
   const [meterTypes, setMeterTypes] = useState<MeterType[]>(["Điện"]);
+  const [meterCatalog, setMeterCatalog] = useState<MeterTypeDef[]>(loadMeterTypeDefs);
+  const [meterEditor, setMeterEditor] = useState<"add" | string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [draftDescription, setDraftDescription] = useState("");
+  const [meterError, setMeterError] = useState("");
   const [recipients, setRecipients] = useState<AlertRecipient[]>([
     { id: "rcpt-new", name: "", email: "", phone: "" },
   ]);
@@ -53,12 +59,63 @@ export function AddProjectForm() {
 
   useEffect(() => {
     setCode(nextProjectId());
+    setMeterCatalog(loadMeterTypeDefs());
   }, []);
 
   function toggleMeter(type: MeterType) {
     setMeterTypes((current) =>
       current.includes(type) ? current.filter((item) => item !== type) : [...current, type],
     );
+  }
+
+  function openAddMeterType() {
+    setMeterEditor("add");
+    setDraftName("");
+    setDraftDescription("");
+    setMeterError("");
+  }
+
+  function openEditMeterType(item: MeterTypeDef) {
+    setMeterEditor(item.name);
+    setDraftName(item.name);
+    setDraftDescription(item.description);
+    setMeterError("");
+  }
+
+  function cancelMeterEditor() {
+    setMeterEditor(null);
+    setDraftName("");
+    setDraftDescription("");
+    setMeterError("");
+  }
+
+  function saveMeterType() {
+    try {
+      const previous = meterEditor === "add" ? undefined : meterEditor ?? undefined;
+      const next = upsertMeterTypeDef({ name: draftName, description: draftDescription }, previous);
+      setMeterCatalog(next);
+      const savedName = draftName.trim();
+      if (previous && previous !== savedName) {
+        setMeterTypes((current) => current.map((item) => (item === previous ? savedName : item)));
+      }
+      if (meterEditor === "add" && savedName && !meterTypes.includes(savedName)) {
+        setMeterTypes((current) => [...current, savedName]);
+      }
+      cancelMeterEditor();
+    } catch (err) {
+      setMeterError(err instanceof Error ? err.message : "Không thể lưu loại điểm đo.");
+    }
+  }
+
+  function deleteMeterType(item: MeterTypeDef) {
+    try {
+      const next = removeMeterTypeDef(item.name);
+      setMeterCatalog(next);
+      setMeterTypes((current) => current.filter((type) => type !== item.name));
+      if (meterEditor === item.name) cancelMeterEditor();
+    } catch (err) {
+      setMeterError(err instanceof Error ? err.message : "Không thể xóa loại điểm đo.");
+    }
   }
 
   function updateRecipient(id: string, patch: Partial<AlertRecipient>) {
@@ -111,6 +168,7 @@ export function AddProjectForm() {
       meterTypes,
       recipients: cleanedRecipients,
     });
+    ensureCustomerAccount({ id: projectCode, customer: customerName });
 
     router.push("/");
   }
@@ -152,8 +210,12 @@ export function AddProjectForm() {
             <Field label="TÊN DỰ ÁN">
               <input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="VD: Sunrise Bắc Ninh Factory"
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setName(value);
+                  setCustomer(value);
+                }}
+                placeholder="VD: Công ty TNHH ABC"
                 className="input"
                 required
               />
@@ -162,7 +224,7 @@ export function AddProjectForm() {
               <input
                 value={customer}
                 onChange={(e) => setCustomer(e.target.value)}
-                placeholder="VD: Sunrise Group"
+                placeholder="Tự điền theo tên dự án"
                 className="input"
                 required
               />
@@ -231,48 +293,143 @@ export function AddProjectForm() {
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-8">
-          <div className="mb-5">
-            <h2 className="text-[15px] font-semibold text-slate-800">Loại điểm đo</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Chọn các loại năng lượng sẽ được giám sát trong dự án này.
-            </p>
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[15px] font-semibold text-slate-800">Loại điểm đo</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Chọn các loại năng lượng sẽ được giám sát trong dự án này. Có thể thêm loại mới ngoài 4 loại mặc định.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={openAddMeterType}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-[#1a73e8] hover:bg-blue-50"
+            >
+              <span className="text-lg leading-none">+</span>
+              Thêm loại điểm đo
+            </button>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {METER_META.map((item) => {
-              const active = meterTypes.includes(item.id);
-              return (
+          {meterEditor ? (
+            <div className="mb-4 grid gap-3 rounded-xl border border-[#c5daf7] bg-[#f8fbff] p-4 sm:grid-cols-[1fr_1fr_auto]">
+              <Field label="TÊN LOẠI ĐIỂM ĐO">
+                <input
+                  value={draftName}
+                  onChange={(e) => {
+                    setDraftName(e.target.value);
+                    setMeterError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      saveMeterType();
+                    }
+                    if (e.key === "Escape") cancelMeterEditor();
+                  }}
+                  placeholder="VD: Khí nén"
+                  className="input"
+                  disabled={meterEditor !== "add" && meterCatalog.find((item) => item.name === meterEditor)?.builtin}
+                />
+              </Field>
+              <Field label="MÔ TẢ">
+                <input
+                  value={draftDescription}
+                  onChange={(e) => {
+                    setDraftDescription(e.target.value);
+                    setMeterError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      saveMeterType();
+                    }
+                    if (e.key === "Escape") cancelMeterEditor();
+                  }}
+                  placeholder="VD: Áp suất và lưu lượng khí nén"
+                  className="input"
+                />
+              </Field>
+              <div className="flex items-end gap-2">
                 <button
-                  key={item.id}
                   type="button"
-                  onClick={() => toggleMeter(item.id)}
+                  onClick={saveMeterType}
+                  className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white hover:bg-[#1666d0]"
+                >
+                  {meterEditor === "add" ? "Thêm" : "Lưu"}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelMeterEditor}
+                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  Hủy
+                </button>
+              </div>
+              {meterError ? <p className="text-sm font-medium text-red-500 sm:col-span-3">{meterError}</p> : null}
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {meterCatalog.map((item) => {
+              const active = meterTypes.includes(item.name);
+              return (
+                <div
+                  key={item.name}
                   className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors ${
                     active
                       ? "border-[#1a73e8] bg-[#f3f8ff] ring-1 ring-[#1a73e8]/20"
                       : "border-slate-200 bg-white hover:border-[#c5daf7] hover:bg-slate-50"
                   }`}
                 >
-                  <span
-                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                      active ? "bg-[#1a73e8] text-white" : "bg-slate-100 text-slate-500"
-                    }`}
+                  <button
+                    type="button"
+                    onClick={() => toggleMeter(item.name)}
+                    className="flex min-w-0 flex-1 items-start gap-3 text-left"
                   >
-                    <MeterTypeIcon type={item.icon} className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-slate-800">{item.id}</span>
-                      <span
-                        className={`flex h-5 w-5 items-center justify-center rounded-full border ${
-                          active ? "border-[#1a73e8] bg-[#1a73e8] text-white" : "border-slate-300 bg-white"
-                        }`}
-                      >
-                        {active ? <CheckIcon className="h-3 w-3" /> : null}
-                      </span>
+                    <span
+                      className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                        active ? "bg-[#1a73e8] text-white" : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      <MeterTypeIcon type={item.icon} className="h-4 w-4" />
                     </span>
-                    <span className="mt-0.5 block text-xs text-slate-500">{item.hint}</span>
-                  </span>
-                </button>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-slate-800">{item.name}</span>
+                        <span
+                          className={`flex h-5 w-5 items-center justify-center rounded-full border ${
+                            active ? "border-[#1a73e8] bg-[#1a73e8] text-white" : "border-slate-300 bg-white"
+                          }`}
+                        >
+                          {active ? <CheckIcon className="h-3 w-3" /> : null}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-500">{item.description}</span>
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 flex-col gap-1">
+                    <button
+                      type="button"
+                      onClick={() => openEditMeterType(item)}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-[#1a73e8]"
+                      aria-label={`Sửa ${item.name}`}
+                      title="Sửa"
+                    >
+                      <EditIcon className="h-3.5 w-3.5" />
+                    </button>
+                    {item.builtin ? null : (
+                      <button
+                        type="button"
+                        onClick={() => deleteMeterType(item)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
+                        aria-label={`Xóa ${item.name}`}
+                        title="Xóa"
+                      >
+                        <TrashIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -383,7 +540,7 @@ function MeterTypeIcon({
   type,
   className,
 }: {
-  type: "bolt" | "drop" | "thermo" | "steam";
+  type: MeterTypeIconId;
   className?: string;
 }) {
   if (type === "drop") {
@@ -414,9 +571,40 @@ function MeterTypeIcon({
       </svg>
     );
   }
+  if (type === "air") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M4 9h11a3 3 0 1 0 0-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M4 13h14a3 3 0 1 1 0 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M4 17h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "generic") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M12 8v4l2.5 1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <path d="M13 2 4.5 13.5h6.2L9.2 22 19.5 10h-6.2L13 2Z" />
+    </svg>
+  );
+}
+
+function EditIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 17.5V20h2.5L18 8.5 15.5 6 4 17.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M13.8 7.7 16.3 10.2" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
