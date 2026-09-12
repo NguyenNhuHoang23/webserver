@@ -437,15 +437,15 @@ export function AlertConfig() {
           return (
             <div
               key={category.id}
-              className={`inline-flex h-11 items-center gap-2 rounded-xl pl-2.5 pr-1 text-sm font-medium ${
+              className={`inline-flex h-11 items-center gap-2 rounded-xl pl-2.5 pr-1 text-sm font-semibold transition-all ${
                 selected
-                  ? "bg-[#e8f1fd] text-[#1a73e8] ring-1 ring-[#1a73e8]"
-                  : "bg-white text-slate-600 ring-1 ring-slate-200"
+                  ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-500 shadow-xs"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:text-slate-900"
               }`}
             >
               <span
                 className={`flex h-7 w-7 items-center justify-center rounded-lg ${
-                  selected ? "bg-white text-[#1a73e8]" : "bg-slate-50 text-slate-500"
+                  selected ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-50 text-slate-500"
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -457,7 +457,7 @@ export function AlertConfig() {
                 type="button"
                 aria-label={`Ẩn nhóm ${category.label}`}
                 className={`px-2 text-base leading-none ${
-                  selected ? "text-[#1a73e8]/70" : "text-slate-400"
+                  selected ? "text-emerald-700/70 hover:text-emerald-900" : "text-slate-400 hover:text-slate-600"
                 }`}
                 onClick={() => removeCategory(category.id)}
               >
@@ -467,13 +467,13 @@ export function AlertConfig() {
           );
         })}
         {addingCategory ? (
-          <div className="flex min-w-[280px] flex-1 flex-wrap items-center gap-2 rounded-xl border border-dashed border-[#1a73e8] bg-[#f3f8ff] p-2">
+          <div className="flex min-w-[280px] flex-1 flex-wrap items-center gap-2 rounded-xl border border-dashed border-emerald-500 bg-emerald-50/40 p-2">
             {unusedCatalog.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => addExistingCategory(item)}
-                className="inline-flex h-8 items-center rounded-lg bg-white px-2.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:text-[#1a73e8] hover:ring-[#1a73e8]"
+                className="inline-flex h-8 items-center rounded-lg bg-white px-2.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:text-emerald-600 hover:ring-emerald-500 transition-colors"
               >
                 {item.label}
               </button>
@@ -490,13 +490,13 @@ export function AlertConfig() {
                 }
               }}
               placeholder="Tên nhóm cảnh báo mới"
-              className="h-8 min-w-[160px] flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:border-[#1a73e8]"
+              className="h-8 min-w-[160px] flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:border-emerald-500"
             />
             <button
               type="button"
               onClick={addCustomCategory}
               disabled={!newCategoryName.trim()}
-              className="h-8 rounded-lg bg-[#1a73e8] px-3 text-xs font-medium text-white disabled:opacity-40"
+              className="h-8 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40 transition-colors shadow-xs"
             >
               Thêm
             </button>
@@ -515,9 +515,9 @@ export function AlertConfig() {
           <button
             type="button"
             onClick={() => setAddingCategory(true)}
-            className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-dashed border-slate-300 bg-white px-3 text-sm font-medium text-slate-500 hover:border-[#1a73e8] hover:text-[#1a73e8]"
+            className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-dashed border-slate-300 bg-white px-3 text-sm font-semibold text-slate-500 hover:border-emerald-500 hover:text-emerald-600 transition-colors"
           >
-            <span className="text-base leading-none">+</span>
+            <span className="text-base leading-none text-emerald-600">+</span>
             Thêm mới
           </button>
         )}
@@ -538,7 +538,7 @@ export function AlertConfig() {
             </h2>
             <button
               type="button"
-              className="mt-2 inline-flex items-center gap-2 text-sm font-medium text-[#1a73e8] hover:underline"
+              className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
             >
               <LiveIcon className="h-4 w-4" />
               Cấu hình Gateway trực tuyến (Live Gateway Configuration)
@@ -560,7 +560,7 @@ export function AlertConfig() {
                   <input
                     value={alarm.alarmId}
                     onChange={(e) => updateAlarm(alarm.id, { alarmId: e.target.value })}
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-center text-sm font-semibold outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/15"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-center text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
                   />
                 </label>
 
@@ -572,7 +572,7 @@ export function AlertConfig() {
                     value={alarm.name}
                     onChange={(e) => updateAlarm(alarm.id, { name: e.target.value })}
                     placeholder="Nhập tên cảnh báo"
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/15"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
                   />
                   <span className="mt-1.5 block text-xs text-slate-400">{alarm.description}</span>
                 </label>
@@ -581,14 +581,14 @@ export function AlertConfig() {
                   <input
                     value={alarm.threshold}
                     onChange={(e) => updateAlarm(alarm.id, { threshold: e.target.value })}
-                    className="w-24 bg-transparent text-right text-3xl font-bold tracking-tight text-[#1a73e8] outline-none"
+                    className="w-24 bg-transparent text-right text-3xl font-bold tracking-tight text-emerald-600 outline-none"
                     aria-label="Ngưỡng cảnh báo"
                   />
-                  <span className="text-lg font-semibold text-[#5b9cf0]">{alarm.unit}</span>
+                  <span className="text-lg font-semibold text-emerald-500">{alarm.unit}</span>
                 </div>
               </div>
 
-              <div className="mt-3 flex items-center gap-2 text-sm font-medium text-[#1a73e8]">
+              <div className="mt-3 flex items-center gap-2 text-sm font-medium text-emerald-700">
                 <CurrentIcon className="h-3.5 w-3.5" />
                 Giá trị hiện tại: {alarm.current}
               </div>
@@ -599,9 +599,9 @@ export function AlertConfig() {
         <button
           type="button"
           onClick={addAlarm}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-[#f8fafc] py-3.5 text-sm font-medium text-slate-500 hover:border-[#1a73e8] hover:bg-[#f3f8ff] hover:text-[#1a73e8]"
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-[#f8fafc] py-3.5 text-sm font-semibold text-slate-600 hover:border-emerald-500 hover:bg-emerald-50/30 hover:text-emerald-700 transition-colors"
         >
-          <span className="text-base leading-none">+</span>
+          <span className="text-base leading-none text-emerald-600">+</span>
           Thêm loại cảnh báo
         </button>
       </section>
@@ -614,7 +614,7 @@ export function AlertConfig() {
           <button
             type="button"
             onClick={() => setShowAllHistory((open) => !open)}
-            className="text-sm font-medium text-[#1a73e8] hover:underline"
+            className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
           >
             {showAllHistory ? "Thu gọn" : "Xem tất cả"}
           </button>
@@ -633,7 +633,7 @@ export function AlertConfig() {
                 <span className="block text-sm font-semibold text-slate-800">{item.title}</span>
                 <span className="block text-xs text-slate-400">{item.detail}</span>
               </span>
-              <span className="text-sm font-semibold text-[#1a73e8]">{item.values}</span>
+              <span className="text-sm font-semibold text-emerald-600">{item.values}</span>
             </li>
           ))}
         </ul>

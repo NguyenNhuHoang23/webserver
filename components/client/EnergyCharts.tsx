@@ -2,6 +2,13 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  DEFAULT_TIME_FILTER,
+  TimeFilterBar,
+  getTimeFilterLabel,
+  getTimeFilterPeriods,
+  type TimeFilterValue,
+} from "@/components/client/TimeFilterBar";
 import { FrequencyChart } from "@/components/client/FrequencyChart";
 import { HarmonicsChart } from "@/components/client/HarmonicsChart";
 import { PowerChart } from "@/components/client/PowerChart";
@@ -22,7 +29,7 @@ type MeterPoint = {
   color: string;
 };
 
-const POINT_COLORS = ["#4f89d8", "#22c55e", "#a16207", "#ef4444", "#8b5cf6", "#06b6d4", "#f59e0b"];
+const POINT_COLORS = ["#059669", "#22c55e", "#a16207", "#ef4444", "#8b5cf6", "#06b6d4", "#f59e0b"];
 
 const FALLBACK_POINTS: MeterPoint[] = [
   { id: "p1", code: "DB-OFF1", name: "Tủ điện văn phòng", energy: "Điện", color: POINT_COLORS[0] },
@@ -57,44 +64,28 @@ const METRICS: { id: MetricId; label: string }[] = [
 
 type BarPoint = { minute: number; label: string; kwh: number };
 
-function daysInMonth(ym: string) {
-  const [y, m] = ym.split("-").map(Number);
-  return new Date(y, m, 0).getDate();
-}
-
-function monthLabel(ym: string) {
-  const [y, m] = ym.split("-").map(Number);
-  const names = [
-    "Tháng Một",
-    "Tháng Hai",
-    "Tháng Ba",
-    "Tháng Tư",
-    "Tháng Năm",
-    "Tháng Sáu",
-    "Tháng Bảy",
-    "Tháng Tám",
-    "Tháng Chín",
-    "Tháng Mười",
-    "Tháng Mười một",
-    "Tháng Mười hai",
-  ];
-  return `${names[(m || 1) - 1]} ${y}`;
-}
-
-function monthDayBars(seed: number, days: number): BarPoint[] {
-  return Array.from({ length: days }, (_, i) => {
-    const day = i + 1;
-    const weekend = (day + Math.floor(seed)) % 7 >= 5;
-    const kwh =
-      95 +
-      55 * Math.sin(day * 0.45 + seed) +
-      35 * Math.sin(day * 0.9 + seed * 0.7) +
-      (weekend ? -25 : 18) +
-      (day % 5) * 3;
+function energyBarsForFilter(seed: number, filter: TimeFilterValue): BarPoint[] {
+  const periods = getTimeFilterPeriods(filter);
+  const count = Math.max(periods.length, 1);
+  return periods.map((p, i) => {
+    const isHourly = filter.mode === "day" || filter.mode === "custom_date";
+    let baseKwh = 95;
+    if (isHourly) {
+      const hour = Number(p.key);
+      const isWorkHour = hour >= 7 && hour <= 18;
+      baseKwh = isWorkHour ? 150 + 40 * Math.sin(hour * 0.4) : 40 + 15 * Math.sin(hour);
+    } else if (filter.mode === "year") {
+      baseKwh = 2400 + 450 * Math.sin(i * 0.55 + seed);
+    } else {
+      const weekend = (i + Math.floor(seed)) % 7 >= 5;
+      baseKwh = 95 + 50 * Math.sin(i * 0.45 + seed) + (weekend ? -25 : 18);
+    }
+    const noise = Math.sin(i * 0.9 + seed * 0.7) * (isHourly ? 8 : 20);
+    const kwh = Math.max(10, baseKwh + noise);
     return {
       minute: i,
-      label: String(day),
-      kwh: Number(Math.max(40, Math.min(250, kwh)).toFixed(1)),
+      label: p.label,
+      kwh: Number(kwh.toFixed(1)),
     };
   });
 }
@@ -159,7 +150,7 @@ export function EnergyCharts() {
   const [allPoints, setAllPoints] = useState<MeterPoint[]>(FALLBACK_POINTS);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pointQuery, setPointQuery] = useState("");
-  const [month, setMonth] = useState("2024-08");
+  const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
 
   useEffect(() => {
     const project = loadProjects().find((item) => item.id === projectId);
@@ -231,20 +222,20 @@ export function EnergyCharts() {
     [metric, seed, selectedPoints.length],
   );
 
-  const dayCount = daysInMonth(month);
-
-  useEffect(() => {
-    setRange({ start: 0, end: Math.max(dayCount - 1, 0) });
-  }, [month, dayCount]);
-
   const multiBars = useMemo(
     () =>
       selectedPoints.map((point, i) => ({
         point,
-        bars: monthDayBars(seed + i * 1.7, dayCount),
+        bars: energyBarsForFilter(seed + i * 1.7, timeFilter),
       })),
-    [selectedPoints, seed, dayCount],
+    [selectedPoints, seed, timeFilter],
   );
+
+  const barCount = multiBars[0]?.bars.length ?? 30;
+
+  useEffect(() => {
+    setRange({ start: 0, end: Math.max(barCount - 1, 0) });
+  }, [timeFilter, barCount]);
 
   const isElectric = energy === "Điện";
   /** Tiêu thụ năng lượng/hạ tầng — áp dụng mọi loại (Điện, Nước, …) */
@@ -277,7 +268,7 @@ export function EnergyCharts() {
             ? "kWh"
             : "kWh";
 
-  const primaryBars = multiBars[0]?.bars ?? monthDayBars(seed, dayCount);
+  const primaryBars = multiBars[0]?.bars ?? energyBarsForFilter(seed, timeFilter);
   const visibleBars = primaryBars.slice(range.start, range.end + 1);
   const barSum = multiBars.reduce(
     (sum, series) =>
@@ -379,7 +370,7 @@ export function EnergyCharts() {
               value={pointQuery}
               onChange={(e) => setPointQuery(e.target.value)}
               placeholder="Tìm điểm đo..."
-              className="h-9 w-full rounded-md border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8]"
+              className="h-9 w-full rounded-md border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-emerald-500"
             />
           </label>
           <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-slate-400">
@@ -390,7 +381,7 @@ export function EnergyCharts() {
               <button
                 type="button"
                 onClick={selectAllVisible}
-                className="font-medium text-[#1a73e8] hover:underline"
+                className="font-medium text-emerald-600 hover:underline"
               >
                 Chọn tất cả
               </button>
@@ -416,7 +407,7 @@ export function EnergyCharts() {
                     <label
                       className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors ${
                         checked
-                          ? "bg-[#1a73e8] text-white shadow-sm"
+                          ? "bg-emerald-600 text-white shadow-sm"
                           : "text-slate-700 hover:bg-slate-50"
                       }`}
                     >
@@ -424,7 +415,7 @@ export function EnergyCharts() {
                         type="checkbox"
                         checked={checked}
                         onChange={() => togglePoint(point.id)}
-                        className="h-4 w-4 shrink-0 rounded border border-white/40 bg-white accent-[#1a73e8]"
+                        className="h-4 w-4 shrink-0 rounded border border-white/40 bg-white accent-emerald-600"
                       />
                       <span
                         className="h-2.5 w-2.5 shrink-0 rounded-[2px] ring-1 ring-black/10"
@@ -456,38 +447,41 @@ export function EnergyCharts() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-2 sm:px-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {energyKinds.map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => {
-                  setEnergy(item);
-                  setMetric("energy");
-                }}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] font-medium ${
-                  energy === item
-                    ? "border-[#1a73e8] bg-[#1a73e8] text-white"
-                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
-                }`}
-              >
-                <EnergyGlyph type={ENERGY_KIND_META[item] ?? "bolt"} className="h-3.5 w-3.5" />
-                {item}
-              </button>
-            ))}
+        <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {energyKinds.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => {
+                    setEnergy(item);
+                    setMetric("energy");
+                  }}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] font-medium transition-colors ${
+                    energy === item
+                      ? "border-slate-900 bg-slate-900 text-white shadow-xs"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <EnergyGlyph type={ENERGY_KIND_META[item] ?? "bolt"} className="h-3.5 w-3.5" />
+                  {item}
+                </button>
+              ))}
+            </div>
+            <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
           </div>
           {isElectric ? (
-            <div className="mt-1.5 flex flex-wrap gap-1">
+            <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
               {METRICS.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => setMetric(item.id)}
-                  className={`h-7 rounded-full px-2.5 text-[11.5px] font-medium ${
+                  className={`h-7 rounded-full px-2.5 text-[11.5px] font-medium transition-colors ${
                     metric === item.id
-                      ? "bg-[#1a73e8] text-white"
-                      : "bg-slate-50 text-slate-500 ring-1 ring-slate-200 hover:bg-white"
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "bg-slate-50 text-slate-600 ring-1 ring-slate-200 hover:bg-white"
                   }`}
                 >
                   {item.label}
@@ -536,7 +530,7 @@ export function EnergyCharts() {
                         ))
                       )}
                       {showSum && selectedPoints.length > 0 ? (
-                        <span className="font-semibold text-[#1a73e8]">
+                        <span className="font-semibold text-emerald-600">
                           Σ {formatNum(barSum)} {consumptionUnit}
                         </span>
                       ) : null}
@@ -585,7 +579,7 @@ export function EnergyCharts() {
                     <table className="w-full min-w-[480px] text-left text-sm">
                       <thead>
                         <tr className="border-b border-slate-100 text-[11px] text-slate-400">
-                          <th className="py-2 font-medium">Ngày</th>
+                          <th className="py-2 font-medium">Thời điểm</th>
                           {selectedPoints.map((p) => (
                             <th key={p.id} className="py-2 font-medium" style={{ color: p.color }}>
                               ({p.code}) {p.name}
@@ -596,7 +590,7 @@ export function EnergyCharts() {
                       <tbody>
                         {visibleBars.map((point, rowIdx) => (
                           <tr key={point.minute} className="border-b border-slate-50 text-slate-600">
-                            <td className="py-1.5">Ngày {point.label}</td>
+                            <td className="py-1.5 font-medium">{point.label}</td>
                             {multiBars.map((series) => (
                               <td key={series.point.id} className="py-1.5">
                                 {series.bars[range.start + rowIdx]?.kwh.toFixed(1)} {consumptionUnit}
@@ -662,19 +656,10 @@ export function EnergyCharts() {
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <label className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
-                <span className="text-slate-500">Tháng</span>
-                <span className="text-slate-300">|</span>
-                <input
-                  type="month"
-                  value={month}
-                  onChange={(e) => setMonth(e.target.value)}
-                  className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
-                />
-                <span className="hidden text-[12px] text-slate-400 sm:inline">
-                  {monthLabel(month)}
-                </span>
-              </label>
+              <div className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-xs">
+                <span className="text-slate-400 font-normal">Kỳ lọc:</span>
+                <span className="text-slate-900">{getTimeFilterLabel(timeFilter)}</span>
+              </div>
               <div className="flex flex-wrap items-center gap-3 text-[12px] text-slate-500">
                 <p className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -781,7 +766,7 @@ export function EnergyCharts() {
                   label={`GIÁ TRỊ NHỎ NHẤT (${totals.count} ĐIỂM)`}
                   value={totals.min}
                   unit={statsUnit}
-                  color="text-[#1a73e8]"
+                  color="text-emerald-600"
                 />
                 <StatCard
                   label={`GIÁ TRỊ LỚN NHẤT (${totals.count} ĐIỂM)`}
@@ -929,8 +914,8 @@ function MultiConsumptionBarChart({
         {hover != null && base[hover] ? (
           <g transform={`translate(${Math.min(pad.l + (hover - range.start) * groupW + 12, W - 180)}, ${pad.t + 6})`}>
             <rect width="168" height={20 + series.length * 16} rx="4" fill="white" stroke="#e2e8f0" />
-            <text x="10" y="16" className="fill-slate-500" fontSize="11">
-              Ngày {base[hover].label}
+            <text x="10" y="16" className="fill-slate-500 font-semibold" fontSize="11">
+              {base[hover].label}
             </text>
             {series.map((item, i) => (
               <text
@@ -948,7 +933,7 @@ function MultiConsumptionBarChart({
         ) : null}
       </svg>
       <DataZoom
-        points={base.length ? base : monthDayBars(1, 31)}
+        points={base}
         range={range}
         onRange={onRange}
       />

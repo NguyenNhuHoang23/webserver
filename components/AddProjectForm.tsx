@@ -303,7 +303,7 @@ export function AddProjectForm() {
             <button
               type="button"
               onClick={openAddMeterType}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-[#1a73e8] hover:bg-blue-50"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100/70 transition-colors"
             >
               <span className="text-lg leading-none">+</span>
               Thêm loại điểm đo
@@ -311,7 +311,7 @@ export function AddProjectForm() {
           </div>
 
           {meterEditor ? (
-            <div className="mb-4 grid gap-3 rounded-xl border border-[#c5daf7] bg-[#f8fbff] p-4 sm:grid-cols-[1fr_1fr_auto]">
+            <div className="mb-4 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50/30 p-4 sm:grid-cols-[1fr_1fr_auto]">
               <Field label="TÊN LOẠI ĐIỂM ĐO">
                 <input
                   value={draftName}
@@ -331,7 +331,7 @@ export function AddProjectForm() {
                   disabled={meterEditor !== "add" && meterCatalog.find((item) => item.name === meterEditor)?.builtin}
                 />
               </Field>
-              <Field label="MÔ TẢ">
+              <Field label="MÔ TẢ LOẠI ĐIỂM ĐO">
                 <input
                   value={draftDescription}
                   onChange={(e) => {
@@ -353,7 +353,7 @@ export function AddProjectForm() {
                 <button
                   type="button"
                   onClick={saveMeterType}
-                  className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white hover:bg-[#1666d0]"
+                  className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors shadow-xs"
                 >
                   {meterEditor === "add" ? "Thêm" : "Lưu"}
                 </button>
@@ -377,8 +377,8 @@ export function AddProjectForm() {
                   key={item.name}
                   className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors ${
                     active
-                      ? "border-[#1a73e8] bg-[#f3f8ff] ring-1 ring-[#1a73e8]/20"
-                      : "border-slate-200 bg-white hover:border-[#c5daf7] hover:bg-slate-50"
+                      ? "border-emerald-600 bg-emerald-50/70 ring-1 ring-emerald-500/20"
+                      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
                   }`}
                 >
                   <button
@@ -388,7 +388,7 @@ export function AddProjectForm() {
                   >
                     <span
                       className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                        active ? "bg-[#1a73e8] text-white" : "bg-slate-100 text-slate-500"
+                        active ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-100 text-slate-500"
                       }`}
                     >
                       <MeterTypeIcon type={item.icon} className="h-4 w-4" />
@@ -397,8 +397,8 @@ export function AddProjectForm() {
                       <span className="flex items-center justify-between gap-2">
                         <span className="text-sm font-semibold text-slate-800">{item.name}</span>
                         <span
-                          className={`flex h-5 w-5 items-center justify-center rounded-full border ${
-                            active ? "border-[#1a73e8] bg-[#1a73e8] text-white" : "border-slate-300 bg-white"
+                          className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+                            active ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white"
                           }`}
                         >
                           {active ? <CheckIcon className="h-3 w-3" /> : null}
@@ -411,7 +411,7 @@ export function AddProjectForm() {
                     <button
                       type="button"
                       onClick={() => openEditMeterType(item)}
-                      className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-[#1a73e8]"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-emerald-600"
                       aria-label={`Sửa ${item.name}`}
                       title="Sửa"
                     >
@@ -446,9 +446,9 @@ export function AddProjectForm() {
             <button
               type="button"
               onClick={() => setRecipients((current) => [...current, nextRecipient()])}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-[#1a73e8] hover:bg-blue-50"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors shadow-xs"
             >
-              <span className="text-lg leading-none">+</span>
+              <span className="text-lg leading-none text-emerald-600">+</span>
               Thêm người nhận
             </button>
           </div>
@@ -509,13 +509,13 @@ export function AddProjectForm() {
         <div className="flex flex-wrap justify-end gap-3">
           <Link
             href="/"
-            className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"
           >
             Hủy
           </Link>
           <button
             type="submit"
-            className="h-10 rounded-lg bg-[#1a73e8] px-5 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+            className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
           >
             Tạo dự án
           </button>

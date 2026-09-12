@@ -71,9 +71,7 @@ function dpfWave(i: number, ch: Channel, agg: Agg, seed: number) {
 }
 
 export function PowerChart({ seed }: { seed: number }) {
-  const [topQty, setTopQty] = useState("P/S/Q");
   const [botQty, setBotQty] = useState("DPF");
-  const [slot, setSlot] = useState("-");
   const [topCh, setTopCh] = useState<Channel[]>(["sum"]);
   const [botCh, setBotCh] = useState<Channel[]>(["sum"]);
   const [pq, setPq] = useState<PqKind[]>(["P"]);
@@ -81,10 +79,12 @@ export function PowerChart({ seed }: { seed: number }) {
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
-  const [resolution, setResolution] = useState<"Phút" | "Giờ" | "Ngày" | "Tuần" | "Tháng" | "Năm">(
-    "Phút",
-  );
+  const RESOLUTIONS = ["Giờ", "Ngày", "Tuần", "Tháng", "Năm", "Khoảng ngày"] as const;
+  type Resolution = (typeof RESOLUTIONS)[number];
+  const [resolution, setResolution] = useState<Resolution>("Giờ");
   const [date, setDate] = useState("2026-07-19");
+  const [startDate, setStartDate] = useState("2026-07-13");
+  const [endDate, setEndDate] = useState("2026-07-19");
 
   const pSeries = useMemo(
     () =>
@@ -106,12 +106,12 @@ export function PowerChart({ seed }: { seed: number }) {
       botCh.flatMap((ch) =>
         aggs.map((agg) => ({
           key: `dpf-${ch}-${agg}`,
-          name: `DPF ${ch} ${agg}`,
+          name: `${botQty} ${ch} ${agg}`,
           color: PURPLE,
           values: Array.from({ length: N }, (_, i) => dpfWave(i, ch, agg, seed)),
         })),
       ),
-    [botCh, aggs, seed],
+    [botCh, aggs, seed, botQty],
   );
 
   const span = viewWin.end - viewWin.start;
@@ -130,42 +130,106 @@ export function PowerChart({ seed }: { seed: number }) {
 
   const left = (viewWin.start / (N - 1)) * 100;
   const width = ((viewWin.end - viewWin.start) / (N - 1)) * 100;
-  const yLabel = pq.length === 1 ? `${pq[0]} [kW]` : "P/S/Q [kW]";
+  const yLabel =
+    pq.length === 1
+      ? pq[0] === "P"
+        ? "P [kW]"
+        : pq[0] === "S"
+        ? "S [kVA]"
+        : "Q [kVAR]"
+      : "P/S/Q [kW, kVA, kVAR]";
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
-      <div className="mb-3 flex flex-wrap items-start gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-slate-600">
-            <QtyGroup
-              qty={topQty}
-              options={["P/S/Q", "P", "S", "Q"]}
-              onQty={setTopQty}
-              channels={topCh}
-              onChannel={(ch) => setTopCh((list) => toggleIn(list, ch))}
-            />
-            <QtyGroup
-              qty={botQty}
-              options={["DPF", "PF", "cosφ"]}
-              onQty={setBotQty}
-              channels={botCh}
-              onChannel={(ch) => setBotCh((list) => toggleIn(list, ch))}
-            />
-            <select
-              value={slot}
-              onChange={(e) => setSlot(e.target.value)}
-              className="h-8 w-14 rounded border border-slate-300 bg-white px-1 text-[13px] text-slate-500"
-            >
-              <option value="-">-</option>
-            </select>
-          </div>
-          <div className="inline-flex items-center gap-3 rounded border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600">
-            {PQ.map((item) => (
-              <Check key={item} checked={pq.includes(item)} onChange={() => setPq((list) => toggleIn(list, item))}>
-                {item}
+    <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-slate-600">
+          {/* Nhóm Công suất */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-700">Công suất:</span>
+            <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 py-1 text-[12px] font-medium text-slate-700 shadow-2xs">
+              {PQ.map((item) => (
+                <Check key={item} checked={pq.includes(item)} onChange={() => setPq((list) => toggleIn(list, item))}>
+                  {item === "P" ? "P (kW)" : item === "S" ? "S (kVA)" : "Q (kVAR)"}
+                </Check>
+              ))}
+            </div>
+            <span className="text-slate-400">CH</span>
+            {CHANNELS.map((ch) => (
+              <Check key={ch} checked={topCh.includes(ch)} onChange={() => setTopCh((list) => toggleIn(list, ch))}>
+                {ch}
               </Check>
             ))}
           </div>
+
+          <div className="hidden h-4 w-px bg-slate-200 sm:block" />
+
+          {/* Nhóm Hệ số công suất */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-700">Hệ số:</span>
+            <select
+              value={botQty}
+              onChange={(e) => setBotQty(e.target.value)}
+              className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] font-medium text-slate-700 outline-none focus:border-emerald-500 shadow-2xs"
+            >
+              {["DPF", "PF", "cosφ"].map((opt) => (
+                <option key={opt}>{opt}</option>
+              ))}
+            </select>
+            <span className="text-slate-400">CH</span>
+            {CHANNELS.map((ch) => (
+              <Check key={ch} checked={botCh.includes(ch)} onChange={() => setBotCh((list) => toggleIn(list, ch))}>
+                {ch}
+              </Check>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xs">
+            {RESOLUTIONS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setResolution(item)}
+                className={`h-9 px-3 text-[12px] font-medium transition-colors ${
+                  resolution === item
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+
+          {resolution === "Khoảng ngày" ? (
+            <div className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-500 bg-white px-2.5 text-[12px] font-medium text-emerald-800 shadow-xs">
+              <span className="text-[11px] text-slate-400">Từ</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
+              />
+              <span className="text-slate-300">-</span>
+              <span className="text-[11px] text-slate-400">Đến</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
+              />
+            </div>
+          ) : (
+            <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-500 bg-white px-3 text-[13px] font-medium text-emerald-700 shadow-xs">
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="border-0 bg-transparent text-[13px] font-medium text-emerald-700 outline-none [color-scheme:light]"
+              />
+            </label>
+          )}
         </div>
       </div>
 
@@ -187,7 +251,7 @@ export function PowerChart({ seed }: { seed: number }) {
             className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
           />
           <span
-            className="pointer-events-none absolute -top-px text-[10px] leading-none text-[#1a73e8]"
+            className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
             style={{ left: `calc(${left}% - 5px)` }}
           >
             ▼
@@ -223,7 +287,7 @@ export function PowerChart({ seed }: { seed: number }) {
         />
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-2.5 flex items-center justify-between gap-3">
         <div className="flex gap-1">
           <ToolBtn label="Phóng to" onClick={zoomIn}>
             <ZoomIcon plus />
@@ -238,68 +302,13 @@ export function PowerChart({ seed }: { seed: number }) {
             <CursorIcon />
           </ToolBtn>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-            {(["Phút", "Giờ", "Ngày", "Tuần", "Tháng", "Năm"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setResolution(item)}
-                className={`h-9 px-2.5 text-[12px] font-medium sm:px-3 ${
-                  resolution === item
-                    ? "bg-[#5aa3d9] text-white"
-                    : "text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-          <label className="inline-flex h-9 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
-            />
-          </label>
-        </div>
+        <span className="text-[11px] text-slate-400">
+          {resolution === "Khoảng ngày"
+            ? `Kỳ hiển thị: ${startDate} → ${endDate}`
+            : `Độ phân giải: ${resolution} · Ngày: ${date}`}
+        </span>
       </div>
     </section>
-  );
-}
-
-function QtyGroup({
-  qty,
-  options,
-  onQty,
-  channels,
-  onChannel,
-}: {
-  qty: string;
-  options: string[];
-  onQty: (value: string) => void;
-  channels: Channel[];
-  onChannel: (ch: Channel) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <select
-        value={qty}
-        onChange={(e) => onQty(e.target.value)}
-        className="h-8 rounded border border-slate-300 bg-white px-2 text-[13px] text-slate-700"
-      >
-        {options.map((opt) => (
-          <option key={opt}>{opt}</option>
-        ))}
-      </select>
-      <span className="text-slate-400">CH</span>
-      {CHANNELS.map((ch) => (
-        <Check key={ch} checked={channels.includes(ch)} onChange={() => onChannel(ch)}>
-          {ch}
-        </Check>
-      ))}
-    </div>
   );
 }
 
@@ -314,7 +323,7 @@ function Check({
 }) {
   return (
     <label className="inline-flex cursor-pointer items-center gap-1">
-      <input type="checkbox" checked={checked} onChange={onChange} className="accent-[#1a73e8]" />
+      <input type="checkbox" checked={checked} onChange={onChange} className="accent-emerald-600" />
       {children}
     </label>
   );
@@ -549,7 +558,7 @@ function ToolBtn({
       title={label}
       onClick={onClick}
       className={`flex h-7 w-7 items-center justify-center rounded-sm border text-slate-500 ${
-        active ? "border-[#1a73e8] bg-blue-50 text-[#1a73e8]" : "border-slate-300 bg-white hover:bg-slate-50"
+        active ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-white hover:bg-slate-50"
       }`}
     >
       {children}

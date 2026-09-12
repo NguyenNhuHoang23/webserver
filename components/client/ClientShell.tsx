@@ -38,71 +38,78 @@ export function ClientShell({
   }, [project]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#e8edf3]">
-      <header className="flex min-h-[52px] shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 sm:px-4">
-        <Link
-          href={homeHref}
-          title={resolved.customer}
-          className="flex min-w-0 max-w-[min(280px,32vw)] shrink items-center gap-2 sm:max-w-[240px] lg:max-w-[280px]"
-        >
-          <FactoryIcon className="h-7 w-7 shrink-0 text-[#1a5fbe] sm:h-8 sm:w-8" />
-          <span className="truncate text-[15px] font-bold tracking-wide text-[#1a5fbe] uppercase sm:text-[17px]">
-            {resolved.customer}
-          </span>
-        </Link>
-
-        <nav
-          className="flex min-h-[52px] min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto"
-          aria-label="Điều hướng dự án"
-        >
-          {navItems.map((item) => {
-            const href = `${base}${item.href}`;
-            const active =
-              item.href === ""
-                ? pathname === base
-                : pathname === href || pathname.startsWith(`${href}/`);
-            const Icon = item.icon;
-
-            return (
-              <Link
-                key={item.href || "home"}
-                href={href}
-                title={item.label}
-                className={`flex shrink-0 items-center gap-1.5 border-b-[3px] px-2.5 text-[12.5px] font-medium whitespace-nowrap sm:px-3 sm:text-[13px] ${
-                  active
-                    ? "border-[#1a73e8] text-[#1a73e8]"
-                    : "border-transparent text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <Icon className="h-4 w-4 shrink-0 sm:h-[17px] sm:w-[17px]" />
-                <span className="hidden md:inline">{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 sm:h-9 sm:w-9"
-            aria-label="Thông báo"
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-[#f8fafc] font-sans">
+      <header className="flex min-h-[56px] shrink-0 items-center justify-between gap-4 border-b border-slate-200/80 bg-white px-4 sm:px-6">
+        <div className="flex items-center gap-6 min-w-0">
+          <Link
+            href={homeHref}
+            title={resolved.customer}
+            className="flex items-center gap-2.5 shrink-0"
           >
-            <BellIcon className="h-5 w-5" />
-          </button>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden text-right leading-tight sm:block">
-              <p className="text-sm font-semibold text-slate-800">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-xs">
+              <EnergyLogoIcon className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="block truncate text-sm font-bold tracking-tight text-slate-900 leading-none">
+                {resolved.customer}
+              </span>
+              <span className="block font-mono text-[10px] text-slate-400 mt-0.5">
+                {resolved.id}
+              </span>
+            </div>
+          </Link>
+
+          <nav
+            className="hidden sm:flex min-h-[56px] items-stretch gap-1 overflow-x-auto"
+            aria-label="Điều hướng dự án"
+          >
+            {navItems.map((item) => {
+              const href = `${base}${item.href}`;
+              const active =
+                item.href === ""
+                  ? pathname === base
+                  : pathname === href || pathname.startsWith(`${href}/`);
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.href || "home"}
+                  href={href}
+                  title={item.label}
+                  className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-xs font-medium whitespace-nowrap transition-colors ${
+                    active
+                      ? "border-emerald-600 text-emerald-800 font-semibold"
+                      : "border-transparent text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <Icon className={`h-3.5 w-3.5 shrink-0 ${active ? "text-emerald-600" : "text-slate-400"}`} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3">
+          <div className="hidden sm:inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/70 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            <span>SCADA Online</span>
+          </div>
+
+          <div className="h-4 w-px bg-slate-200" />
+
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-700 font-semibold text-white text-[11px]">
+              {(session?.displayName ?? session?.username ?? resolved.customer).slice(0, 2).toUpperCase()}
+            </div>
+            <div className="hidden text-left leading-tight md:block">
+              <p className="text-xs font-semibold text-slate-800 truncate max-w-[140px]">
                 {session?.displayName ?? session?.username ?? resolved.customer}
               </p>
-              <p className="text-[11px] tracking-wide text-slate-400">
-                {session?.portal === "admin" ? "QUẢN TRỊ VIÊN" : "KHÁCH HÀNG"}
+              <p className="text-[10px] tracking-wide text-slate-400 uppercase">
+                {session?.portal === "admin" ? "Quản trị viên" : "Khách hàng"}
               </p>
             </div>
-            <img
-              src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=80&h=80&fit=crop&crop=faces"
-              alt="Ảnh đại diện"
-              className="h-8 w-8 rounded-full object-cover sm:h-9 sm:w-9"
-            />
             <button
               type="button"
               onClick={() => {
@@ -110,7 +117,7 @@ export function ClientShell({
                 logout();
                 if (portal === "admin") router.replace("/");
               }}
-              className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-[#d94848] hover:bg-red-50"
+              className="inline-flex h-7 items-center rounded-lg border border-slate-200 px-2 text-[11px] font-medium text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors ml-1"
             >
               Đăng xuất
             </button>
@@ -120,46 +127,23 @@ export function ClientShell({
 
       <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
 
-      <footer className="flex h-10 shrink-0 items-center justify-between gap-4 border-t border-slate-200 bg-white px-4 text-[11px] text-slate-400 sm:px-5">
+      <footer className="flex h-9 shrink-0 items-center justify-between gap-4 border-t border-slate-200/80 bg-white px-4 text-[11px] text-slate-400 sm:px-6">
         <p className="truncate">
-          © 2024 {resolved.customer} EMS. Data Source: Scada System Node-04
+          © 2026 {resolved.customer} • EMS Telemetry Gateway Node-04
         </p>
-        <div className="hidden items-center gap-5 lg:flex">
-          <a href="#" className="hover:text-slate-600">
-            Privacy Policy
-          </a>
-          <a href="#" className="hover:text-slate-600">
-            System Status
-          </a>
-          <a href="#" className="hover:text-slate-600">
-            Technical Support
-          </a>
-        </div>
         <p className="hidden shrink-0 items-center gap-1.5 sm:flex">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          Cập nhật lần cuối: 2026-07-19 09:42:23
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Dữ liệu thời gian thực
         </p>
       </footer>
     </div>
   );
 }
 
-function FactoryIcon({ className }: { className?: string }) {
+function EnergyLogoIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden>
-      <path
-        d="M4 28V12l7-3v4l6-4v5l7-3v17H4Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M20 12h8v16h-8"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path d="M23 16v2M26 16v2M23 21v2M26 21v2" stroke="currentColor" strokeWidth="1.8" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
 }

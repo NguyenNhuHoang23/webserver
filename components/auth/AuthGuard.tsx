@@ -46,10 +46,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
 function AuthSplash({ message }: { message: string }) {
   return (
-    <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-[#f3f5f8]">
+    <div className="flex h-full min-h-screen w-full items-center justify-center bg-[#0b1120]">
       <div className="text-center">
-        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-[#1a73e8]" />
-        <p className="mt-3 text-sm text-slate-500">{message}</p>
+        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-slate-800 border-t-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]" />
+        <p className="mt-4 text-xs font-medium tracking-wide text-slate-400">{message}</p>
       </div>
     </div>
   );

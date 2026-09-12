@@ -1,5 +1,17 @@
-import { ClientReports } from "@/components/client/ClientReports";
+import { notFound } from "next/navigation";
+import { ClientAlerts } from "@/components/client/ClientAlerts";
+import { getProject } from "@/lib/projects";
 
-export default function AlertsPage() {
-  return <ClientReports initialId="alerts" />;
+export default async function AlertsPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const project = getProject(id);
+
+  if (!project) notFound();
+
+  return <ClientAlerts project={project} />;
 }
+

@@ -193,22 +193,28 @@ export function HarmonicsChart({ seed }: { seed: number }) {
 
   return (
     <section className="mt-4 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-4">
-      <div className="mb-2 inline-flex overflow-hidden rounded border border-slate-300 text-[13px]">
+      <div className="mb-2.5 inline-flex overflow-hidden rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 text-[12px] font-medium shadow-2xs">
         <button
           type="button"
           onClick={() => setTab("trend")}
-          className={`h-8 px-4 ${tab === "trend" ? "bg-white font-medium text-slate-800" : "bg-slate-100 text-slate-500"}`}
+          className={`h-8 rounded-md px-3.5 transition-all ${
+            tab === "trend"
+              ? "bg-white font-semibold text-emerald-700 shadow-xs"
+              : "text-slate-600 hover:text-slate-900"
+          }`}
         >
-          Trend
+          Biểu đồ xu hướng
         </button>
         <button
           type="button"
           onClick={() => setTab("peak")}
-          className={`h-8 border-l border-slate-300 px-4 ${
-            tab === "peak" ? "bg-white font-medium text-slate-800" : "bg-slate-100 text-slate-500"
+          className={`h-8 rounded-md px-3.5 transition-all ${
+            tab === "peak"
+              ? "bg-white font-semibold text-emerald-700 shadow-xs"
+              : "text-slate-600 hover:text-slate-900"
           }`}
         >
-          Peak Level
+          Mức đỉnh bậc
         </button>
       </div>
 
@@ -238,7 +244,7 @@ export function HarmonicsChart({ seed }: { seed: number }) {
                 type="button"
                 onClick={() => setOrderOpen((v) => !v)}
                 className={`h-8 rounded border px-3 text-[12px] font-medium ${
-                  orderOpen ? "border-[#1a73e8] bg-blue-50 text-[#1a73e8]" : "border-slate-300 bg-white text-slate-600"
+                  orderOpen ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-white text-slate-600"
                 }`}
               >
                 Order
@@ -281,7 +287,7 @@ export function HarmonicsChart({ seed }: { seed: number }) {
                 className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
               />
               <span
-                className="pointer-events-none absolute -top-px text-[10px] leading-none text-[#1a73e8]"
+                className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
                 style={{ left: `calc(${left}% - 5px)` }}
               >
                 ▼
@@ -429,7 +435,7 @@ function ModeRadios({
             name={name}
             checked={value === mode}
             onChange={() => onChange(mode)}
-            className="accent-[#1a73e8]"
+            className="accent-emerald-600"
           />
           {mode}
         </label>
@@ -449,7 +455,7 @@ function Check({
 }) {
   return (
     <label className="flex cursor-pointer items-center gap-1 text-[12px] text-slate-600">
-      <input type="checkbox" checked={checked} onChange={onChange} className="accent-[#1a73e8]" />
+      <input type="checkbox" checked={checked} onChange={onChange} className="accent-emerald-600" />
       {children}
     </label>
   );
@@ -717,7 +723,7 @@ function ToolBtn({
       title={label}
       onClick={onClick}
       className={`flex h-7 w-7 items-center justify-center rounded-sm border text-slate-500 ${
-        active ? "border-[#1a73e8] bg-blue-50 text-[#1a73e8]" : "border-slate-300 bg-white hover:bg-slate-50"
+        active ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-white hover:bg-slate-50"
       }`}
     >
       {children}

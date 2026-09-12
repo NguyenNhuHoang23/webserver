@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  DEFAULT_TIME_FILTER,
+  TimeFilterBar,
+  getTimeFilterLabel,
+  getTimeFilterScaleFactor,
+  type TimeFilterValue,
+} from "@/components/client/TimeFilterBar";
+import {
   GHG_SCOPES,
   loadGhgSources,
   scopeColor,
@@ -11,8 +18,6 @@ import {
   type ScopeId,
 } from "@/lib/ghg-sources";
 
-const YEARS = [2023, 2024, 2025, 2026];
-
 function fmt(n: number, digits = 1) {
   return n.toLocaleString("en-US", {
     minimumFractionDigits: digits,
@@ -21,20 +26,29 @@ function fmt(n: number, digits = 1) {
 }
 
 export function GreenhouseCharts() {
-  const [year, setYear] = useState(2024);
+  const [timeFilter, setTimeFilter] = useState<TimeFilterValue>({
+    ...DEFAULT_TIME_FILTER,
+    mode: "year",
+  });
   const [sources, setSources] = useState<GhgEmissionSource[]>([]);
 
   useEffect(() => {
     setSources(withDemoTons(loadGhgSources()));
   }, []);
 
-  const scale = 1 + (year - 2024) * 0.035;
+  const baseScale = 1 + (timeFilter.year - 2024) * 0.035;
+  const timeScale = getTimeFilterScaleFactor(timeFilter);
+  const scale = baseScale * (timeFilter.mode === "year" ? 1 : Math.max(0.005, timeScale));
 
   const rows = useMemo(() => {
-    const scaled = sources.map((source) => ({
-      ...source,
-      tons: Number(((source.tons ?? 0) * scale).toFixed(1)),
-    }));
+    const scaled = sources.map((source) => {
+      const rawTons = (source.tons ?? 0) * scale;
+      const tons = Number(rawTons < 1 ? rawTons.toFixed(2) : rawTons.toFixed(1));
+      return {
+        ...source,
+        tons,
+      };
+    });
     const totalTons = scaled.reduce((s, r) => s + r.tons, 0) || 1;
     return scaled
       .map((row) => ({
@@ -45,7 +59,7 @@ export function GreenhouseCharts() {
   }, [sources, scale]);
 
   const total = Number(rows.reduce((s, r) => s + r.tons, 0).toFixed(1));
-  const goal = Math.max(62, Math.min(96, 85 - (year - 2024) * 4));
+  const goal = Math.max(62, Math.min(96, 85 - (timeFilter.year - 2024) * 4));
 
   const scopeShares = useMemo(() => {
     return GHG_SCOPES.map((scope) => {
@@ -60,39 +74,39 @@ export function GreenhouseCharts() {
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-[#f4f6f9] p-4 lg:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-[22px] font-bold tracking-tight text-slate-800">
-          Tổng quan phát thải khí nhà kính
-        </h2>
-        <select
-          value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
-          className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(16,24,40,0.04)] outline-none focus:border-[#1a73e8]"
-        >
-          {YEARS.map((y) => (
-            <option key={y} value={y}>
-              Năm {y}
-            </option>
-          ))}
-        </select>
+        <div>
+          <h2 className="text-[20px] font-bold tracking-tight text-slate-800 sm:text-[22px]">
+            Tổng quan phát thải khí nhà kính
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Theo dõi phát thải CO₂e theo phạm vi Scope 1, 2, 3 · Kỳ: <strong className="text-slate-800">{getTimeFilterLabel(timeFilter)}</strong>
+          </p>
+        </div>
+        <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
         <KpiCard
           label="TỔNG LƯỢNG PHÁT THẢI"
-          value={`${fmt(total)}`}
+          value={`${fmt(total, total < 10 ? 2 : 1)}`}
           hint="tấn CO₂e"
           trend={-2.4}
         />
-        <KpiCard label="CƯỜNG ĐỘ PHÁT THẢI" value="0.12" hint="tấn/sản phẩm" trend={0.8} />
+        <KpiCard
+          label="CƯỜNG ĐỘ PHÁT THẢI"
+          value={`${(0.12 * (timeFilter.mode === "year" ? 1 : 0.95)).toFixed(2)}`}
+          hint="tấn/sản phẩm"
+          trend={0.8}
+        />
         <article className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <p className="text-[11px] font-semibold tracking-[0.08em] text-slate-400">
-            MỤC TIÊU GIẢM THẢI {year}
+            MỤC TIÊU GIẢM THẢI · {timeFilter.year}
           </p>
           <p className="mt-2 text-[28px] font-bold leading-none text-slate-800">
             {goal}% <span className="text-[15px] font-medium text-slate-500">hoàn thành</span>
           </p>
           <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-[#3b82f6]" style={{ width: `${goal}%` }} />
+            <div className="h-full rounded-full bg-emerald-600 transition-all duration-500" style={{ width: `${goal}%` }} />
           </div>
         </article>
       </div>

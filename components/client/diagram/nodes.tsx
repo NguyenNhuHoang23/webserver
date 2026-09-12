@@ -5,19 +5,19 @@ import { useDiagramActions } from "./context";
 import type { JunctionFlowNode, MeterFlowNode, MeterIcon, MeterStatus } from "./types";
 
 const statusBorder: Record<MeterStatus, string> = {
-  normal: "border-[#3b82f6]",
+  normal: "border-emerald-500",
   warning: "border-[#f59e0b]",
   offline: "border-slate-300",
 };
 
 const statusText: Record<MeterStatus, string> = {
-  normal: "text-[#1a73e8]",
+  normal: "text-emerald-600",
   warning: "text-[#ea8c12]",
   offline: "text-slate-400",
 };
 
 const iconWrap: Record<MeterStatus, string> = {
-  normal: "bg-blue-50 text-[#3b82f6]",
+  normal: "bg-emerald-50 text-emerald-600",
   warning: "bg-orange-50 text-[#ea8c12]",
   offline: "bg-slate-100 text-slate-400",
 };
@@ -28,14 +28,14 @@ export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
   return (
     <div
       className={`diagram-card w-[248px] rounded-xl border-2 bg-white px-3.5 py-3 shadow-[0_2px_8px_rgba(15,23,42,0.06)] ${statusBorder[data.status]} ${
-        selected ? "ring-2 ring-[#1a73e8]/20" : ""
+        selected ? "ring-2 ring-emerald-500/25" : ""
       }`}
     >
       <Handle
         type="target"
         position={Position.Top}
         id="parent"
-        className="!-top-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#1a73e8]"
+        className="!-top-1.5 !h-3 !w-3 !border-2 !border-white !bg-emerald-600"
         title="Nối từ điểm cha"
       />
 
@@ -94,7 +94,7 @@ export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
         type="source"
         position={Position.Bottom}
         id="child"
-        className="!-bottom-1.5 !h-3 !w-3 !border-2 !border-white !bg-[#1a73e8]"
+        className="!-bottom-1.5 !h-3 !w-3 !border-2 !border-white !bg-emerald-600"
         title="Kéo xuống để gắn điểm con"
       />
     </div>
@@ -105,7 +105,7 @@ export function JunctionNode({ selected }: NodeProps<JunctionFlowNode>) {
   return (
     <div
       className={`relative flex h-8 w-8 items-center justify-center rounded-md border-2 bg-white shadow-sm ${
-        selected ? "border-[#1a73e8] ring-2 ring-[#1a73e8]/25" : "border-slate-300"
+        selected ? "border-emerald-600 ring-2 ring-emerald-500/25" : "border-slate-300"
       }`}
       title="Điểm nhánh — kéo để chỉnh cây cha-con"
     >

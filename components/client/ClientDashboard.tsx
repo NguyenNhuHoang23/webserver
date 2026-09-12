@@ -62,7 +62,7 @@ export function ClientDashboard({ project }: { project: Project }) {
           <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <p>
               Lớn nhất:{" "}
-              <span className="font-semibold text-[#1a73e8]">236.8 kWh</span>
+              <span className="font-semibold text-emerald-700">236.8 kWh</span>
             </p>
             <p>
               Nhỏ nhất:{" "}
@@ -167,7 +167,7 @@ function MonthPicker({
             <select
               value={year}
               onChange={(e) => setYear(Number(e.target.value))}
-              className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
+              className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-emerald-500"
               aria-label="Năm"
             >
               {YEAR_OPTIONS.map((item) => (
@@ -190,9 +190,9 @@ function MonthPicker({
                       setMonth(value);
                       setOpen(false);
                     }}
-                    className={`h-9 w-full rounded-md text-[12px] font-medium ${
+                    className={`h-9 w-full rounded-md text-[12px] font-medium transition-colors ${
                       active
-                        ? "bg-[#1a73e8] text-white"
+                        ? "bg-emerald-600 text-white shadow-xs"
                         : "bg-slate-50 text-slate-600 hover:bg-slate-100"
                     }`}
                   >
@@ -247,7 +247,7 @@ function EnergyChart({ data }: { data: { day: string; kwh: number }[] }) {
         <div key={item.day} className="flex min-w-0 flex-1 flex-col items-center">
           <div className="flex h-[220px] w-full items-end">
             <div
-              className="mx-auto w-[78%] rounded-t-[2px] bg-[#2b6f9e]"
+              className="mx-auto w-[78%] rounded-t-md bg-emerald-600 transition-all hover:bg-emerald-500"
               style={{ height: `${(item.kwh / max) * 100}%` }}
               title={`${item.day}: ${item.kwh} kWh`}
             />
@@ -404,7 +404,7 @@ function AlertLogTable() {
                 <input
                   value={time}
                   onChange={(e) => setTime(e.target.value)}
-                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-emerald-500"
                 />
                 <FilterMark />
               </span>
@@ -414,7 +414,7 @@ function AlertLogTable() {
                 <select
                   value={point}
                   onChange={(e) => setPoint(e.target.value)}
-                  className="h-8 w-full appearance-none rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                  className="h-8 w-full appearance-none rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-emerald-500"
                 >
                   <option value="all" />
                   <option value="Tủ điện văn phòng">Tủ điện văn phòng</option>
@@ -427,7 +427,7 @@ function AlertLogTable() {
                 <input
                   value={param}
                   onChange={(e) => setParam(e.target.value)}
-                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-emerald-500"
                 />
                 <FilterMark />
               </span>
@@ -437,7 +437,7 @@ function AlertLogTable() {
                 <input
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
-                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-[#1a73e8]"
+                  className="h-8 w-full rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-emerald-500"
                 />
                 <FilterMark />
               </span>
@@ -450,7 +450,7 @@ function AlertLogTable() {
               <td className="py-2.5 whitespace-nowrap">{row.time}</td>
               <td className="py-2.5">{row.point}</td>
               <td className="py-2.5">
-                <button type="button" className="text-[#1a73e8] hover:underline">
+                <button type="button" className="text-emerald-600 hover:underline">
                   {row.param}
                 </button>
               </td>

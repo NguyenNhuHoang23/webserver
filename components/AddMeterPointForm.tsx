@@ -136,9 +136,9 @@ export function AddMeterPointForm({
                       type="button"
                       onClick={() => selectEnergy(type.name)}
                       title={type.description}
-                      className={`h-10 rounded-lg border text-sm font-medium transition-colors ${
+                      className={`h-10 rounded-xl border text-sm font-semibold transition-all ${
                         active
-                          ? "border-[#1a73e8] bg-white text-[#1a73e8]"
+                          ? "border-emerald-600 bg-emerald-50/80 text-emerald-700 ring-1 ring-emerald-500/20"
                           : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
                       }`}
                     >
@@ -182,9 +182,9 @@ export function AddMeterPointForm({
                   const device = devices.find((d) => d.id === id);
                   if (device) applyDevice(device);
                 }}
-                className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#8bb4ee] bg-[#f3f8ff] px-6 py-10 text-center"
+                className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 px-6 py-10 text-center"
               >
-                <ImportIcon className="mb-3 h-8 w-8 text-[#1a73e8]" />
+                <ImportIcon className="mb-3 h-8 w-8 text-emerald-600" />
                 <p className="max-w-md text-sm text-slate-500">
                   {droppedDevice
                     ? `Đã gắn thiết bị: ${droppedDevice.name}`
@@ -244,13 +244,13 @@ export function AddMeterPointForm({
             <div className="flex justify-end gap-3 pt-4">
               <Link
                 href={cancelHref}
-                className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"
               >
                 Hủy
               </Link>
               <button
                 type="submit"
-                className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+                className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
               >
                 Lưu thay đổi
               </button>
@@ -272,7 +272,7 @@ export function AddMeterPointForm({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Tìm thiết bị..."
-              className="h-9 w-full rounded-lg border border-slate-200 bg-[#f8fafc] pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:bg-white"
+              className="h-9 w-full rounded-xl border border-slate-200 bg-[#f8fafc] pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white transition-colors"
             />
           </label>
 
@@ -287,9 +287,9 @@ export function AddMeterPointForm({
                     e.dataTransfer.effectAllowed = "copy";
                   }}
                   onClick={() => applyDevice(device)}
-                  className="flex w-full items-center gap-3 rounded-lg border border-slate-100 bg-white px-3 py-3 text-left hover:border-[#c5daf7] hover:bg-[#f7fbff]"
+                  className="flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-3 text-left hover:border-emerald-300 hover:bg-emerald-50/40 transition-colors"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
                     <MeterIcon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">

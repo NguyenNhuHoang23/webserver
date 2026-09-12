@@ -216,10 +216,10 @@ export function GhgConfig() {
           return (
             <div
               key={scope.id}
-              className={`inline-flex h-9 items-center rounded-lg pl-3.5 text-sm font-medium ${
+              className={`inline-flex h-9 items-center rounded-xl pl-3.5 text-sm font-semibold transition-all ${
                 active
-                  ? "bg-[#1a73e8] text-white shadow-sm"
-                  : "bg-white text-slate-600 ring-1 ring-slate-200"
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:text-slate-900"
               }`}
             >
               <button type="button" onClick={() => setActiveScope(scope.id)} className="pr-1">
@@ -252,12 +252,12 @@ export function GhgConfig() {
             const factor = factors.find((item) => item.id === id);
             if (factor) applyFactor(factor);
           }}
-          className={`rounded-xl border bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] ${
-            dropHover ? "border-[#1a73e8] ring-2 ring-[#1a73e8]/15" : "border-slate-200"
+          className={`rounded-xl border bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors ${
+            dropHover ? "border-emerald-500 ring-2 ring-emerald-500/15" : "border-slate-200"
           }`}
         >
           <div className="mb-5 flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 shadow-xs">
               <LeafIcon className="h-4 w-4" />
             </span>
             <h2 className="text-[15px] font-semibold text-slate-800">
@@ -299,13 +299,13 @@ export function GhgConfig() {
                       onClick={() => setMethod(item.id)}
                       className={`flex flex-col items-start gap-2 rounded-xl border px-4 py-3.5 text-left transition-colors ${
                         selected
-                          ? "border-[#1a73e8] bg-[#f3f8ff] text-[#1a73e8] shadow-[inset_0_0_0_1px_#1a73e8]"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-[#c5daf7] hover:bg-[#f7fbff]"
+                          ? "border-emerald-600 bg-emerald-50/70 text-emerald-700 shadow-[inset_0_0_0_1px_#059669]"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:bg-emerald-50/20"
                       }`}
                     >
                       <span
-                        className={`flex h-9 w-9 items-center justify-center rounded-lg ${
-                          selected ? "bg-white text-[#1a73e8]" : "bg-slate-50 text-slate-500"
+                        className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                          selected ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-50 text-slate-500"
                         }`}
                       >
                         <Icon className="h-4 w-4" />
@@ -314,7 +314,7 @@ export function GhgConfig() {
                         <span className="block text-sm font-semibold">{item.label}</span>
                         <span
                           className={`mt-0.5 block text-[11px] ${
-                            selected ? "text-[#5b9cf0]" : "text-slate-400"
+                            selected ? "text-emerald-600 font-medium" : "text-slate-400"
                           }`}
                         >
                           {item.hint}
@@ -351,7 +351,7 @@ export function GhgConfig() {
             </Field>
 
             <Field label="NHẬP CÔNG THỨC TÍNH (KG CO₂E)">
-              <div className="overflow-hidden rounded-lg border border-slate-200 focus-within:border-[#1a73e8] focus-within:ring-2 focus-within:ring-[#1a73e8]/15">
+              <div className="overflow-hidden rounded-xl border border-slate-200 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/15 transition-all">
                 <textarea
                   ref={formulaRef}
                   value={formula}
@@ -364,14 +364,14 @@ export function GhgConfig() {
                   <button
                     type="button"
                     onClick={() => insertToken("{Giá trị điểm đo}")}
-                    className="rounded-md bg-[#e8f1fd] px-2 py-1 font-mono text-[11px] font-semibold text-[#1a73e8] hover:bg-[#d7e8fb]"
+                    className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
                   >
                     [Điểm đo]
                   </button>
                   <button
                     type="button"
                     onClick={() => insertToken("{Hệ số phát thải}")}
-                    className="rounded-md bg-[#e8f1fd] px-2 py-1 font-mono text-[11px] font-semibold text-[#1a73e8] hover:bg-[#d7e8fb]"
+                    className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
                   >
                     [Hệ số]
                   </button>
@@ -403,7 +403,7 @@ export function GhgConfig() {
             <div className="flex items-center gap-3 pt-1">
               <button
                 type="submit"
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
               >
                 <SaveIcon className="h-4 w-4" />
                 Lưu
@@ -411,7 +411,7 @@ export function GhgConfig() {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"
               >
                 Hủy
               </button>
@@ -432,7 +432,7 @@ export function GhgConfig() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Tìm kiếm hệ số..."
-              className="h-9 w-full rounded-lg border border-slate-200 bg-[#f8fafc] pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:bg-white"
+              className="h-9 w-full rounded-xl border border-slate-200 bg-[#f8fafc] pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white transition-colors"
             />
           </label>
 
@@ -449,10 +449,10 @@ export function GhgConfig() {
                       e.dataTransfer.effectAllowed = "copy";
                     }}
                     onClick={() => applyFactor(factor)}
-                    className="flex w-full items-center gap-3 rounded-lg border border-slate-100 bg-white px-3 py-3 text-left hover:border-[#c5daf7] hover:bg-[#f7fbff]"
+                    className="flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-3 text-left hover:border-emerald-200 hover:bg-emerald-50/30 transition-colors"
                   >
                     <GripIcon className="h-3.5 w-3.5 shrink-0 text-slate-300" />
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
                       <Icon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0">
@@ -520,7 +520,7 @@ export function GhgConfig() {
                     className="border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
                   >
                     <td className="px-5 py-3.5">
-                      <span className="inline-flex rounded-md bg-[#e8f1fd] px-2 py-1 text-xs font-semibold text-[#1a73e8]">
+                      <span className="inline-flex rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
                         Scope {source.scope}
                       </span>
                     </td>
@@ -541,7 +541,7 @@ export function GhgConfig() {
                         <button
                           type="button"
                           onClick={() => handleEdit(source)}
-                          className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
+                          className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
                           aria-label={`Chỉnh sửa ${source.name}`}
                         >
                           <EditIcon className="h-4 w-4" />
@@ -601,9 +601,9 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={`h-8 rounded-full px-3 text-sm font-medium ${
+      className={`h-8 rounded-full px-3 text-sm font-semibold transition-colors ${
         active
-          ? "bg-[#1a73e8] text-white"
+          ? "bg-emerald-600 text-white shadow-xs"
           : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
       }`}
     >
