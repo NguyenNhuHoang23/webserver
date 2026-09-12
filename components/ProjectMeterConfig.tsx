@@ -268,7 +268,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
         actions={
           <Link
             href={projectConfigPath(project.id, "add-meter")}
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
           >
             <span className="text-lg leading-none">+</span>
             Thêm mới điểm đo
@@ -298,7 +298,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
               </p>
               <button
                 type="button"
-                className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-[#1a73e8] hover:underline"
+                className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
               >
                 <DownloadIcon className="h-4 w-4" />
                 Tải về báo cáo tháng 10
@@ -310,7 +310,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
             {energies.map((energy) => (
               <div
                 key={energy}
-                className="inline-flex h-8 items-center rounded-full bg-[#1a73e8] pl-3 text-sm font-medium text-white"
+                className="inline-flex h-8 items-center rounded-full bg-emerald-600 pl-3 text-sm font-semibold text-white shadow-xs"
               >
                 <span className="pr-1">{energy}</span>
                 <button
@@ -344,7 +344,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                   }}
                   placeholder="VD: Khí nén"
                   list="meter-type-suggestions"
-                  className="h-8 w-36 rounded-full border border-[#1a73e8] bg-white px-3 text-sm outline-none"
+                  className="h-8 w-36 rounded-full border border-emerald-500 bg-white px-3 text-sm outline-none"
                 />
                 <datalist id="meter-type-suggestions">
                   {suggestions.map((item) => (
@@ -354,7 +354,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                 <button
                   type="button"
                   onClick={() => addEnergyType(newType)}
-                  className="h-8 rounded-full bg-[#1a73e8] px-3 text-xs font-semibold text-white"
+                  className="h-8 rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs"
                 >
                   Thêm
                 </button>
@@ -373,7 +373,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
               <button
                 type="button"
                 onClick={() => setAddingType(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-[#1a73e8] ring-1 ring-slate-200 hover:bg-slate-50"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-emerald-600 ring-1 ring-slate-200 hover:bg-emerald-50 transition-colors"
                 aria-label="Thêm loại năng lượng"
                 title="Thêm loại điểm đo (hiển thị trên thanh công cụ Sơ đồ)"
               >
@@ -397,7 +397,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                   setPage(1);
                 }}
                 placeholder="Tìm kiếm điểm đo, ID..."
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8]"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-emerald-500 transition-colors"
               />
             </label>
             <select
@@ -406,7 +406,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                 setDeviceType(e.target.value);
                 setPage(1);
               }}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 outline-none focus:border-[#1a73e8]"
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 outline-none focus:border-emerald-500 transition-colors"
             >
               <option value="all">Tất cả loại thiết bị</option>
               {deviceTypes.map((type) => (
@@ -521,7 +521,7 @@ function DeviceRows({
             ) : (
               <span className="w-5" />
             )}
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
               <Icon className="h-4 w-4" />
             </span>
             <span>
@@ -549,9 +549,9 @@ function DeviceRows({
               --.- <span className="text-xs font-medium">{point.unit}</span>
             </span>
           ) : (
-            <span className="text-base font-bold text-[#1a73e8]">
+            <span className="text-base font-bold text-emerald-700">
               {formatValue(point.value, point.unit)}{" "}
-              <span className="text-xs font-semibold text-[#5b9cf0]">{point.unit}</span>
+              <span className="text-xs font-semibold text-emerald-600">{point.unit}</span>
             </span>
           )}
         </td>
@@ -559,7 +559,7 @@ function DeviceRows({
           <div className="flex justify-end">
             <Link
               href={projectConfigPath(projectId, "add-meter")}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
               aria-label="Chỉnh sửa điểm đo"
             >
               <EditIcon className="h-4 w-4" />
@@ -628,8 +628,8 @@ function PageBtn({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-8 min-w-8 items-center justify-center rounded-md px-2 text-sm font-medium disabled:opacity-40 ${
-        active ? "bg-[#1a73e8] text-white" : "text-slate-600 hover:bg-slate-100"
+      className={`flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm font-semibold disabled:opacity-40 transition-colors ${
+        active ? "bg-emerald-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-100"
       }`}
     >
       {children}

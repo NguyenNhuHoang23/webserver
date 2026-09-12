@@ -11,12 +11,12 @@ import {
   type GasKey,
 } from "@/lib/emission-factors";
 
-const PAGE_SIZE = 3;
+const PAGE_SIZE = 4;
 
 const GAS_META: Record<GasKey, { label: string; className: string }> = {
-  co2: { label: "CO₂", className: "bg-[#e8f1fd] text-[#1a73e8]" },
-  ch4: { label: "CH₄", className: "bg-amber-50 text-amber-700" },
-  n2o: { label: "N₂O", className: "bg-violet-50 text-violet-700" },
+  co2: { label: "CO₂", className: "bg-emerald-50 text-emerald-700 border-emerald-200/60" },
+  ch4: { label: "CH₄", className: "bg-amber-50 text-amber-700 border-amber-200/60" },
+  n2o: { label: "N₂O", className: "bg-violet-50 text-violet-700 border-violet-200/60" },
 };
 
 export function EmissionFactors() {
@@ -44,26 +44,33 @@ export function EmissionFactors() {
   const pageRows = filtered.slice(start, start + PAGE_SIZE);
 
   return (
-    <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto max-w-[1400px] p-6 lg:p-8 font-sans">
+      {/* Header */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Quản lý hệ số phát thải
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Quản lý thư viện hệ số phát thải theo tiêu chuẩn
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              Quản lý hệ số phát thải
+            </h1>
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+              {groups.length} nhóm hệ số
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Thư viện hệ số phát thải phục vụ quy đổi năng lượng và kiểm kê carbon theo tiêu chuẩn GHG Protocol và Bộ TN&MT.
           </p>
         </div>
         <Link
           href="/he-so-phat-thai/them-moi"
-          className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+          className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors"
         >
-          <span className="text-lg leading-none">+</span>
+          <span className="text-base leading-none font-bold">+</span>
           Thêm hệ số
         </Link>
       </div>
 
-      <label className="relative mb-4 block max-w-md">
+      {/* Search Bar */}
+      <div className="relative mb-6 max-w-md">
         <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400">
           <SearchIcon className="h-4 w-4" />
         </span>
@@ -73,24 +80,25 @@ export function EmissionFactors() {
             setQuery(e.target.value);
             setPage(1);
           }}
-          placeholder="Tìm kiếm hệ số..."
-          className="h-10 w-full rounded-lg border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8]"
+          placeholder="Tìm kiếm theo tên nguồn hoặc xuất xứ..."
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white pr-3 pl-9 text-xs text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-xs"
         />
-      </label>
+      </div>
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      {/* Main Table */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-sm">
+          <table className="w-full min-w-[920px] text-left text-xs">
             <thead>
-              <tr className="border-b border-slate-200 bg-[#f8fafc] text-[11px] font-semibold tracking-wide text-slate-400">
-                <th className="px-5 py-3">HỆ SỐ PHÁT THẢI SỬ DỤNG</th>
-                <th className="px-5 py-3">GIÁ TRỊ</th>
-                <th className="px-5 py-3">ĐƠN VỊ</th>
-                <th className="px-5 py-3">NGUỒN</th>
-                <th className="px-5 py-3 text-right">THAO TÁC</th>
+              <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+                <th className="px-5 py-3">Nguồn / Loại nhiên liệu</th>
+                <th className="px-5 py-3">Loại khí & Giá trị</th>
+                <th className="px-5 py-3">Đơn vị đo</th>
+                <th className="px-5 py-3">Nguồn tham chiếu / Căn cứ</th>
+                <th className="px-5 py-3 text-right">Thao tác</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {pageRows.map((group) =>
                 group.gases.map((gas, index) => {
                   const first = index === 0;
@@ -98,55 +106,55 @@ export function EmissionFactors() {
                   return (
                     <tr
                       key={`${group.id}-${gas.key}`}
-                      className={`hover:bg-slate-50/80 ${
-                        last ? "border-b border-slate-200" : "border-b border-slate-100"
+                      className={`hover:bg-slate-50/80 transition-colors ${
+                        last ? "border-b border-slate-100" : ""
                       }`}
                     >
                       {first && (
                         <td
                           rowSpan={group.gases.length}
-                          className="max-w-[340px] px-5 py-4 align-middle font-medium text-slate-800"
+                          className="max-w-[320px] px-5 py-4 align-middle font-semibold text-slate-900 border-r border-slate-100"
                         >
                           {group.name}
                         </td>
                       )}
-                      <td className="px-5 py-2.5">
-                        <span className="inline-flex items-center gap-3">
+                      <td className="px-5 py-3">
+                        <div className="inline-flex items-center gap-3">
                           <span
-                            className={`inline-flex min-w-12 justify-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${GAS_META[gas.key].className}`}
+                            className={`inline-flex min-w-11 justify-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${GAS_META[gas.key].className}`}
                           >
                             {GAS_META[gas.key].label}
                           </span>
-                          <span className="font-semibold text-slate-800">
+                          <span className="font-mono font-semibold text-slate-800 text-xs">
                             {formatFactorValue(gas.value)}
                           </span>
-                        </span>
+                        </div>
                       </td>
-                      <td className="px-5 py-2.5 text-slate-600">{gas.unit}</td>
+                      <td className="px-5 py-3 text-slate-600 font-mono text-[11px]">{gas.unit}</td>
                       {first && (
                         <>
                           <td
                             rowSpan={group.gases.length}
-                            className="max-w-[280px] px-5 py-4 align-middle text-xs leading-5 text-slate-500"
+                            className="max-w-[280px] px-5 py-4 align-middle text-xs leading-relaxed text-slate-500 border-l border-slate-100"
                           >
                             {group.source}
                           </td>
-                          <td rowSpan={group.gases.length} className="px-5 py-4 align-middle">
+                          <td rowSpan={group.gases.length} className="px-5 py-4 align-middle text-right">
                             <div className="flex justify-end gap-1">
                               <Link
                                 href={`/he-so-phat-thai/them-moi?id=${group.id}`}
-                                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
-                                aria-label={`Chỉnh sửa ${group.name}`}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors"
+                                title={`Chỉnh sửa ${group.name}`}
                               >
-                                <EditIcon className="h-4 w-4" />
+                                <EditIcon className="h-3.5 w-3.5" />
                               </Link>
                               <button
                                 type="button"
                                 onClick={() => setGroups(removeFactorGroup(group.id))}
-                                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
-                                aria-label={`Xóa ${group.name}`}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
+                                title={`Xóa ${group.name}`}
                               >
-                                <TrashIcon className="h-4 w-4" />
+                                <TrashIcon className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           </td>
@@ -158,8 +166,8 @@ export function EmissionFactors() {
               )}
               {pageRows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center text-sm text-slate-400">
-                    Không tìm thấy hệ số phát thải.
+                  <td colSpan={5} className="px-5 py-12 text-center text-xs text-slate-400">
+                    Không tìm thấy hệ số phát thải nào phù hợp.
                   </td>
                 </tr>
               )}
@@ -167,11 +175,11 @@ export function EmissionFactors() {
           </table>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm text-slate-500">
+        {/* Pagination */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3.5 text-xs text-slate-500 bg-white">
           <p>
             Hiển thị {filtered.length === 0 ? 0 : start + 1}-
-            {Math.min(start + PAGE_SIZE, filtered.length)} trên tổng số {filtered.length} nhóm hệ
-            số
+            {Math.min(start + PAGE_SIZE, filtered.length)} trên tổng số {filtered.length} nhóm hệ số
           </p>
           <div className="flex items-center gap-1">
             <PageBtn disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
@@ -192,14 +200,13 @@ export function EmissionFactors() {
         </div>
       </section>
 
-      <div className="mt-5 flex gap-3 rounded-xl border border-[#c5daf7] bg-[#f3f8ff] px-4 py-3 text-sm text-slate-600">
-        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1a73e8] text-[11px] font-bold text-white">
+      {/* Note Banner */}
+      <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 text-xs text-emerald-900">
+        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white">
           i
         </span>
-        <p>
-          <span className="font-semibold">Ghi chú:</span> Các hệ số phát thải được hiển thị theo
-          nhóm thành phần (CO₂, CH₄, N₂O) dựa trên thông tư hướng dẫn của Bộ Tài nguyên và Môi
-          trường.
+        <p className="leading-relaxed">
+          <strong className="font-semibold">Căn cứ tiêu chuẩn:</strong> Hệ số phát thải được phân loại theo các chất khí gây hiệu ứng nhà kính chính (CO₂, CH₄, N₂O) và quy đổi sang tấn CO₂ tương đương ($tCO_2e$) dựa theo GWP (Global Warming Potential) công bố bởi IPCC và quy chuẩn của Bộ Tài nguyên & Môi trường.
         </p>
       </div>
     </div>
@@ -222,8 +229,10 @@ function PageBtn({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-8 min-w-8 items-center justify-center rounded-md px-2 text-sm font-medium disabled:opacity-40 ${
-        active ? "bg-[#1a73e8] text-white" : "text-slate-600 hover:bg-slate-100"
+      className={`flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold transition-colors disabled:opacity-30 ${
+        active
+          ? "bg-emerald-600 text-white shadow-xs"
+          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
       }`}
     >
       {children}
@@ -233,37 +242,26 @@ function PageBtn({
 
 function SearchIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M16 16.5 20 20.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
     </svg>
   );
 }
 
 function EditIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 17.5V20h2.5L18 8.5 15.5 6 4 17.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path d="M13.8 7.7 16.3 10.2" stroke="currentColor" strokeWidth="1.8" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
     </svg>
   );
 }
 
 function TrashIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M5 7h14M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M8 7l.7 12.2A1.5 1.5 0 0 0 10.2 21h3.6a1.5 1.5 0 0 0 1.5-1.8L16 7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
     </svg>
   );
 }

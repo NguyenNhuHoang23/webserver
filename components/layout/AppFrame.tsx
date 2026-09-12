@@ -12,7 +12,15 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
   const isClientView = pathname.startsWith("/du-an/");
   const isAuthView = isAuthPath(pathname);
 
-  if (isAuthView || isClientView) {
+  if (isAuthView) {
+    return (
+      <AuthGuard>
+        <div className="flex h-full min-h-screen w-full flex-col overflow-y-auto bg-[#0b1120]">{children}</div>
+      </AuthGuard>
+    );
+  }
+
+  if (isClientView) {
     return (
       <AuthGuard>
         <div className="flex h-full min-h-0 flex-1 flex-col bg-[#e8edf3]">{children}</div>

@@ -125,7 +125,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
           <select
             value={template}
             onChange={(e) => setTemplate(e.target.value)}
-            className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
+            className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
           >
             {TEMPLATES.map((item) => (
               <option key={item}>{item}</option>
@@ -140,8 +140,8 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
                 key={item.id}
                 type="button"
                 onClick={() => pickReport(item.id)}
-                className={`mb-1 flex h-10 w-full items-center rounded-md px-3 text-left text-[13px] font-medium ${
-                  active ? "bg-[#3b82f6] text-white" : "text-slate-700 hover:bg-slate-50"
+                className={`mb-1 flex h-10 w-full items-center rounded-md px-3 text-left text-[13px] font-medium transition-colors ${
+                  active ? "bg-emerald-600 text-white shadow-xs" : "text-slate-700 hover:bg-slate-50"
                 }`}
               >
                 {index + 1}. {item.name}
@@ -184,7 +184,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
                       type="checkbox"
                       checked={selected.includes(item.id)}
                       onChange={() => togglePoint(item.id)}
-                      className="accent-[#1a73e8]"
+                      className="accent-emerald-600"
                     />
                     {item.name}
                   </label>
@@ -198,7 +198,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="h-9 w-full max-w-[420px] rounded-md border border-slate-200 px-3 text-sm font-semibold tracking-wide text-slate-800 outline-none focus:border-[#1a73e8]"
+                className="h-9 w-full max-w-[420px] rounded-md border border-slate-200 px-3 text-sm font-semibold tracking-wide text-slate-800 outline-none focus:border-emerald-500"
               />
             </SettingRow>
             <SettingRow index={2} label="Biểu đồ:">
@@ -214,7 +214,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
               <select
                 value={format}
                 onChange={(e) => setFormat(e.target.value as Format)}
-                className="h-9 min-w-[140px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
+                className="h-9 min-w-[140px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
               >
                 <option>.pdf</option>
                 <option>.xlsx</option>
@@ -266,7 +266,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
             <select
               value={period}
               onChange={(e) => setPeriod(e.target.value as Period)}
-              className="h-9 min-w-[120px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
+              className="h-9 min-w-[120px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
             >
               <option>Ngày</option>
               <option>Tuần</option>
@@ -309,7 +309,7 @@ function YesNoSelect({ value, onChange }: { value: YesNo; onChange: (value: YesN
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as YesNo)}
-      className="h-9 min-w-[140px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1a73e8]"
+      className="h-9 min-w-[140px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
     >
       <option>Có</option>
       <option>Không</option>

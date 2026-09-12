@@ -58,59 +58,71 @@ export function DeviceList() {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto max-w-[1400px] p-6 lg:p-8 font-sans">
+      {/* Header */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#0f2b5b]">
-            Thư viện loại đồng hồ
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Cấu hình loại đồng hồ nhận dữ liệu từ gateway, dùng chung cho nhiều dự án.
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              Thư viện loại đồng hồ
+            </h1>
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+              {devices.length} models
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Cấu hình danh mục loại đồng hồ, địa chỉ thanh ghi nhận dữ liệu từ gateway dùng chung cho toàn hệ thống.
           </p>
         </div>
         <Link
           href="/thiet-bi/them-moi"
-          className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+          className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors"
         >
-          <span className="text-lg leading-none">+</span>
+          <span className="text-base leading-none font-bold">+</span>
           Thêm loại đồng hồ
         </Link>
       </div>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* KPI Cards */}
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="TỔNG LOẠI ĐỒNG HỒ"
           value={String(stats.total)}
-          icon={<BoxIcon className="h-5 w-5" />}
-          iconWrap="bg-[#e8f1fd] text-[#1a73e8]"
+          hint="Catalog tiêu chuẩn"
+          icon={<BoxIcon className="h-5 w-5 text-slate-700" />}
+          iconWrap="bg-slate-100"
         />
         <StatCard
-          label="ĐÃ CẤU HÌNH HÀM DỮ LIỆU"
+          label="ĐÃ CẤU HÌNH THANH GHI"
           value={String(stats.mapped)}
-          valueClass="text-emerald-600"
-          icon={<CheckIcon className="h-5 w-5" />}
-          iconWrap="bg-emerald-50 text-emerald-600"
+          valueClass="text-emerald-700"
+          hint="Sẵn sàng đọc Modbus/MQTT"
+          icon={<CheckIcon className="h-5 w-5 text-emerald-600" />}
+          iconWrap="bg-emerald-50"
         />
         <StatCard
           label="CÓ ẢNH NHẬN DIỆN"
           value={String(stats.withImage)}
-          valueClass="text-[#1a73e8]"
-          icon={<CameraIcon className="h-5 w-5" />}
-          iconWrap="bg-[#e8f1fd] text-[#1a73e8]"
+          valueClass="text-cyan-700"
+          hint="Hỗ trợ hiển thị trực quan"
+          icon={<CameraIcon className="h-5 w-5 text-cyan-600" />}
+          iconWrap="bg-cyan-50"
         />
         <StatCard
-          label="THƯƠNG HIỆU"
+          label="THƯƠNG HIỆU HỖ TRỢ"
           value={String(stats.brandsCount)}
-          icon={<BoxIcon className="h-5 w-5" />}
-          iconWrap="bg-slate-100 text-slate-600"
+          hint="Hãng sản xuất thiết bị"
+          icon={<TagIcon className="h-5 w-5 text-slate-600" />}
+          iconWrap="bg-slate-100"
         />
       </div>
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500">
-              <FilterIcon className="h-4 w-4" />
+      {/* Main Table / Grid Section */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4 bg-slate-50/40">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500">
+              <FilterIcon className="h-3.5 w-3.5" />
               Lọc theo:
             </span>
             <FilterSelect
@@ -136,14 +148,9 @@ export function DeviceList() {
               ]}
             />
           </div>
-          <div className="flex items-center gap-1">
-            <ToolbarButton
-              label="Dạng lưới"
-              active={view === "grid"}
-              onClick={() => setView("grid")}
-            >
-              <GridIcon className="h-4 w-4" />
-            </ToolbarButton>
+
+          {/* View Toggle */}
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
             <ToolbarButton
               label="Dạng danh sách"
               active={view === "list"}
@@ -151,120 +158,140 @@ export function DeviceList() {
             >
               <ListIcon className="h-4 w-4" />
             </ToolbarButton>
+            <ToolbarButton
+              label="Dạng lưới"
+              active={view === "grid"}
+              onClick={() => setView("grid")}
+            >
+              <GridIcon className="h-4 w-4" />
+            </ToolbarButton>
           </div>
         </div>
 
         {view === "list" ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-left text-sm">
+            <table className="w-full min-w-[820px] text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-100 bg-[#f8fafc] text-[11px] font-semibold tracking-wide text-slate-400">
-                  <th className="px-5 py-3">TÊN MODEL</th>
-                  <th className="px-5 py-3">THƯƠNG HIỆU</th>
-                  <th className="px-5 py-3">LOẠI</th>
-                  <th className="px-5 py-3">GIAO THỨC</th>
-                  <th className="px-5 py-3">HÀM DỮ LIỆU</th>
-                  <th className="px-5 py-3 text-right">THAO TÁC</th>
+                <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+                  <th className="px-5 py-3">Tên Model & Chủng loại</th>
+                  <th className="px-5 py-3">Thương hiệu</th>
+                  <th className="px-5 py-3">Phân loại</th>
+                  <th className="px-5 py-3">Giao thức</th>
+                  <th className="px-5 py-3">Hàm dữ liệu</th>
+                  <th className="px-5 py-3 text-right">Thao tác</th>
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((device) => {
-                  const Icon = kindIcons[device.kind];
-                  return (
-                    <tr
-                      key={device.id}
-                      className="border-b border-slate-50 last:border-0 hover:bg-slate-50/70"
-                    >
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 overflow-hidden items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
-                            {device.image ? (
-                              <img src={device.image} alt="" className="h-9 w-9 object-cover" />
-                            ) : (
-                              <Icon className="h-4 w-4" />
-                            )}
-                          </span>
-                          <span>
-                            <span className="block font-semibold text-slate-800">
-                              {device.name}
+              <tbody className="divide-y divide-slate-100">
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                      Không tìm thấy loại đồng hồ nào phù hợp.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((device) => {
+                    const Icon = getKindIcon(device.kind);
+                    return (
+                      <tr
+                        key={device.id}
+                        className="hover:bg-slate-50/80 transition-colors"
+                      >
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <span className="flex h-9 w-9 shrink-0 overflow-hidden items-center justify-center rounded-xl bg-slate-100 text-slate-700 border border-slate-200/60">
+                              {device.image ? (
+                                <img src={device.image} alt="" className="h-9 w-9 object-cover" />
+                              ) : (
+                                <Icon className="h-4 w-4" />
+                              )}
                             </span>
-                            <span className="block text-xs text-slate-400">
-                              {device.brandModel}
-                            </span>
+                            <div>
+                              <span className="block font-semibold text-slate-900">
+                                {device.name}
+                              </span>
+                              <span className="block font-mono text-[11px] text-slate-400">
+                                {device.brandModel}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5 font-medium text-slate-700">
+                          {device.brand}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600 border border-slate-200/60">
+                            {device.type}
                           </span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 text-slate-600">
-                        {device.brand}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                          {device.type}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 text-slate-600">
-                        {device.protocol || "—"}
-                      </td>
-                      <td className="px-5 py-3.5 text-slate-600">
-                        {(device.registers?.length ?? 0) > 0
-                          ? `${device.registers?.length} điểm`
-                          : "Chưa cấu hình"}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex justify-end gap-1">
-                          <Link
-                            href={`/thiet-bi/them-moi?id=${device.id}`}
-                            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-[#1a73e8]"
-                            aria-label="Sửa loại đồng hồ"
-                          >
-                            <EditIcon className="h-4 w-4" />
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() => removeDevice(device.id)}
-                            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
-                            aria-label="Xóa loại đồng hồ"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="px-5 py-3.5 text-slate-600 font-mono text-[11px]">
+                          {device.protocol || "—"}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          {(device.registers?.length ?? 0) > 0 ? (
+                            <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              {device.registers?.length} điểm đo
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Chưa cấu hình</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <div className="flex justify-end gap-1">
+                            <Link
+                              href={`/thiet-bi/them-moi?id=${device.id}`}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors"
+                              title="Sửa loại đồng hồ"
+                            >
+                              <EditIcon className="h-3.5 w-3.5" />
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => removeDevice(device.id)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
+                              title="Xóa loại đồng hồ"
+                            >
+                              <TrashIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
         ) : (
           <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
             {rows.map((device) => {
-              const Icon = kindIcons[device.kind];
+              const Icon = getKindIcon(device.kind);
               return (
                 <article
                   key={device.id}
-                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+                  className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs hover:border-emerald-300 transition-colors"
                 >
                   <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 overflow-hidden items-center justify-center rounded-lg bg-[#e8f1fd] text-[#1a73e8]">
+                    <span className="flex h-11 w-11 shrink-0 overflow-hidden items-center justify-center rounded-xl bg-slate-100 text-slate-700 border border-slate-200/60">
                       {device.image ? (
-                        <img src={device.image} alt="" className="h-10 w-10 object-cover" />
+                        <img src={device.image} alt="" className="h-11 w-11 object-cover" />
                       ) : (
                         <Icon className="h-5 w-5" />
                       )}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold text-slate-800">
+                      <p className="truncate font-semibold text-slate-900 text-xs">
                         {device.name}
                       </p>
-                      <p className="text-xs text-slate-400">{device.brand}</p>
-                      <p className="mt-2 text-sm text-slate-600">
+                      <p className="text-[11px] text-slate-400">{device.brand}</p>
+                      <p className="mt-1 text-xs text-slate-600 font-mono">
                         {device.protocol || "Chưa chọn giao thức"}
                       </p>
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                      <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-[11px]">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
                           {device.type}
                         </span>
-                        <span className="text-xs text-slate-400">
+                        <span className="text-slate-500 font-medium">
                           {(device.registers?.length ?? 0) > 0
                             ? `${device.registers?.length} điểm dữ liệu`
                             : "Chưa cấu hình"}
@@ -278,11 +305,11 @@ export function DeviceList() {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-sm text-slate-500">
+        {/* Pagination */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3.5 text-xs text-slate-500 bg-white">
           <p>
             Hiển thị {filtered.length === 0 ? 0 : start + 1}-
-            {Math.min(start + PAGE_SIZE, filtered.length)} trên tổng số{" "}
-            {filtered.length} loại đồng hồ
+            {Math.min(start + PAGE_SIZE, filtered.length)} trên tổng số {filtered.length} loại đồng hồ
           </p>
           <Pagination
             page={currentPage}
@@ -291,11 +318,12 @@ export function DeviceList() {
           />
         </div>
 
-        <div className="flex items-start gap-2.5 rounded-b-xl border-t border-[#d6e6fb] bg-[#eef5ff] px-5 py-3.5 text-sm text-[#1a5fbe]">
-          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" />
+        {/* Subtle Tip Banner */}
+        <div className="flex items-start gap-2.5 border-t border-emerald-100 bg-emerald-50/40 px-5 py-3 text-xs text-emerald-800">
+          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
           <p>
-            <span className="font-semibold">Mẹo:</span> Đây là cấu hình dùng chung.
-            Gán loại đồng hồ vào điểm đo của từng dự án khi thêm điểm đo — không lưu thông tin dự án ở đây.
+            <strong className="font-semibold">Mẹo vận hành:</strong> Đây là danh mục loại thiết bị dùng chung cho toàn hệ thống.
+            Khi thêm điểm đo trong từng dự án, bạn chỉ cần chọn loại đồng hồ tương ứng mà không cần khai báo lại thanh ghi Modbus.
           </p>
         </div>
       </section>
@@ -303,32 +331,35 @@ export function DeviceList() {
   );
 }
 
+// ---------------- Helpers & Icons ----------------
+
 function StatCard({
   label,
   value,
+  hint,
   icon,
   iconWrap,
   valueClass = "text-slate-900",
 }: {
   label: string;
   value: string;
+  hint?: string;
   icon: ReactNode;
   iconWrap: string;
   valueClass?: string;
 }) {
   return (
-    <article className="flex items-start justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+    <article className="flex items-start justify-between rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs">
       <div>
-        <p className="text-[11px] font-semibold tracking-wide text-slate-400">
+        <p className="text-[10px] font-bold tracking-wider uppercase text-slate-400">
           {label}
         </p>
         <p className={`mt-2 text-3xl font-bold tracking-tight ${valueClass}`}>
           {value}
         </p>
+        {hint && <p className="mt-1.5 text-xs text-slate-500">{hint}</p>}
       </div>
-      <span
-        className={`flex h-11 w-11 items-center justify-center rounded-full ${iconWrap}`}
-      >
+      <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconWrap}`}>
         {icon}
       </span>
     </article>
@@ -349,7 +380,7 @@ function FilterSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-9 appearance-none rounded-lg border border-slate-200 bg-white py-0 pr-8 pl-3 text-sm text-slate-600 outline-none focus:border-[#1a73e8]"
+        className="h-9 appearance-none rounded-lg border border-slate-200 bg-white py-0 pr-8 pl-3 text-xs font-medium text-slate-700 outline-none hover:border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -357,7 +388,7 @@ function FilterSelect({
           </option>
         ))}
       </select>
-      <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-slate-400">
+      <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-slate-400 text-xs">
         ▾
       </span>
     </div>
@@ -380,10 +411,8 @@ function ToolbarButton({
       type="button"
       title={label}
       onClick={onClick}
-      className={`flex h-8 w-8 items-center justify-center rounded-md ${
-        active
-          ? "bg-[#e8f1fd] text-[#1a73e8]"
-          : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+        active ? "bg-slate-900 text-white shadow-xs" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
       }`}
     >
       {children}
@@ -417,7 +446,7 @@ function Pagination({
         type="button"
         disabled={page === 1}
         onClick={() => onChange(page - 1)}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 transition-colors"
       >
         ‹
       </button>
@@ -431,10 +460,10 @@ function Pagination({
             key={item}
             type="button"
             onClick={() => onChange(item)}
-            className={`h-8 min-w-8 rounded-md px-2 text-sm font-medium ${
+            className={`h-8 min-w-8 rounded-lg px-2 text-xs font-semibold transition-colors ${
               item === page
-                ? "bg-[#1a73e8] text-white"
-                : "text-slate-600 hover:bg-slate-100"
+                ? "bg-emerald-600 text-white shadow-xs"
+                : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             }`}
           >
             {item}
@@ -445,7 +474,7 @@ function Pagination({
         type="button"
         disabled={page === totalPages}
         onClick={() => onChange(page + 1)}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 transition-colors"
       >
         ›
       </button>
@@ -453,187 +482,148 @@ function Pagination({
   );
 }
 
-const kindIcons: Record<
-  DeviceKind,
-  (props: { className?: string }) => ReactNode
-> = {
-  power: BoltIcon,
-  flow: DropIcon,
-  temp: ThermoIcon,
-  steam: WaveIcon,
-};
+function getKindIcon(kind?: string) {
+  switch (kind) {
+    case "power":
+      return BoltIcon;
+    case "flow":
+      return DropletIcon;
+    case "temp":
+      return HeatIcon;
+    case "steam":
+      return FlameIcon;
+    default:
+      return BoxIcon;
+  }
+}
 
 function BoxIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 8.5 12 4l8 4.5V16L12 20.5 4 16V8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path d="M12 12v8.5M4 8.5l8 3.5 8-3.5" stroke="currentColor" strokeWidth="1.8" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m7.5 4.27 9 5.15" />
+      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+      <path d="m3.3 7 8.7 5 8.7-5" />
+      <path d="M12 22V12" />
     </svg>
   );
 }
 
 function CheckIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="m8.5 12.2 2.4 2.4 4.6-5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
     </svg>
   );
 }
 
 function CameraIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 8.5h3l1.5-2h7l1.5 2h3A1.5 1.5 0 0 1 21.5 10v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="14" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+      <circle cx="12" cy="13" r="3" />
+    </svg>
+  );
+}
+
+function TagIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" />
+      <path d="M7 7h.01" />
     </svg>
   );
 }
 
 function FilterIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 6h16l-6 7.5V18l-4 2v-6.5L4 6Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function GridIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="4" y="4" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
-      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
-      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
-      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.8" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
   );
 }
 
 function ListIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+    </svg>
+  );
+}
+
+function GridIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect width="7" height="7" x="3" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="14" rx="1" />
+      <rect width="7" height="7" x="3" y="14" rx="1" />
     </svg>
   );
 }
 
 function EditIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 17.5V20h2.5L18 8.5 15.5 6 4 17.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path d="M13.8 7.7 16.3 10.2" stroke="currentColor" strokeWidth="1.8" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
     </svg>
   );
 }
 
 function TrashIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M5 7h14M10 7V5h4v2M8 7l.8 12h6.4L16 7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
     </svg>
   );
 }
 
 function InfoIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M12 11v5M12 8v.01"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4M12 8h.01" />
     </svg>
   );
 }
 
 function BoltIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M13 2 4.5 13.5h6.2L9.2 22 19.5 10h-6.2L13 2Z" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
 }
 
-function DropIcon({ className }: { className?: string }) {
+function DropletIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M12 3s6 7 6 11a6 6 0 1 1-12 0c0-4 6-11 6-11Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" />
     </svg>
   );
 }
 
-function ThermoIcon({ className }: { className?: string }) {
+function FlameIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M10 13.5V6.5a2 2 0 1 1 4 0v7a3.5 3.5 0 1 1-4 0Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path d="M12 9v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
     </svg>
   );
 }
 
-function WaveIcon({ className }: { className?: string }) {
+function SunIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M3 14c2-3 4-3 6 0s4 3 6 0 4-3 6 0"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M3 9c2-3 4-3 6 0s4 3 6 0 4-3 6 0"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+    </svg>
+  );
+}
+
+function HeatIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z" />
     </svg>
   );
 }

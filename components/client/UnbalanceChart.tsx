@@ -75,7 +75,6 @@ function iUnb(i: number, qty: string, agg: Agg, seed: number) {
 export function UnbalanceChart({ seed }: { seed: number }) {
   const [topQty, setTopQty] = useState("Uunb");
   const [botQty, setBotQty] = useState("Iunb");
-  const [slot, setSlot] = useState("-");
   const [aggs, setAggs] = useState<Agg[]>(["AVG"]);
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
@@ -142,13 +141,6 @@ export function UnbalanceChart({ seed }: { seed: number }) {
             <option>Ineg</option>
             <option>Izero</option>
           </select>
-          <select
-            value={slot}
-            onChange={(e) => setSlot(e.target.value)}
-            className="h-8 w-14 rounded border border-slate-300 bg-white px-1 text-[13px] text-slate-500"
-          >
-            <option value="-">-</option>
-          </select>
         </div>
         <div className="flex items-center gap-3 rounded border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600">
           {AGGS.map((agg) => (
@@ -157,7 +149,7 @@ export function UnbalanceChart({ seed }: { seed: number }) {
                 type="checkbox"
                 checked={aggs.includes(agg)}
                 onChange={() => setAggs((list) => toggleIn(list, agg))}
-                className="accent-[#1a73e8]"
+                className="accent-emerald-600"
               />
               {agg}
             </label>
@@ -184,7 +176,7 @@ export function UnbalanceChart({ seed }: { seed: number }) {
               className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
             />
             <span
-              className="pointer-events-none absolute -top-px text-[10px] leading-none text-[#1a73e8]"
+              className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
               style={{ left: `calc(${left}% - 5px)` }}
             >
               ▼
@@ -463,7 +455,7 @@ function ToolBtn({
       title={label}
       onClick={onClick}
       className={`flex h-7 w-7 items-center justify-center rounded-sm border text-slate-500 ${
-        active ? "border-[#1a73e8] bg-blue-50 text-[#1a73e8]" : "border-slate-300 bg-white hover:bg-slate-50"
+        active ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-white hover:bg-slate-50"
       }`}
     >
       {children}

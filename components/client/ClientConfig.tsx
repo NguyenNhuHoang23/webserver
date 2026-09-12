@@ -129,7 +129,7 @@ export function ClientConfig() {
     project: { title: "Thông tin dự án", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
     meters: {
       title: "Cụm điểm đo",
-      hint: `Thêm điểm đo và gán ID thiết bị tại đây (hiển thị cây cha–con trên Sơ đồ) · Dự án ${projectId}`,
+      hint: `Cấu hình phân cấp cây cha–con của các điểm đo trên Sơ đồ · Dự án ${projectId}`,
     },
     cost: { title: "Cấu hình chi phí", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
     alerts: { title: "Cấu hình cảnh báo", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
@@ -157,8 +157,8 @@ export function ClientConfig() {
                   key={item.id}
                   type="button"
                   onClick={() => setTab(item.id)}
-                  className={`mb-1 flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[13px] font-medium ${
-                    tab === item.id ? "bg-[#3b82f6] text-white" : "text-slate-700 hover:bg-slate-50"
+                  className={`mb-1 flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[13px] font-medium transition-colors ${
+                    tab === item.id ? "bg-emerald-600 text-white shadow-xs" : "text-slate-700 hover:bg-slate-50"
                   }`}
                 >
                   <NavIcon type={item.icon} className="h-4 w-4" />
@@ -180,7 +180,7 @@ export function ClientConfig() {
               type="button"
               title="Lưu"
               onClick={markSaved}
-              className="flex h-9 w-9 items-center justify-center rounded-md bg-[#3b82f6] text-white hover:bg-[#2563eb]"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs transition-colors"
             >
               {tab === "accounts" ? <FileIcon /> : <SaveIcon />}
             </button>
@@ -291,7 +291,7 @@ export function ClientConfig() {
               <button
                 type="button"
                 onClick={markSaved}
-                className="h-10 rounded-md bg-[#2563eb] px-4 text-sm font-medium text-white hover:bg-[#1d4ed8]"
+                className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors"
               >
                 Lưu cấu hình
               </button>
@@ -349,7 +349,7 @@ function ProjectForm({
       <select
         value={classify}
         onChange={(e) => onClassify(e.target.value)}
-        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#3b82f6]"
+        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
       >
         <option>Thông tin chung (Info)</option>
         <option>Thông tin kỹ thuật</option>
@@ -363,7 +363,7 @@ function ProjectForm({
             value={warnCount}
             onChange={(e) => onWarnCount(e.target.value)}
             placeholder="Nhập số lượng (ví dụ: 50)..."
-            className="h-10 w-full max-w-xs rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-[#3b82f6]"
+            className="h-10 w-full max-w-xs rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500"
           />
         </Field>
         <Field n={3} title="Warning Timeout" hint="Thời gian chờ phản hồi cảnh báo (tối thiểu 1 phút)">
@@ -378,7 +378,7 @@ function ProjectForm({
             value={gmail}
             onChange={(e) => onGmail(e.target.value)}
             placeholder="example@ems-project.com"
-            className="h-10 w-full max-w-sm rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-[#3b82f6]"
+            className="h-10 w-full max-w-sm rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500"
           />
         </Field>
         <Field n={8} title="Mật khẩu" hint="Mật khẩu bảo mật cho tài khoản hệ thống (đã mã hóa)">
@@ -386,14 +386,14 @@ function ProjectForm({
             type="password"
             value={password}
             onChange={(e) => onPassword(e.target.value)}
-            className="h-10 w-full max-w-sm rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-[#3b82f6]"
+            className="h-10 w-full max-w-sm rounded-md border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500"
           />
         </Field>
         <Field n={5} title="Ngôn ngữ hệ thống" hint="Ngôn ngữ hiển thị trên toàn bộ giao diện quản trị">
           <select
             value={language}
             onChange={(e) => onLanguage(e.target.value)}
-            className="h-10 min-w-[180px] rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#3b82f6]"
+            className="h-10 min-w-[180px] rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:border-emerald-500"
           >
             <option>Tiếng Việt</option>
             <option>English</option>
@@ -406,8 +406,8 @@ function ProjectForm({
                 key={item}
                 type="button"
                 onClick={() => onTheme(item)}
-                className={`h-9 px-4 text-[13px] font-medium ${
-                  theme === item ? "bg-[#3b82f6] text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                className={`h-9 px-4 text-[13px] font-medium transition-colors ${
+                  theme === item ? "bg-emerald-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
                 }`}
               >
                 {item}
@@ -437,23 +437,8 @@ function MetersPanel({
 }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ id: string; position: DropPosition } | null>(null);
-  const [showAdd, setShowAdd] = useState(true);
-  const [draft, setDraft] = useState({
-    name: "",
-    code: "",
-    parentId: "",
-    deviceId: "",
-  });
 
   const depthMap = useMemo(() => buildMeterDepthMap(meters), [meters]);
-
-  const usedDeviceIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const meter of meters) {
-      if (meter.deviceId) set.add(meter.deviceId);
-    }
-    return set;
-  }, [meters]);
 
   function resolveDropPosition(event: DragEvent<HTMLTableRowElement>): DropPosition {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -470,53 +455,6 @@ function MetersPanel({
     if (next) onMetersChange(next);
     setDragId(null);
     setDropHint(null);
-  }
-
-  function addMeter() {
-    const name = draft.name.trim();
-    if (!name) return;
-    const device = devices.find((item) => item.id === draft.deviceId);
-    const id = `m-${Date.now()}`;
-    const code =
-      draft.code.trim() ||
-      `${utility.slice(0, 2).toUpperCase()}-${String(meters.length + 1).padStart(3, "0")}`;
-    const parentId = draft.parentId || null;
-    const next: Meter = {
-      id,
-      name,
-      code,
-      type: device?.brandModel || device?.type || "Chưa gán thiết bị",
-      parentId,
-      utility,
-      deviceId: draft.deviceId || null,
-    };
-    const ordered = [...meters];
-    if (parentId) {
-      const insertAt = findChildInsertIndex(ordered, parentId);
-      ordered.splice(insertAt, 0, next);
-      onMetersChange(ordered);
-    } else {
-      onMetersChange([...ordered, next]);
-    }
-    setDraft({ name: "", code: "", parentId: draft.parentId, deviceId: "" });
-  }
-
-  function patchMeter(id: string, patch: Partial<Meter>) {
-    onMetersChange(
-      meters.map((meter) => {
-        if (meter.id !== id) return meter;
-        const next = { ...meter, ...patch };
-        if (patch.deviceId !== undefined) {
-          const device = devices.find((item) => item.id === patch.deviceId);
-          if (device) {
-            next.type = device.brandModel || device.type;
-          } else if (!patch.deviceId) {
-            next.type = "Chưa gán thiết bị";
-          }
-        }
-        return next;
-      }),
-    );
   }
 
   function changeParent(id: string, parentId: string | null) {
@@ -538,108 +476,35 @@ function MetersPanel({
     onMetersChange(next);
   }
 
-  function removeMeter(id: string) {
-    const ids = new Set<string>([id]);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const meter of meters) {
-        if (meter.parentId && ids.has(meter.parentId) && !ids.has(meter.id)) {
-          ids.add(meter.id);
-          changed = true;
-        }
-      }
-    }
-    onMetersChange(meters.filter((meter) => !ids.has(meter.id)));
-  }
-
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <UtilityTabs value={utility} options={utilities} onChange={onUtility} />
-        <button
-          type="button"
-          onClick={() => setShowAdd((v) => !v)}
-          className="inline-flex h-9 items-center gap-1 rounded-md bg-[#3b82f6] px-3 text-[12px] font-semibold text-white hover:bg-[#2563eb]"
-        >
-          {showAdd ? "Ẩn form thêm" : "+ Thêm điểm đo"}
-        </button>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-600/20">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+          Kéo thả hoặc chọn điểm cha để phân cấp
+        </span>
       </div>
       <p className="mt-3 text-[12px] text-slate-500">
-        Thêm điểm đo và gán điểm đo đó vào <span className="font-semibold text-slate-700">ID thiết bị</span> tại
-        đây. Kéo thả hoặc chọn điểm cha để tạo cây — Sơ đồ chỉ hiển thị, không thêm điểm trên Sơ đồ.
+        Kéo thả các hàng hoặc chọn trong cột <span className="font-semibold text-slate-700">ĐIỂM CHA</span> để thiết lập quan hệ cây phân cấp cha–con. Cấu trúc cây sẽ tự động đồng bộ và hiển thị trên <span className="font-semibold text-emerald-700">Sơ đồ hệ thống</span>.
       </p>
 
-      {showAdd ? (
-        <div className="mt-3 rounded-lg border border-[#bfdbfe] bg-[#f8fbff] p-3">
-          <p className="mb-2 text-[12px] font-semibold text-[#1d4ed8]">Thêm điểm đo mới</p>
-          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-5">
-            <input
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder="Tên điểm đo *"
-              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
-            />
-            <input
-              value={draft.code}
-              onChange={(e) => setDraft({ ...draft, code: e.target.value })}
-              placeholder="Mã ID (vd: MP-001)"
-              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
-            />
-            <select
-              value={draft.parentId}
-              onChange={(e) => setDraft({ ...draft, parentId: e.target.value })}
-              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
-            >
-              <option value="">Không có điểm đo cha</option>
-              {meters.map((meter) => (
-                <option key={meter.id} value={meter.id}>
-                  Con của: {meter.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={draft.deviceId}
-              onChange={(e) => setDraft({ ...draft, deviceId: e.target.value })}
-              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#3b82f6]"
-            >
-              <option value="">Gán ID thiết bị...</option>
-              {devices.map((device) => (
-                <option key={device.id} value={device.id} disabled={usedDeviceIds.has(device.id)}>
-                  {device.name} · {device.sn}
-                  {usedDeviceIds.has(device.id) ? " (đã gán)" : ""}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={addMeter}
-              disabled={!draft.name.trim()}
-              className="h-9 rounded-md bg-[#3b82f6] text-sm font-medium text-white hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Thêm điểm đo
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[900px] text-left text-[13px]">
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[840px] text-left text-[13px]">
           <thead>
             <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
-              <th className="py-2 pr-2 font-semibold">TÊN ĐIỂM ĐO</th>
-              <th className="py-2 pr-2 font-semibold">MÃ ID</th>
-              <th className="py-2 pr-2 font-semibold">ĐIỂM CHA</th>
-              <th className="py-2 pr-2 font-semibold">GÁN ID THIẾT BỊ</th>
-              <th className="py-2 pr-2 font-semibold">LOẠI THIẾT BỊ</th>
-              <th className="py-2 text-right font-semibold">THAO TÁC</th>
+              <th className="py-2.5 pr-2 font-semibold">TÊN ĐIỂM ĐO</th>
+              <th className="py-2.5 pr-2 font-semibold">MÃ ID</th>
+              <th className="py-2.5 pr-2 font-semibold">ĐIỂM CHA</th>
+              <th className="py-2.5 pr-2 font-semibold">THIẾT BỊ ĐÃ GÁN</th>
+              <th className="py-2.5 pr-2 font-semibold">LOẠI THIẾT BỊ</th>
             </tr>
           </thead>
           <tbody>
             {meters.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-sm text-slate-400">
-                  Chưa có điểm đo loại {utility}. Thêm điểm và gán ID thiết bị phía trên.
+                <td colSpan={5} className="py-8 text-center text-sm text-slate-400">
+                  Chưa có điểm đo loại {utility}.
                 </td>
               </tr>
             ) : (
@@ -677,99 +542,79 @@ function MetersPanel({
                       isDragging ? "opacity-40" : ""
                     } ${
                       hint === "child"
-                        ? "bg-[#eef5ff] ring-1 ring-inset ring-[#3b82f6]/30"
+                        ? "bg-emerald-50 ring-1 ring-inset ring-emerald-500/30"
                         : hint
                           ? "bg-slate-50"
                           : "hover:bg-slate-50/70"
                     }`}
                   >
-                    <td className="relative py-2.5 pr-2">
+                    <td className="relative py-3 pr-2">
                       {hint === "before" ? (
-                        <span className="absolute inset-x-0 top-0 h-0.5 bg-[#3b82f6]" />
+                        <span className="absolute inset-x-0 top-0 h-0.5 bg-emerald-600" />
                       ) : null}
                       {hint === "after" ? (
-                        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-[#3b82f6]" />
+                        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-emerald-600" />
                       ) : null}
                       <span
                         className="inline-flex w-full items-center gap-2"
-                        style={{ paddingLeft: depth * 18 }}
+                        style={{ paddingLeft: depth * 22 }}
                       >
-                        <span className="cursor-grab text-slate-300 active:cursor-grabbing">
+                        <span
+                          className="cursor-grab text-slate-300 hover:text-slate-500 active:cursor-grabbing"
+                          title="Kéo thả để sắp xếp phân cấp"
+                        >
                           <DragHandle />
                         </span>
-                        {depth > 0 ? <span className="text-slate-300">↳</span> : null}
-                        <input
-                          value={item.name}
-                          onChange={(e) => patchMeter(item.id, { name: e.target.value })}
-                          className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-[13px] font-medium outline-none hover:border-slate-200 focus:border-[#3b82f6] focus:bg-white"
-                        />
+                        {depth > 0 ? <span className="font-bold text-slate-300">↳</span> : null}
+                        <span className="truncate text-[13px] font-semibold text-slate-800">
+                          {item.name}
+                        </span>
                         {hint === "child" ? (
-                          <span className="shrink-0 rounded bg-[#dbeafe] px-1.5 py-0.5 text-[10px] font-semibold text-[#2563eb]">
+                          <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
                             Làm con
                           </span>
                         ) : null}
                       </span>
                     </td>
-                    <td className="py-2.5 pr-2">
-                      <input
-                        value={item.code}
-                        onChange={(e) => patchMeter(item.id, { code: e.target.value })}
-                        className="h-8 w-[100px] rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-600 outline-none focus:border-[#3b82f6]"
-                      />
+                    <td className="py-3 pr-2">
+                      <span className="inline-flex rounded-md bg-slate-100 px-2 py-1 font-mono text-[12px] font-semibold text-slate-700">
+                        {item.code}
+                      </span>
                     </td>
-                    <td className="py-2.5 pr-2">
+                    <td className="py-3 pr-2">
                       <select
                         value={item.parentId ?? ""}
                         onChange={(e) => changeParent(item.id, e.target.value || null)}
-                        className="h-8 max-w-[160px] rounded-md border border-slate-200 bg-white px-2 text-[12px] outline-none focus:border-[#3b82f6]"
+                        className="h-8 max-w-[200px] rounded-md border border-slate-200 bg-white px-2 text-[12px] font-medium text-slate-700 outline-none focus:border-emerald-500 shadow-2xs cursor-pointer"
                       >
-                        <option value="">Không có điểm đo cha</option>
+                        <option value="">Không có điểm đo cha (Gốc)</option>
                         {meters
                           .filter((meter) => meter.id !== item.id && !isMeterDescendant(meters, item.id, meter.id))
                           .map((meter) => (
                             <option key={meter.id} value={meter.id}>
-                              {meter.name}
+                              Con của: {meter.name}
                             </option>
                           ))}
                       </select>
                     </td>
-                    <td className="py-2.5 pr-2">
-                      <select
-                        value={item.deviceId ?? ""}
-                        onChange={(e) =>
-                          patchMeter(item.id, { deviceId: e.target.value || null })
-                        }
-                        className={`h-8 max-w-[240px] rounded-md border px-2 text-[12px] outline-none focus:border-[#3b82f6] ${
-                          item.deviceId
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                            : "border-amber-200 bg-amber-50 text-amber-700"
-                        }`}
-                      >
-                        <option value="">Chưa gán thiết bị</option>
-                        {devices.map((device) => {
-                          const taken = usedDeviceIds.has(device.id) && device.id !== item.deviceId;
-                          return (
-                            <option key={device.id} value={device.id} disabled={taken}>
-                              {device.name} · {device.sn}
-                              {taken ? " (đã gán)" : ""}
-                            </option>
-                          );
-                        })}
-                      </select>
+                    <td className="py-3 pr-2">
                       {assigned ? (
-                        <span className="mt-0.5 block truncate text-[10px] text-slate-400">
-                          {assigned.id}
+                        <div>
+                          <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[12px] font-medium text-emerald-800">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            {assigned.name} · {assigned.sn}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[10px] text-slate-400">
+                            ID: {assigned.id}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12px] font-medium text-amber-700">
+                          Chưa gán thiết bị
                         </span>
-                      ) : null}
+                      )}
                     </td>
-                    <td className="py-2.5 pr-2 text-slate-600">{item.type}</td>
-                    <td className="py-2.5">
-                      <span className="flex justify-end gap-1 text-slate-400">
-                        <IconBtn label="Xóa điểm đo" onClick={() => removeMeter(item.id)}>
-                          <TrashIcon />
-                        </IconBtn>
-                      </span>
-                    </td>
+                    <td className="py-3 pr-2 text-[12px] text-slate-600">{item.type}</td>
                   </tr>
                 );
               })
@@ -1015,7 +860,7 @@ function CostPanel({
                 <input
                   value={flatPrice}
                   onChange={(e) => setFlatPrice(e.target.value)}
-                  className="h-10 w-full rounded-md border border-slate-200 pr-14 pl-3 text-sm font-semibold text-slate-800 outline-none focus:border-[#3b82f6]"
+                  className="h-10 w-full rounded-md border border-slate-200 pr-14 pl-3 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500"
                 />
                 <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[11px] text-slate-400">
                   VNĐ
@@ -1064,7 +909,7 @@ function AlertsPanel({
       <select
         value={classify}
         onChange={(e) => onClassify(e.target.value)}
-        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#3b82f6]"
+        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
       >
         <option>Thông tin chung (Info)</option>
         <option>Ngưỡng vận hành</option>
@@ -1077,8 +922,8 @@ function AlertsPanel({
               key={tag}
               type="button"
               onClick={() => onActive(tag)}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium ${
-                active ? "bg-[#3b82f6] text-white" : "bg-slate-100 text-slate-500"
+              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium transition-colors ${
+                active ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
               }`}
             >
               {tag}
@@ -1095,7 +940,7 @@ function AlertsPanel({
             </button>
           );
         })}
-        <button type="button" onClick={onAddTag} className="text-[12px] font-semibold text-[#3b82f6] hover:underline">
+        <button type="button" onClick={onAddTag} className="text-[12px] font-semibold text-emerald-600 hover:underline">
           + Thêm mới
         </button>
       </div>
@@ -1104,7 +949,7 @@ function AlertsPanel({
           <input
             value={threshold}
             onChange={(e) => onThreshold(e.target.value)}
-            className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#3b82f6]"
+            className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-500"
           />
         </Field>
         <Field title="Daily limit" hint="Giới hạn tiêu thụ hàng ngày tối đa">
@@ -1117,7 +962,7 @@ function AlertsPanel({
               role="switch"
               aria-checked={peakWarn}
               onClick={() => onPeakWarn(!peakWarn)}
-              className={`relative h-6 w-11 rounded-full ${peakWarn ? "bg-[#3b82f6]" : "bg-slate-300"}`}
+              className={`relative h-6 w-11 rounded-full transition-colors ${peakWarn ? "bg-emerald-600" : "bg-slate-300"}`}
             >
               <span
                 className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${peakWarn ? "left-5.5" : "left-0.5"}`}
@@ -1153,7 +998,7 @@ function AccountsPanel({
         <button
           type="button"
           onClick={() => onAdding(true)}
-          className="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#3b82f6] px-3.5 text-sm font-medium text-white hover:bg-[#2563eb]"
+          className="inline-flex h-10 items-center gap-1.5 rounded-md bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors"
         >
           <UserPlusIcon />
           + Thêm mới tài khoản
@@ -1194,7 +1039,7 @@ function AccountsPanel({
                 });
                 setDraft({ username: "", fullName: "", role: "Người xem", email: "" });
               }}
-              className="h-9 rounded-md bg-[#3b82f6] px-3 text-sm text-white"
+              className="h-9 rounded-md bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700 shadow-xs transition-colors"
             >
               Thêm
             </button>
@@ -1268,8 +1113,8 @@ function UtilityTabs({
           key={item}
           type="button"
           onClick={() => onChange(item)}
-          className={`h-10 text-[14px] font-medium ${
-            value === item ? "border-b-2 border-[#3b82f6] text-[#3b82f6]" : "text-slate-400 hover:text-slate-600"
+          className={`h-10 text-[14px] font-medium transition-colors ${
+            value === item ? "border-b-2 border-emerald-600 text-emerald-600" : "text-slate-400 hover:text-slate-600"
           }`}
         >
           {item}

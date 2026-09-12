@@ -12,6 +12,7 @@ import {
   useNodesState,
   useReactFlow,
   type NodeTypes,
+  type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -45,11 +46,75 @@ const nodeTypes: NodeTypes = {
   meter: MeterNode,
 };
 
-const edgeStyle = { stroke: "#c5cdd6", strokeWidth: 2 };
+const edgeStyle = { stroke: "#cbd5e1", strokeWidth: 2 };
 
 const NODE_W = 248;
 const H_GAP = 48;
 const V_GAP = 120;
+
+// ---------------- Persistence System ----------------
+
+type SavedDiagramState = {
+  positions: Record<string, { x: number; y: number }>;
+  viewport?: { x: number; y: number; zoom: number };
+};
+
+function getStorageKey(projectId: string, energy: string) {
+  return `ems-diagram-layout-${projectId}-${energy}`;
+}
+
+function loadDiagramState(projectId: string, energy: string): SavedDiagramState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(getStorageKey(projectId, energy));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDiagramPositions(
+  projectId: string,
+  energy: string,
+  patches: Record<string, { x: number; y: number }>,
+) {
+  if (typeof window === "undefined") return;
+  try {
+    const key = getStorageKey(projectId, energy);
+    const current = loadDiagramState(projectId, energy) ?? { positions: {} };
+    const updated: SavedDiagramState = {
+      ...current,
+      positions: { ...current.positions, ...patches },
+    };
+    window.localStorage.setItem(key, JSON.stringify(updated));
+  } catch {}
+}
+
+function saveDiagramViewport(
+  projectId: string,
+  energy: string,
+  viewport: Viewport,
+) {
+  if (typeof window === "undefined") return;
+  try {
+    const key = getStorageKey(projectId, energy);
+    const current = loadDiagramState(projectId, energy) ?? { positions: {} };
+    const updated: SavedDiagramState = {
+      ...current,
+      viewport: {
+        x: Math.round(viewport.x),
+        y: Math.round(viewport.y),
+        zoom: Number(viewport.zoom.toFixed(3)),
+      },
+    };
+    window.localStorage.setItem(key, JSON.stringify(updated));
+  } catch {}
+}
+
+function clearDiagramState(projectId: string, energy: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(getStorageKey(projectId, energy));
+}
 
 function iconForUtility(utility: string): MeterIcon {
   if (utility === "Nước") return "pump";
@@ -191,17 +256,20 @@ function SystemDiagramInner() {
   const params = useParams<{ id: string }>();
   const projectId = params?.id ?? "default";
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const [energyFilters, setEnergyFilters] = useState<MeterType[]>(() => resolveMeterTypes(null));
   const [energy, setEnergy] = useState<EnergyKind>("Điện");
   const [meters, setMeters] = useState<ClientMeter[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savedNotice, setSavedNotice] = useState(false);
   const [displayOverrides, setDisplayOverrides] = useState<
     Record<string, Partial<MeterNodeData>>
   >({});
   const [nodes, setNodes, onNodesChange] = useNodesState<DiagramNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<DiagramEdge>([]);
-  const { fitView, setCenter, getNode } = useReactFlow();
+  const { fitView, setCenter, getNode, setViewport } = useReactFlow();
 
   const reloadMeters = useCallback(() => {
     const rows = loadClientMeters(projectId);
@@ -229,23 +297,30 @@ function SystemDiagramInner() {
     };
   }, [reloadMeters]);
 
+  // Load or build diagram nodes, restoring saved positions & viewport
   useEffect(() => {
     const filtered = meters.filter((meter) => meter.utility === energy);
     const built = buildFlowFromMeters(filtered);
-    setNodes(
-      built.nodes.map((node) => {
-        const patch = displayOverrides[node.id];
-        const data = patch
-          ? { ...(node.data as MeterNodeData), ...patch }
-          : (node.data as MeterNodeData);
-        return {
-          ...node,
-          type: "meter" as const,
-          data,
-          selected: node.id === selectedId,
-        };
-      }),
-    );
+    const savedState = loadDiagramState(projectId, energy);
+    const savedPositions = savedState?.positions ?? {};
+
+    const restoredNodes: DiagramNode[] = built.nodes.map((node) => {
+      const patch = displayOverrides[node.id];
+      const data = patch
+        ? { ...(node.data as MeterNodeData), ...patch }
+        : (node.data as MeterNodeData);
+      // Restore previously dragged position if exists!
+      const position = savedPositions[node.id] ? { ...savedPositions[node.id] } : node.position;
+      return {
+        ...node,
+        type: "meter" as const,
+        position,
+        data,
+        selected: node.id === selectedId,
+      };
+    });
+
+    setNodes(restoredNodes);
     setEdges(built.edges);
 
     const ids = new Set(filtered.map((meter) => meter.id));
@@ -256,11 +331,19 @@ function SystemDiagramInner() {
       setSelectedId(filtered[0].id);
     }
 
-    const frame = requestAnimationFrame(() => fitView({ padding: 0.28, duration: 200 }));
-    return () => cancelAnimationFrame(frame);
-    // selectedId only used for highlight when rebuilding; selection-only updates handled below
+    // Restore viewport or auto-fit if first time
+    if (savedState?.viewport) {
+      const vp = savedState.viewport;
+      const frame = requestAnimationFrame(() => {
+        setViewport({ x: vp.x, y: vp.y, zoom: vp.zoom });
+      });
+      return () => cancelAnimationFrame(frame);
+    } else {
+      const frame = requestAnimationFrame(() => fitView({ padding: 0.28, duration: 200 }));
+      return () => cancelAnimationFrame(frame);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meters, energy, displayOverrides, setNodes, setEdges, fitView]);
+  }, [meters, energy, displayOverrides, setNodes, setEdges, fitView, setViewport]);
 
   useEffect(() => {
     setNodes((current) =>
@@ -332,30 +415,63 @@ function SystemDiagramInner() {
     });
   };
 
+  // Reset layout back to default tree calculation
+  const handleResetLayout = useCallback(() => {
+    clearDiagramState(projectId, energy);
+    const filtered = meters.filter((meter) => meter.utility === energy);
+    const built = buildFlowFromMeters(filtered);
+    setNodes(
+      built.nodes.map((node) => {
+        const patch = displayOverrides[node.id];
+        const data = patch
+          ? { ...(node.data as MeterNodeData), ...patch }
+          : (node.data as MeterNodeData);
+        return {
+          ...node,
+          type: "meter" as const,
+          data,
+          selected: node.id === selectedId,
+        };
+      }),
+    );
+    setEdges(built.edges);
+    fitView({ padding: 0.28, duration: 250 });
+    setSavedNotice(true);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => setSavedNotice(false), 2000);
+  }, [projectId, energy, meters, displayOverrides, selectedId, setNodes, setEdges, fitView]);
+
   const configHref = `/du-an/${projectId}/cau-hinh`;
 
   return (
     <DiagramActionsContext.Provider value={diagramActions}>
-      <div className="flex h-full min-h-0 bg-white">
-        <aside className="flex w-[270px] shrink-0 flex-col border-r border-slate-200 bg-[#f7f9fc]">
-          <div className="flex items-center justify-between px-4 pt-4 pb-3">
-            <h2 className="text-[12px] font-bold tracking-[0.08em] text-slate-500">
-              DANH SÁCH ĐIỂM ĐO
-            </h2>
+      <div className="flex h-full min-h-0 bg-white font-sans">
+        {/* Left Sidebar: Points List */}
+        <aside className="flex w-[280px] shrink-0 flex-col border-r border-slate-200/80 bg-slate-50/70">
+          <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-slate-200/60 bg-white">
+            <div>
+              <h2 className="text-xs font-bold tracking-wider uppercase text-slate-700">
+                Danh sách điểm đo
+              </h2>
+              <span className="text-[11px] text-slate-400">
+                {listedPoints.length} điểm loại {energy}
+              </span>
+            </div>
             <button
               type="button"
-              className="text-slate-400 hover:text-slate-600 disabled:opacity-40"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:opacity-40 transition-colors"
               aria-label="Cài đặt điểm đo"
               disabled={!selectedNode}
               onClick={() => selectedNode && setSettingsOpen(true)}
+              title="Tùy chỉnh biểu tượng hiển thị"
             >
-              <GearIcon className="h-4 w-4" />
+              <GearIcon className="h-3.5 w-3.5" />
             </button>
           </div>
-          <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+          <ul className="min-h-0 flex-1 overflow-y-auto p-2 space-y-1">
             {listedPoints.length === 0 ? (
-              <li className="px-3 py-6 text-center text-sm text-slate-400">
-                Chưa có điểm đo. Thêm tại Cấu hình.
+              <li className="px-3 py-8 text-center text-xs text-slate-400">
+                Chưa có điểm đo nào cho loại {energy}.
               </li>
             ) : (
               listedPoints.map((point, index) => {
@@ -365,33 +481,33 @@ function SystemDiagramInner() {
                     <button
                       type="button"
                       onClick={() => selectPoint(point.id)}
-                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-[13px] ${
+                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs transition-colors ${
                         active
-                          ? "bg-[#1a73e8] font-medium text-white"
-                          : "text-slate-600 hover:bg-slate-200/70"
+                          ? "bg-slate-900 font-semibold text-white shadow-xs"
+                          : "text-slate-700 hover:bg-slate-200/60"
                       }`}
                     >
-                      <span className="min-w-0 truncate">
-                        <span className="block truncate">
+                      <span className="min-w-0 truncate pr-2">
+                        <span className="block truncate font-medium">
                           {index + 1}. {point.name}
                         </span>
                         <span
-                          className={`block text-[10px] ${
-                            active ? "text-white/75" : "text-slate-400"
+                          className={`block font-mono text-[10px] ${
+                            active ? "text-slate-300" : "text-slate-400"
                           }`}
                         >
                           {point.code}
-                          {!point.deviceId ? " · Chưa gán TB" : ""}
+                          {!point.deviceId ? " • Chưa gán TB" : ""}
                         </span>
                       </span>
                       <span
-                        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                        className={`h-2 w-2 shrink-0 rounded-full ${
                           point.status === "warning"
-                            ? "bg-[#f59e0b]"
+                            ? "bg-amber-500 ring-2 ring-amber-200"
                             : point.status === "normal"
                               ? "bg-emerald-500"
                               : "bg-slate-300"
-                        } ${active && point.status === "warning" ? "ring-2 ring-white/70" : ""}`}
+                        }`}
                       />
                     </button>
                   </li>
@@ -401,23 +517,29 @@ function SystemDiagramInner() {
           </ul>
         </aside>
 
+        {/* Center: SCADA Canvas */}
         <section className="flex min-w-0 flex-1 flex-col">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-3">
-            <div>
-              <h1 className="text-lg font-bold text-slate-800">Sơ đồ Hệ thống</h1>
-              <p className="text-[12px] text-slate-400">
-                Cây cha–con lấy từ Cấu hình → Cụm điểm đo
-              </p>
-              <div className="mt-2.5 flex flex-wrap gap-2">
+          {/* Top Canvas Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 px-6 py-3 bg-white">
+            <div className="flex items-center gap-4">
+              <div>
+                <h1 className="text-base font-bold text-slate-900 leading-tight">Sơ đồ Phân phối Năng lượng</h1>
+                <p className="text-[11px] text-slate-400">
+                  Kéo thả node để sắp xếp vị trí • Vị trí được tự động lưu vĩnh viễn
+                </p>
+              </div>
+
+              {/* Energy Utility Selector */}
+              <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/60 p-1">
                 {energyFilters.map((item) => (
                   <button
                     key={item}
                     type="button"
                     onClick={() => setEnergy(item)}
-                    className={`rounded-full px-3.5 py-1 text-[12px] font-medium ${
+                    className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${
                       energy === item
-                        ? "bg-[#1a73e8] text-white"
-                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-white"
                     }`}
                   >
                     {item}
@@ -425,18 +547,22 @@ function SystemDiagramInner() {
                 ))}
               </div>
             </div>
-            <Link
-              href={configHref}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#1a73e8] px-3 text-[12px] font-semibold tracking-wide text-white hover:bg-[#1666d0]"
-            >
-              Cấu hình điểm đo
-            </Link>
+
+            <div className="flex items-center gap-3">
+              <Link
+                href={configHref}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
+              >
+                Cấu hình điểm đo
+              </Link>
+            </div>
           </div>
 
+          {/* React Flow Area */}
           <div ref={wrapperRef} className="relative flex min-h-0 flex-1">
             <div className="relative min-h-0 min-w-0 flex-1">
               <ReactFlow
-                className="diagram-flow"
+                className="diagram-flow bg-[#f8fafc]"
                 nodes={nodes}
                 edges={edges}
                 nodeTypes={nodeTypes}
@@ -449,32 +575,60 @@ function SystemDiagramInner() {
                   }
                 }}
                 onPaneClick={() => setSettingsOpen(false)}
+                // Automatically save dragged positions on mouse release
+                onNodeDragStop={(_, node, draggedNodes) => {
+                  const patches: Record<string, { x: number; y: number }> = {};
+                  const list = draggedNodes && draggedNodes.length > 0 ? draggedNodes : [node];
+                  for (const n of list) {
+                    patches[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
+                  }
+                  saveDiagramPositions(projectId, energy, patches);
+                  setSavedNotice(true);
+                  if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+                  saveTimerRef.current = setTimeout(() => setSavedNotice(false), 2000);
+                }}
+                // Automatically save viewport pan/zoom on canvas move
+                onMoveEnd={(_, viewport) => {
+                  saveDiagramViewport(projectId, energy, viewport);
+                }}
                 nodesConnectable={false}
                 edgesFocusable={false}
                 elementsSelectable
                 nodesDraggable
-                fitView
-                fitViewOptions={{ padding: 0.28 }}
-                minZoom={0.4}
-                maxZoom={1.8}
+                minZoom={0.3}
+                maxZoom={2.0}
                 proOptions={{ hideAttribution: true }}
               >
-                <Background gap={22} size={1} color="#e8edf3" />
+                <Background gap={24} size={1} color="#cbd5e1" />
+
+                {/* Status Notice on drag/save */}
+                {savedNotice && (
+                  <Panel position="top-right" className="m-3">
+                    <div className="flex items-center gap-2 rounded-xl bg-slate-900/90 px-3 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur-md animate-fadeIn">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>Đã lưu vị trí sơ đồ tự động</span>
+                    </div>
+                  </Panel>
+                )}
+
+                {/* Floating Info Guide */}
                 <Panel
                   position="top-left"
-                  className="m-3 max-w-[300px] rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-[11px] leading-relaxed text-slate-500 shadow-sm"
+                  className="m-3 max-w-[280px] rounded-xl border border-slate-200/80 bg-white/95 p-3 text-[11px] leading-relaxed text-slate-500 shadow-xs backdrop-blur-sm"
                 >
-                  <p className="font-semibold text-slate-700">Cây cha–con</p>
-                  <p>
-                    Thêm điểm đo và gán ID thiết bị tại{" "}
-                    <Link href={configHref} className="font-medium text-[#1a73e8] hover:underline">
-                      Cấu hình → Cụm điểm đo
-                    </Link>
-                    . Kéo thả dòng trong cấu hình để đặt quan hệ cha–con.
+                  <p className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    Bố cục tự do & Tự động lưu
+                  </p>
+                  <p className="mt-1 text-slate-600">
+                    Bạn có thể kéo thả bất kỳ điểm đo nào vào vị trí mong muốn. Hệ thống sẽ tự động lưu vị trí và giữ nguyên khi chuyển trang hoặc tắt trình duyệt.
                   </p>
                 </Panel>
+
+                {/* Floating Controls */}
                 <CanvasControls
                   onFit={() => fitView({ padding: 0.28, duration: 220 })}
+                  onResetLayout={handleResetLayout}
                   onFullscreen={() => {
                     const el = wrapperRef.current;
                     if (!el) return;
@@ -486,18 +640,26 @@ function SystemDiagramInner() {
                   }}
                 />
               </ReactFlow>
+
               {listedPoints.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="rounded-lg bg-white/90 px-5 py-4 text-center">
+                  <div className="rounded-2xl border border-slate-200 bg-white/95 px-6 py-5 text-center shadow-xs">
                     <CloudIcon className="mx-auto mb-2 h-8 w-8 text-slate-300" />
-                    <p className="text-sm text-slate-400">
-                      Chưa có điểm đo loại {energy} — thêm tại Cấu hình
+                    <p className="text-xs font-medium text-slate-500">
+                      Chưa có điểm đo nào cho loại {energy}.
                     </p>
+                    <Link
+                      href={configHref}
+                      className="mt-3 inline-block rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white pointer-events-auto hover:bg-emerald-700"
+                    >
+                      Thêm điểm đo ngay
+                    </Link>
                   </div>
                 </div>
               ) : null}
             </div>
 
+            {/* Right Panel: Display Customization */}
             {settingsOpen && selectedData ? (
               <NodeSettingsPanel
                 data={selectedData}
@@ -512,6 +674,8 @@ function SystemDiagramInner() {
   );
 }
 
+// ---------------- Settings Panel ----------------
+
 function NodeSettingsPanel({
   data,
   onClose,
@@ -522,32 +686,32 @@ function NodeSettingsPanel({
   onChange: (patch: Partial<MeterNodeData>) => void;
 }) {
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col border-l border-slate-200 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+    <aside className="flex w-[300px] shrink-0 flex-col border-l border-slate-200 bg-white font-sans shadow-lg">
+      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5">
         <div>
-          <h2 className="text-[13px] font-semibold text-slate-800">Hiển thị điểm đo</h2>
-          <p className="text-[11px] text-slate-400">Chỉ tùy chỉnh biểu tượng trên sơ đồ</p>
+          <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Tùy chỉnh Điểm đo</h2>
+          <p className="text-[11px] text-slate-400">Thay đổi icon và tên hiển thị sơ đồ</p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
           aria-label="Đóng cài đặt"
         >
           ×
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 text-xs">
         <SettingsField label="TÊN HIỂN THỊ">
           <input
             value={data.title}
             onChange={(e) => onChange({ title: e.target.value })}
-            className="input"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500"
           />
         </SettingsField>
 
-        <SettingsField label="BIỂU TƯỢNG">
+        <SettingsField label="BIỂU TƯỢNG HỆ THỐNG">
           <div className="grid grid-cols-4 gap-2">
             {ICON_OPTIONS.map((option) => {
               const active = data.icon === option.id && !data.iconImage;
@@ -557,13 +721,13 @@ function NodeSettingsPanel({
                   type="button"
                   title={option.label}
                   onClick={() => onChange({ icon: option.id, iconImage: undefined })}
-                  className={`flex flex-col items-center gap-1 rounded-lg border px-1.5 py-2 text-[10px] ${
+                  className={`flex flex-col items-center gap-1 rounded-xl border px-1.5 py-2 text-[10px] transition-colors ${
                     active
-                      ? "border-[#1a73e8] bg-[#eef5ff] text-[#1a73e8]"
-                      : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white"
+                      ? "border-emerald-500 bg-emerald-50/70 text-emerald-700 font-semibold"
+                      : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white"
                   }`}
                 >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white shadow-xs">
                     <NodeGlyph type={option.id} className="h-4 w-4" />
                   </span>
                   <span className="truncate">{option.label}</span>
@@ -573,19 +737,19 @@ function NodeSettingsPanel({
           </div>
         </SettingsField>
 
-        <SettingsField label="ẢNH TÙY CHỈNH">
-          <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center hover:border-[#1a73e8] hover:bg-[#f4f8ff]">
+        <SettingsField label="ẢNH MINH HỌA TÙY CHỈNH">
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center hover:border-emerald-500 hover:bg-emerald-50/30 transition-colors">
             {data.iconImage ? (
               <img
                 src={data.iconImage}
                 alt="Biểu tượng tùy chỉnh"
-                className="mb-2 h-14 w-14 rounded-full object-cover"
+                className="mb-2 h-14 w-14 rounded-xl object-cover shadow-xs"
               />
             ) : (
-              <ImageIcon className="mb-2 h-7 w-7 text-slate-400" />
+              <ImageIcon className="mb-2 h-6 w-6 text-slate-400" />
             )}
-            <span className="text-[11px] font-medium text-slate-600">
-              {data.iconImage ? "Chọn ảnh khác" : "Tải ảnh lên"}
+            <span className="text-xs font-medium text-slate-600">
+              {data.iconImage ? "Chọn ảnh khác" : "Tải ảnh thiết bị lên"}
             </span>
             <input
               type="file"
@@ -602,9 +766,9 @@ function NodeSettingsPanel({
             <button
               type="button"
               onClick={() => onChange({ iconImage: undefined })}
-              className="mt-2 text-[11px] font-medium text-red-500 hover:underline"
+              className="mt-2 text-xs font-medium text-rose-500 hover:underline"
             >
-              Xóa ảnh, dùng biểu tượng mặc định
+              Xóa ảnh, dùng icon mặc định
             </button>
           ) : null}
         </SettingsField>
@@ -622,7 +786,7 @@ function SettingsField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">
+      <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
         {label}
       </span>
       {children}
@@ -630,25 +794,32 @@ function SettingsField({
   );
 }
 
+// ---------------- Canvas Controls ----------------
+
 function CanvasControls({
   onFit,
+  onResetLayout,
   onFullscreen,
 }: {
   onFit: () => void;
+  onResetLayout: () => void;
   onFullscreen: () => void;
 }) {
   const { zoomIn, zoomOut } = useReactFlow();
 
   return (
-    <Panel position="bottom-right" className="m-4 flex flex-col gap-2">
-      <ControlButton label="Phóng to" onClick={() => zoomIn({ duration: 160 })}>
+    <Panel position="bottom-right" className="m-4 flex flex-col gap-2 font-sans">
+      <ControlButton label="Phóng to (+)" onClick={() => zoomIn({ duration: 160 })}>
         +
       </ControlButton>
-      <ControlButton label="Thu nhỏ" onClick={() => zoomOut({ duration: 160 })}>
+      <ControlButton label="Thu nhỏ (-)" onClick={() => zoomOut({ duration: 160 })}>
         −
       </ControlButton>
       <ControlButton label="Vừa khung hình" onClick={onFit}>
         <FitIcon className="h-4 w-4" />
+      </ControlButton>
+      <ControlButton label="Đặt lại vị trí mặc định" onClick={onResetLayout}>
+        <ResetIcon className="h-4 w-4" />
       </ControlButton>
       <ControlButton label="Toàn màn hình" onClick={onFullscreen}>
         <ExpandIcon className="h-4 w-4" />
@@ -671,80 +842,63 @@ function ControlButton({
       type="button"
       title={label}
       onClick={onClick}
-      className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-lg text-slate-500 shadow-sm hover:text-slate-800"
+      className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white text-base text-slate-600 shadow-md hover:bg-slate-50 hover:text-slate-900 transition-colors"
     >
       {children}
     </button>
   );
 }
 
+// ---------------- SVG Icons ----------------
+
 function GearIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-      <path
-        d="M12 5v1.5M12 17.5V19M19 12h-1.5M6.5 12H5M16.8 7.2l-1 1M8.2 15.8l-1 1M16.8 16.8l-1-1M8.2 8.2l-1-1"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
     </svg>
   );
 }
 
 function FitIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5" />
+    </svg>
+  );
+}
+
+function ResetIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
     </svg>
   );
 }
 
 function ExpandIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M14 5h5v5M10 19H5v-5M19 9l-6 6M5 15l6-6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 5h5v5M10 19H5v-5M19 9l-6 6M5 15l6-6" />
     </svg>
   );
 }
 
 function ImageIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
-      <circle cx="9" cy="10" r="1.5" fill="currentColor" />
-      <path
-        d="m4 16 4.5-4.5 3 3L15 11l5 5"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
     </svg>
   );
 }
 
 function CloudIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M7.5 18h10a3.5 3.5 0 0 0 .4-7 5 5 0 0 0-9.7-1.5A3.5 3.5 0 0 0 7.5 18Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
     </svg>
   );
 }

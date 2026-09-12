@@ -139,7 +139,7 @@ export function AddCustomDeviceForm() {
       <div className="flex items-start gap-3">
         <Link
           href="/thiet-bi"
-          className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-[#1a73e8]"
+          className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-white hover:text-emerald-600 transition-colors"
           aria-label="Quay lại danh sách thiết bị"
         >
           <BackIcon className="h-5 w-5" />
@@ -157,13 +157,13 @@ export function AddCustomDeviceForm() {
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-sm font-bold tracking-wide text-slate-700 uppercase">
-            <InfoIcon className="h-4 w-4 text-[#1a73e8]" />
+            <InfoIcon className="h-4 w-4 text-emerald-600" />
             Thông số chung
           </h2>
           <button
             type="button"
             onClick={addExtraField}
-            className="text-xs font-bold tracking-wide text-[#1a73e8] hover:underline"
+            className="text-xs font-bold tracking-wide text-emerald-600 hover:text-emerald-700 hover:underline"
           >
             + THÊM TRƯỜNG THÔNG TIN
           </button>
@@ -253,13 +253,13 @@ export function AddCustomDeviceForm() {
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-sm font-bold tracking-wide text-slate-700 uppercase">
-            <DocIcon className="h-4 w-4 text-[#1a73e8]" />
+            <DocIcon className="h-4 w-4 text-emerald-600" />
             Hàm nhận dữ liệu từ gateway
           </h2>
           <button
             type="button"
             onClick={addRow}
-            className="text-xs font-bold tracking-wide text-[#1a73e8] hover:underline"
+            className="text-xs font-bold tracking-wide text-emerald-600 hover:text-emerald-700 hover:underline"
           >
             + THÊM DÒNG
           </button>
@@ -335,7 +335,7 @@ export function AddCustomDeviceForm() {
 
       <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center hover:border-[#1a73e8] hover:bg-[#f4f8ff]">
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center hover:border-emerald-500 hover:bg-emerald-50/30 transition-colors">
             {preview ? (
               <img
                 src={preview}
@@ -368,7 +368,7 @@ export function AddCustomDeviceForm() {
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-wide text-slate-700 uppercase">
-            <DocIcon className="h-4 w-4 text-[#1a73e8]" />
+            <DocIcon className="h-4 w-4 text-emerald-600" />
             Ghi chú & mô tả
           </h2>
           <textarea
@@ -376,7 +376,7 @@ export function AddCustomDeviceForm() {
             onChange={(e) => setNotes(e.target.value)}
             rows={7}
             placeholder="Ghi chú kỹ thuật của loại đồng hồ: đơn vị, cách đọc thanh ghi, lưu ý khi kết nối gateway..."
-            className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/15"
+            className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 transition-all"
           />
         </section>
       </div>
@@ -389,13 +389,13 @@ export function AddCustomDeviceForm() {
         <div className="flex items-center gap-3">
           <Link
             href="/thiet-bi"
-            className="inline-flex h-10 items-center rounded-lg border border-[#1a73e8] bg-white px-4 text-sm font-medium text-[#1a73e8] hover:bg-blue-50"
+            className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"
           >
             Hủy bỏ
           </Link>
           <button
             type="submit"
-            className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+            className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
           >
             {isEdit ? "Cập nhật loại đồng hồ" : "Lưu loại đồng hồ"}
           </button>

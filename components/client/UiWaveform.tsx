@@ -84,10 +84,12 @@ export function UiWaveform() {
   const [hover, setHover] = useState<number | null>(null);
   const [crosshair, setCrosshair] = useState(true);
   const [window, setWindow] = useState({ start: 0, end: N - 1 });
-  const [resolution, setResolution] = useState<"Phút" | "Giờ" | "Ngày" | "Tuần" | "Tháng" | "Năm">(
-    "Phút",
-  );
+  const RESOLUTIONS = ["Giờ", "Ngày", "Tuần", "Tháng", "Năm", "Khoảng ngày"] as const;
+  type Resolution = (typeof RESOLUTIONS)[number];
+  const [resolution, setResolution] = useState<Resolution>("Giờ");
   const [date, setDate] = useState("2026-07-19");
+  const [startDate, setStartDate] = useState("2026-07-13");
+  const [endDate, setEndDate] = useState("2026-07-19");
 
   const span = window.end - window.start;
   const zoomIn = () => {
@@ -135,25 +137,77 @@ export function UiWaveform() {
 
   return (
     <div className="font-sans">
-      <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-3">
-        <ParamGroup
-          qty={uQty}
-          onQty={setUQty}
-          options={["U", "Un", "U0"]}
-          channels={uCh}
-          onChannel={(ch) => setUCh((list) => toggleIn(list, ch))}
-          meas={uMeas}
-          onMeas={(m) => setUMeas((list) => toggleIn(list, m))}
-        />
-        <ParamGroup
-          qty={iQty}
-          onQty={setIQty}
-          options={["I", "In", "I0"]}
-          channels={iCh}
-          onChannel={(ch) => setICh((list) => toggleIn(list, ch))}
-          meas={iMeas}
-          onMeas={(m) => setIMeas((list) => toggleIn(list, m))}
-        />
+      {/* Top bar: Tham số bên trái, Bộ lọc thời gian bên phải (cho lên trên, bỏ phút, thêm khoảng ngày) */}
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+          <ParamGroup
+            qty={uQty}
+            onQty={setUQty}
+            options={["U", "Un", "U0"]}
+            channels={uCh}
+            onChannel={(ch) => setUCh((list) => toggleIn(list, ch))}
+            meas={uMeas}
+            onMeas={(m) => setUMeas((list) => toggleIn(list, m))}
+          />
+          <ParamGroup
+            qty={iQty}
+            onQty={setIQty}
+            options={["I", "In", "I0"]}
+            channels={iCh}
+            onChannel={(ch) => setICh((list) => toggleIn(list, ch))}
+            meas={iMeas}
+            onMeas={(m) => setIMeas((list) => toggleIn(list, m))}
+          />
+        </div>
+
+        {/* Cụm bộ lọc thời gian đưa lên trên */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xs">
+            {RESOLUTIONS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setResolution(item)}
+                className={`h-9 px-3 text-[12px] font-medium transition-colors ${
+                  resolution === item
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+
+          {resolution === "Khoảng ngày" ? (
+            <div className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-500 bg-white px-2.5 text-[12px] font-medium text-emerald-800 shadow-xs">
+              <span className="text-[11px] text-slate-400">Từ</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
+              />
+              <span className="text-slate-300">-</span>
+              <span className="text-[11px] text-slate-400">Đến</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
+              />
+            </div>
+          ) : (
+            <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-500 bg-white px-3 text-[13px] font-medium text-emerald-700 shadow-xs">
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="border-0 bg-transparent text-[13px] font-medium text-emerald-700 outline-none [color-scheme:light]"
+              />
+            </label>
+          )}
+        </div>
       </div>
 
       <div className="-mx-1 min-w-0 overflow-hidden rounded-[2px] border border-slate-400 bg-white sm:-mx-2">
@@ -180,7 +234,7 @@ export function UiWaveform() {
         />
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-2.5 flex items-center justify-between gap-3">
         <div className="flex gap-1">
           <ToolBtn label="Phóng to" onClick={zoomIn}>
             <ZoomIcon plus />
@@ -195,33 +249,11 @@ export function UiWaveform() {
             <CursorIcon />
           </ToolBtn>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-            {(["Phút", "Giờ", "Ngày", "Tuần", "Tháng", "Năm"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setResolution(item)}
-                className={`h-9 px-2.5 text-[12px] font-medium sm:px-3 ${
-                  resolution === item
-                    ? "bg-[#5aa3d9] text-white"
-                    : "text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-          <label className="inline-flex h-9 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
-            />
-          </label>
-        </div>
+        <span className="text-[11px] text-slate-400">
+          {resolution === "Khoảng ngày"
+            ? `Kỳ hiển thị: ${startDate} → ${endDate}`
+            : `Độ phân giải: ${resolution} · Ngày: ${date}`}
+        </span>
       </div>
     </div>
   );
@@ -285,7 +317,7 @@ function Check({
 }) {
   return (
     <label className="inline-flex cursor-pointer items-center gap-1">
-      <input type="checkbox" checked={checked} onChange={onChange} className="accent-[#1a73e8]" />
+      <input type="checkbox" checked={checked} onChange={onChange} className="accent-emerald-600" />
       {children}
     </label>
   );
@@ -321,7 +353,7 @@ function TimeSlider({
         className="absolute inset-x-0 top-0 z-10 h-full w-full cursor-ew-resize appearance-none bg-transparent"
       />
       <span
-        className="pointer-events-none absolute -top-px text-[10px] leading-none text-[#1a73e8]"
+        className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
         style={{ left: `calc(${left}% - 5px)` }}
       >
         ▼
@@ -536,7 +568,7 @@ function ToolBtn({
       title={label}
       onClick={onClick}
       className={`flex h-7 w-7 items-center justify-center rounded-sm border text-slate-500 ${
-        active ? "border-[#1a73e8] bg-blue-50 text-[#1a73e8]" : "border-slate-300 bg-white hover:bg-slate-50"
+        active ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-white hover:bg-slate-50"
       }`}
     >
       {children}

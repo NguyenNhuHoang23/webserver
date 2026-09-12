@@ -169,25 +169,25 @@ export function AddEmissionFactorForm() {
         <div className="mt-8 flex flex-wrap justify-end gap-3">
           <Link
             href="/he-so-phat-thai"
-            className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"
           >
             Quay lại thư viện
           </Link>
           <button
             type="submit"
-            className="h-10 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+            className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
           >
             {isEdit ? "Cập nhật hệ số" : "Lưu hệ số"}
           </button>
         </div>
       </form>
 
-      <div className="mt-5 flex gap-3 rounded-xl border border-[#c5daf7] bg-[#f3f8ff] px-4 py-3 text-sm text-slate-600">
-        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1a73e8] text-[11px] font-bold text-white">
+      <div className="mt-5 flex gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm text-slate-700">
+        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white shadow-xs">
           i
         </span>
         <p>
-          <span className="font-semibold">Mẹo:</span> Điền đủ 3 thành phần CO2, CH4, N2O theo tài
+          <span className="font-semibold text-emerald-900">Mẹo:</span> Điền đủ 3 thành phần CO2, CH4, N2O theo tài
           liệu viện dẫn để báo cáo khí nhà kính nhất quán.
         </p>
       </div>

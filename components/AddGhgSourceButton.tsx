@@ -19,7 +19,7 @@ export function AddGhgSourceButton() {
     <button
       type="button"
       onClick={() => window.dispatchEvent(new Event("ems-ghg-open-form"))}
-      className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#1a73e8] px-4 text-sm font-medium text-white shadow-sm hover:bg-[#1666d0]"
+      className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
     >
       <span className="text-lg leading-none">+</span>
       Thêm mới nguồn phát thải

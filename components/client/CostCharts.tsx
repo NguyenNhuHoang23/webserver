@@ -2,10 +2,15 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_TIME_FILTER,
+  TimeFilterBar,
+  getTimeFilterLabel,
+  getTimeFilterPeriods,
+  type TimeFilterValue,
+} from "@/components/client/TimeFilterBar";
 import { loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { loadProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
-
-type Resolution = "Ngày" | "Tháng" | "Năm";
 
 type CostPoint = {
   id: string;
@@ -15,7 +20,7 @@ type CostPoint = {
   color: string;
 };
 
-const POINT_COLORS = ["#1e5a96", "#27ae60", "#e67e22", "#8b5cf6", "#06b6d4", "#ef4444", "#a16207"];
+const POINT_COLORS = ["#059669", "#10b981", "#e67e22", "#8b5cf6", "#06b6d4", "#ef4444", "#a16207"];
 
 const FALLBACK_POINTS: CostPoint[] = [
   { id: "c1", code: "DB-OFF1", name: "Tủ điện văn phòng", energy: "Điện", color: POINT_COLORS[0] },
@@ -49,10 +54,6 @@ function formatVnd(n: number) {
   return Math.round(n).toLocaleString("en-US");
 }
 
-function hourLabel(h: number) {
-  return `${String(h).padStart(2, "0")}:00`;
-}
-
 function costLabel(energy: string) {
   if (energy === "Nhiệt") return "Chi phí nhiệt năng";
   if (energy === "Khí nén") return "Chi phí khí nén";
@@ -61,28 +62,33 @@ function costLabel(energy: string) {
   return "Chi phí điện năng";
 }
 
-function costSeries(seed: number, pointIndex: number, resolution: Resolution) {
-  const count = resolution === "Năm" ? 12 : resolution === "Ngày" ? 24 : 8;
-  const startHour = resolution === "Ngày" ? 0 : 1;
+function costSeriesForFilter(seed: number, pointIndex: number, filter: TimeFilterValue) {
+  const periods = getTimeFilterPeriods(filter);
+  const count = Math.max(periods.length, 1);
   const targets = [68719, 54210, 81340, 42180, 95880, 33400, 28900];
-  const target = targets[pointIndex % targets.length] * (1 + (seed - 1) * 0.015);
-  const raw = Array.from({ length: count }, (_, i) => {
+  const scaleByFilter =
+    filter.mode === "day" || filter.mode === "custom_date"
+      ? 0.04
+      : filter.mode === "month"
+      ? 1.0
+      : filter.mode === "year"
+      ? 12.0
+      : Math.max(0.1, count / 30);
+  const target = targets[pointIndex % targets.length] * scaleByFilter * (1 + (seed - 1) * 0.015);
+  const raw = periods.map((p, i) => {
     const ramp = (i + 1) / count;
     const dark = 6200 + 3600 * ramp + 260 * Math.sin(i * 1.15 + seed + pointIndex);
     const light = dark * (0.55 + 0.07 * Math.sin(i + pointIndex));
-    return { dark, light };
+    return { dark, light, period: p };
   });
-  const sumDark = raw.reduce((s, b) => s + b.dark, 0);
+  const sumDark = raw.reduce((s, b) => s + b.dark, 0) || 1;
   const scale = target / sumDark;
-  return raw.map((bar, i) => {
-    const hour = resolution === "Năm" ? i + 1 : startHour + i;
-    return {
-      key: hour,
-      label: resolution === "Năm" ? `T${hour}` : hourLabel(hour),
-      light: Math.round(bar.light * scale),
-      dark: Math.round(bar.dark * scale),
-    };
-  });
+  return raw.map((bar) => ({
+    key: bar.period.key,
+    label: bar.period.label,
+    light: Math.round(bar.light * scale),
+    dark: Math.round(bar.dark * scale),
+  }));
 }
 
 export function CostCharts() {
@@ -90,8 +96,7 @@ export function CostCharts() {
   const projectId = params?.id ?? "default";
   const [energyKinds, setEnergyKinds] = useState<MeterType[]>(() => resolveMeterTypes(null));
   const [energy, setEnergy] = useState<string>("Điện");
-  const [resolution, setResolution] = useState<Resolution>("Tháng");
-  const [date, setDate] = useState("2026-07-19");
+  const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
   const [allPoints, setAllPoints] = useState<CostPoint[]>(FALLBACK_POINTS);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [seed, setSeed] = useState(1);
@@ -167,12 +172,12 @@ export function CostCharts() {
     () =>
       selectedPoints.map((point, index) => ({
         point,
-        bars: costSeries(seed, index + point.id.charCodeAt(1), resolution),
+        bars: costSeriesForFilter(seed, index + point.id.charCodeAt(1), timeFilter),
       })),
-    [selectedPoints, seed, resolution],
+    [selectedPoints, seed, timeFilter],
   );
 
-  const primaryBars = series[0]?.bars ?? costSeries(seed, 0, resolution);
+  const primaryBars = series[0]?.bars ?? costSeriesForFilter(seed, 0, timeFilter);
   const grandTotal = series.reduce(
     (sum, item) => sum + item.bars.reduce((s, b) => s + b.dark, 0),
     0,
@@ -211,11 +216,12 @@ export function CostCharts() {
   }
 
   const exportCsv = () => {
+    const periodName = getTimeFilterLabel(timeFilter);
     const header = ["Thời điểm", ...selectedPoints.map((p) => `${p.code} ${p.name}`)].join(",");
     const rows = primaryBars.map((bar, i) =>
       [bar.label, ...series.map((s) => s.bars[i]?.dark ?? 0)].join(","),
     );
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([[`# Kỳ: ${periodName}`, header, ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -258,7 +264,7 @@ export function CostCharts() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Tìm điểm đo..."
-              className="h-9 w-full rounded-md border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-[#1a73e8]"
+              className="h-9 w-full rounded-xl border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-emerald-500 transition-colors"
             />
           </label>
           <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-slate-400">
@@ -267,7 +273,7 @@ export function CostCharts() {
               <button
                 type="button"
                 onClick={selectAllVisible}
-                className="font-medium text-[#1a73e8] hover:underline"
+                className="font-semibold text-emerald-600 hover:underline"
               >
                 Chọn tất cả
               </button>
@@ -291,9 +297,9 @@ export function CostCharts() {
                 return (
                   <li key={point.id}>
                     <label
-                      className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors ${
+                      className={`flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors ${
                         checked
-                          ? "bg-[#1a73e8] text-white shadow-sm"
+                          ? "bg-emerald-600 text-white shadow-xs font-medium"
                           : "text-slate-700 hover:bg-slate-50"
                       }`}
                     >
@@ -301,7 +307,7 @@ export function CostCharts() {
                         type="checkbox"
                         checked={checked}
                         onChange={() => togglePoint(point.id)}
-                        className="h-4 w-4 shrink-0 rounded border border-white/40 bg-white accent-[#1a73e8]"
+                        className="h-4 w-4 shrink-0 rounded border border-white/40 bg-white accent-emerald-600"
                       />
                       <span
                         className="h-2.5 w-2.5 shrink-0 rounded-[2px] ring-1 ring-black/10"
@@ -309,8 +315,8 @@ export function CostCharts() {
                       />
                       <span className="min-w-0 flex-1">
                         <span
-                          className={`block truncate text-[13px] font-medium ${
-                            checked ? "text-white" : "text-slate-700"
+                          className={`block truncate text-[13px] font-semibold ${
+                            checked ? "text-white" : "text-slate-800"
                           }`}
                         >
                           {index + 1}. {point.name}
@@ -335,7 +341,7 @@ export function CostCharts() {
           <button
             type="button"
             onClick={() => setSeed((n) => n + 1)}
-            className="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-[#d9ebf8] text-[13px] font-semibold text-[#1a5f8a] hover:bg-[#c7e1f4]"
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-50 text-[13px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors shadow-xs"
           >
             <RefreshIcon className="h-4 w-4" />
             Refresh Data
@@ -345,7 +351,7 @@ export function CostCharts() {
 
       <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
+          <div className="inline-flex overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xs">
             {energyKinds.map((item) => {
               const active = energy === item;
               return (
@@ -353,41 +359,17 @@ export function CostCharts() {
                   key={item}
                   type="button"
                   onClick={() => setEnergy(item)}
-                  className={`inline-flex h-10 items-center gap-1.5 px-3.5 text-[13px] font-medium ${
-                    active ? "bg-[#1e4f8a] text-white" : "text-slate-500 hover:bg-slate-50"
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-semibold transition-all ${
+                    active ? "bg-slate-900 text-white shadow-xs" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
                   }`}
                 >
-                  <EnergyGlyph type={ENERGY_KIND_META[item] ?? "bolt"} className="h-4 w-4" />
+                  <EnergyGlyph type={ENERGY_KIND_META[item] ?? "bolt"} className="h-3.5 w-3.5" />
                   {item}
                 </button>
               );
             })}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
-              {(["Ngày", "Tháng", "Năm"] as const).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setResolution(item)}
-                  className={`h-10 px-4 text-[13px] font-medium ${
-                    resolution === item ? "bg-[#5aa3d9] text-white" : "text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-            <label className="inline-flex h-10 items-center gap-2 rounded-md border border-[#1a73e8] bg-white px-3 text-[13px] font-medium text-[#1a73e8]">
-              <CalendarIcon className="h-4 w-4 shrink-0" />
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="border-0 bg-transparent text-[13px] font-medium text-[#1a73e8] outline-none [color-scheme:light]"
-              />
-            </label>
-          </div>
+          <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
         </div>
 
         <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
@@ -410,7 +392,7 @@ export function CostCharts() {
                     ))
                   )}
                   {showSum && selectedPoints.length > 0 ? (
-                    <span className="font-semibold text-[#1a73e8]">
+                    <span className="font-semibold text-emerald-600">
                       Σ {formatVnd(grandTotal)} VND
                     </span>
                   ) : null}
@@ -452,7 +434,7 @@ export function CostCharts() {
                   return (
                     <div
                       key={item.point.id}
-                      className="rounded-md bg-[#eaf3fb] px-3 py-2 text-[12px] text-slate-700"
+                      className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2 text-[12px] text-slate-700"
                     >
                       <p className="flex items-start gap-2">
                         <span
@@ -501,7 +483,7 @@ function MultiCostBarChart({
   hover,
   onHover,
 }: {
-  series: { point: CostPoint; bars: { key: number; label: string; light: number; dark: number }[] }[];
+  series: { point: CostPoint; bars: ReturnType<typeof costSeriesForFilter> }[];
   hover: number | null;
   onHover: (index: number | null) => void;
 }) {
