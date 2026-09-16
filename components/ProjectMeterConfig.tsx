@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProjectConfigHeader } from "@/components/ProjectConfigHeader";
 import {
@@ -13,6 +14,10 @@ import {
 } from "@/lib/projects";
 import { upsertMeterTypeDef } from "@/lib/meter-types";
 import { projectConfigPath } from "@/lib/project-config";
+import { hydrateClientMeters, orderMetersByTree, type ClientMeter } from "@/lib/client-meters";
+import { hydrateDevices, type CatalogDevice } from "@/lib/devices";
+import { hydrateAlertEvents } from "@/lib/alert-events";
+import { hydrateMeterReadings } from "@/lib/meter-readings";
 
 type Energy = string;
 type DeviceKind = "meter" | "inverter" | "thermo" | "water" | "wind" | "steam" | "air";
@@ -169,29 +174,93 @@ const extraPoints: MeterPoint[] = Array.from({ length: 37 }, (_, i) => {
   };
 });
 
-const allPoints: MeterPoint[] = [...seeds, ...extraPoints];
+const INITIAL_POINTS: MeterPoint[] = [...seeds, ...extraPoints];
 const PAGE_SIZE = 10;
 
 function flatten(points: MeterPoint[]): MeterPoint[] {
   return points.flatMap((p) => [p, ...(p.children ?? [])]);
 }
 
+function meterKind(meter: ClientMeter): DeviceKind {
+  if (meter.utility === "Nước") return "water";
+  if (meter.utility === "Nhiệt") return "thermo";
+  if (meter.utility === "Hơi") return "steam";
+  if (meter.utility === "Khí nén") return "air";
+  return meter.type.toLowerCase().includes("inverter") ? "inverter" : "meter";
+}
+
+function meterUnit(utility: string) {
+  if (utility === "Nước") return "m³/h";
+  if (utility === "Nhiệt") return "°C";
+  if (utility === "Hơi") return "t/h";
+  if (utility === "Khí nén") return "Nm³/h";
+  return "kWh";
+}
+
+function fromDbMeters(meters: ClientMeter[], devices: CatalogDevice[], readings: Awaited<ReturnType<typeof hydrateMeterReadings>>) {
+  const latest = new Map<string, number>();
+  for (const reading of readings.filter((row) => row.metric === "energy")) {
+    latest.set(reading.meterPointId, reading.value);
+  }
+  return orderMetersByTree(meters).map((meter) => {
+    const device = devices.find((item) => item.id === meter.deviceId);
+    return {
+      id: meter.id,
+      name: meter.name,
+      sn: device?.sn ?? meter.serialNumber ?? "Chưa gán thiết bị",
+      type: meter.type,
+      energy: meter.utility,
+      kind: meterKind(meter),
+      status: !device || device.status === "offline" ? "disconnected" : "connected",
+      value: latest.get(meter.id) ?? null,
+      unit: meterUnit(meter.utility),
+      ...(meter.parentId ? { parentId: meter.parentId } : {}),
+    } satisfies MeterPoint;
+  });
+}
+
 export function ProjectMeterConfig({ project }: { project: Project }) {
   const [energies, setEnergies] = useState<MeterType[]>(() => resolveMeterTypes(project));
   const [addingType, setAddingType] = useState(false);
+  const [energyToDelete, setEnergyToDelete] = useState<MeterType | null>(null);
   const [newType, setNewType] = useState("");
   const [query, setQuery] = useState("");
   const [deviceType, setDeviceType] = useState("all");
   const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["MP-001"]));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(["m1", "MP-001"]));
+  const [allPoints, setAllPoints] = useState(INITIAL_POINTS);
+  const [meterDataReady, setMeterDataReady] = useState(false);
+  const [alertCount, setAlertCount] = useState(2);
 
   useEffect(() => {
     setEnergies(resolveMeterTypes(project));
   }, [project]);
 
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      hydrateClientMeters(project.id),
+      hydrateDevices(),
+      hydrateMeterReadings(project.id),
+      hydrateAlertEvents(project.id),
+    ]).then(([meters, devices, readings, alerts]) => {
+      if (!active) return;
+      setAllPoints(fromDbMeters(meters, devices, readings));
+      setMeterDataReady(true);
+      setAlertCount(alerts.filter((event) => event.status !== "resolved").length);
+    }).catch(() => {
+      if (!active) return;
+      setAllPoints([]);
+      setMeterDataReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [project.id]);
+
   function persistEnergies(next: MeterType[]) {
     setEnergies(next);
-    upsertProject({ ...project, meterTypes: next });
+    void upsertProject({ ...project, meterTypes: next }).catch(() => undefined);
   }
 
   const suggestions = useMemo(
@@ -202,16 +271,29 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
     [energies],
   );
 
+  const flatPoints = useMemo(
+    () => (meterDataReady ? flatten(allPoints) : []),
+    [allPoints, meterDataReady],
+  );
+  const connectedPoints = useMemo(
+    () => flatPoints.filter((item) => item.status === "connected").length,
+    [flatPoints],
+  );
+  const disconnectedPoints = useMemo(
+    () => flatPoints.filter((item) => item.status !== "connected").length,
+    [flatPoints],
+  );
+
   const deviceTypes = useMemo(
-    () => Array.from(new Set(flatten(allPoints).map((p) => p.type))).sort(),
-    [],
+    () => Array.from(new Set(flatPoints.map((p) => p.type))).sort(),
+    [flatPoints],
   );
 
   const filteredRoots = useMemo(() => {
     const q = query.trim().toLowerCase();
 
     function match(point: MeterPoint): boolean {
-      const energyOk = energies.length === 0 || energies.includes(point.energy);
+      const energyOk = energies.includes(point.energy);
       const typeOk = deviceType === "all" || point.type === deviceType;
       const textOk =
         !q ||
@@ -222,7 +304,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
     }
 
     const next: MeterPoint[] = [];
-    for (const root of allPoints) {
+    for (const root of (meterDataReady ? allPoints : [])) {
       const children = (root.children ?? []).filter(match);
       if (match(root)) {
         next.push(root.children ? { ...root, children } : root);
@@ -231,7 +313,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
       }
     }
     return next;
-  }, [deviceType, energies, query]);
+  }, [allPoints, deviceType, energies, meterDataReady, query]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRoots.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -262,7 +344,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
+    <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8">
       <ProjectConfigHeader
         project={project}
         actions={
@@ -275,22 +357,29 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
           </Link>
         }
       />
-          <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mb-5 grid gap-3.5 sm:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               label="TỔNG ĐIỂM ĐO"
-              value="42"
-              hint={<span className="text-emerald-600">+3 thiết bị mới</span>}
+              value={String(flatPoints.length)}
+              hint={<span className="text-emerald-600">đồng bộ từ database</span>}
             />
             <StatCard
-              label="KẾT NỐI"
-              value="39 / 42"
+              label="ĐANG KẾT NỐI"
+              value={String(connectedPoints)}
+              valueClass="text-emerald-600"
               hint={<span className="text-slate-500">active</span>}
             />
             <StatCard
-              label="CẢNH BÁO HỆ THỐNG"
-              value="02"
-              valueClass="text-red-500"
-              hint={<span className="text-red-500">Cần xử lý ngay</span>}
+              label="KHÔNG KẾT NỐI"
+              value={String(disconnectedPoints)}
+              valueClass={disconnectedPoints > 0 ? "text-amber-500" : "text-slate-900"}
+              hint={
+                disconnectedPoints > 0 ? (
+                  <span className="text-amber-600">mất kết nối</span>
+                ) : (
+                  <span className="text-emerald-600">tất cả trực tuyến</span>
+                )
+              }
             />
             <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
               <p className="text-[11px] font-semibold tracking-wide text-slate-400">
@@ -317,10 +406,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                   type="button"
                   aria-label={`Bỏ loại ${energy}`}
                   className="px-2 text-base leading-none text-white/80 hover:text-white"
-                  onClick={() => {
-                    persistEnergies(energies.filter((item) => item !== energy));
-                    setPage(1);
-                  }}
+                  onClick={() => setEnergyToDelete(energy)}
                 >
                   ×
                 </button>
@@ -430,7 +516,20 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageRows.map((point) => {
+                  {!meterDataReady ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-10 text-center text-sm text-slate-400">
+                        Đang tải điểm đo của dự án...
+                      </td>
+                    </tr>
+                  ) : pageRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-10 text-center text-sm text-slate-400">
+                        Chưa có điểm đo nào được cấu hình cho dự án.
+                      </td>
+                    </tr>
+                  ) : null}
+                  {meterDataReady && pageRows.map((point) => {
                     const hasChildren = Boolean(point.children?.length);
                     const isOpen = expanded.has(point.id);
                     return (
@@ -483,6 +582,21 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
               </div>
             </div>
           </section>
+
+      <ConfirmDialog
+        open={Boolean(energyToDelete)}
+        title="Xác nhận bỏ loại năng lượng"
+        description={`Bạn có chắc chắn muốn bỏ loại "${energyToDelete}" khỏi dự án này không?`}
+        confirmText="Xác nhận bỏ"
+        onConfirm={() => {
+          if (energyToDelete) {
+            persistEnergies(energies.filter((item) => item !== energyToDelete));
+            setPage(1);
+            setEnergyToDelete(null);
+          }
+        }}
+        onCancel={() => setEnergyToDelete(null)}
+      />
     </div>
   );
 }
@@ -558,9 +672,10 @@ function DeviceRows({
         <td className="px-5 py-3.5">
           <div className="flex justify-end">
             <Link
-              href={projectConfigPath(projectId, "add-meter")}
+              href={`/chinh-sua-du-an/${encodeURIComponent(projectId)}/diem-do/${encodeURIComponent(point.id)}`}
               className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
               aria-label="Chỉnh sửa điểm đo"
+              title="Chỉnh sửa điểm đo"
             >
               <EditIcon className="h-4 w-4" />
             </Link>

@@ -1,6 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { hydrateProjectSettings, loadProjectSettings, saveProjectSettings } from "@/lib/project-settings";
+import type { MeterType } from "@/lib/projects";
 
 type CategoryId =
   | "energy"
@@ -51,6 +55,51 @@ const extraCategories: Category[] = [
 ];
 
 const catalogCategories: Category[] = [...presetCategories, ...extraCategories];
+
+const ELECTRICITY_CATEGORY_IDS: CategoryId[] = [
+  "energy",
+  "ui",
+  "frequency",
+  "power",
+  "harmonics",
+  "imbalance",
+];
+
+function uniqueUtilities(values: string[]): MeterType[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function utilityIcon(utility: string): Category["icon"] {
+  const value = utility.toLowerCase();
+  if (value.includes("điện") || value.includes("dien")) return BoltIcon;
+  if (value.includes("nước") || value.includes("nuoc")) return DropIcon;
+  if (value.includes("nhiệt") || value.includes("nhiet")) return ThermoIcon;
+  if (value.includes("hơi") || value.includes("hoi")) return SteamIcon;
+  return TagIcon;
+}
+
+function categoriesForUtility(utility: string): Category[] {
+  const value = utility.toLowerCase();
+  const ids = value.includes("điện") || value.includes("dien")
+    ? ELECTRICITY_CATEGORY_IDS
+    : value.includes("nước") || value.includes("nuoc")
+      ? (["water"] as CategoryId[])
+      : value.includes("nhiệt") || value.includes("nhiet")
+        ? (["temperature"] as CategoryId[])
+        : value.includes("hơi") || value.includes("hoi")
+          ? (["steam"] as CategoryId[])
+          : [];
+  const categories = ids
+    .map((id) => catalogCategories.find((category) => category.id === id))
+    .filter((category): category is Category => Boolean(category));
+  return categories.length > 0
+    ? categories
+    : [{ id: `utility-${utility.toLowerCase().replace(/\s+/g, "-")}`, label: utility, icon: utilityIcon(utility) }];
+}
+
+function buildCategoryMap(utilities: string[]) {
+  return Object.fromEntries(utilities.map((utility) => [utility, categoriesForUtility(utility)])) as Record<string, Category[]>;
+}
 
 const initialAlarms: Record<string, Alarm[]> = {
   energy: [
@@ -346,14 +395,96 @@ const allHistory: HistoryItem[] = [
   },
 ];
 
-export function AlertConfig() {
-  const [categories, setCategories] = useState<Category[]>(presetCategories);
-  const [activeId, setActiveId] = useState<CategoryId>("energy");
+export function AlertConfig({
+  projectId,
+  initialUtilities,
+}: {
+  projectId: string;
+  initialUtilities: MeterType[];
+}) {
+  const utilities = useMemo(() => uniqueUtilities(initialUtilities), [initialUtilities]);
+  const firstUtility = utilities[0] ?? "Điện";
+  const [activeUtility, setActiveUtility] = useState<MeterType>(firstUtility);
+  const [categoriesByUtility, setCategoriesByUtility] = useState<Record<string, Category[]>>(() =>
+    buildCategoryMap(utilities.length ? utilities : [firstUtility]),
+  );
+  const [activeId, setActiveId] = useState<CategoryId>(
+    categoriesForUtility(firstUtility)[0]?.id ?? "energy",
+  );
   const [alarmsByCategory, setAlarmsByCategory] = useState(initialAlarms);
+  const [settingsReady, setSettingsReady] = useState(false);
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<{ id: CategoryId; label: string } | null>(null);
   const [newCategoryName, setNewCategoryName] = useState("");
 
+  useEffect(() => {
+    let active = true;
+    setSettingsReady(false);
+    void hydrateProjectSettings(projectId).then((payload) => {
+      if (!active) return;
+      const saved = payload.alertConfig as {
+        categories?: Array<{ id: string; label: string }>;
+        categoriesByUtility?: Record<string, Array<{ id: string; label: string }>>;
+        activeUtility?: string;
+        activeId?: string;
+        alarmsByCategory?: Record<string, Alarm[]>;
+      } | undefined;
+      const restoreCategory = (item: { id: string; label: string }) => {
+        const catalog = catalogCategories.find((category) => category.id === item.id);
+        return catalog ?? { id: item.id, label: item.label, icon: TagIcon };
+      };
+      const defaults = buildCategoryMap(utilities.length ? utilities : [firstUtility]);
+      const savedByUtility = saved?.categoriesByUtility;
+      if (savedByUtility) {
+        for (const utility of Object.keys(defaults)) {
+          const savedCategories = savedByUtility[utility];
+          if (savedCategories?.length) defaults[utility] = savedCategories.map(restoreCategory);
+        }
+      } else if (saved?.categories?.length && defaults[firstUtility]) {
+        defaults[firstUtility] = saved.categories.map(restoreCategory);
+      }
+      const restoredUtility = saved?.activeUtility && utilities.includes(saved.activeUtility)
+        ? saved.activeUtility
+        : firstUtility;
+      const restoredCategories = defaults[restoredUtility] ?? categoriesForUtility(restoredUtility);
+      setCategoriesByUtility(defaults);
+      setActiveUtility(restoredUtility);
+      const savedActiveId = saved?.activeId;
+      setActiveId(
+        savedActiveId && restoredCategories.some((category) => category.id === savedActiveId)
+          ? savedActiveId
+          : restoredCategories[0]?.id ?? "",
+      );
+      if (saved?.alarmsByCategory) setAlarmsByCategory(saved.alarmsByCategory);
+      setSettingsReady(true);
+    }).catch(() => {
+      if (active) setSettingsReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    void saveProjectSettings(projectId, {
+      ...(loadProjectSettings(projectId) ?? {}),
+      alertConfig: {
+        categoriesByUtility: Object.fromEntries(
+          Object.entries(categoriesByUtility).map(([utility, items]) => [
+            utility,
+            items.map(({ id, label }) => ({ id, label })),
+          ]),
+        ),
+        activeUtility,
+        activeId,
+        alarmsByCategory,
+      },
+    });
+  }, [activeId, activeUtility, alarmsByCategory, categoriesByUtility, projectId, settingsReady]);
+
+  const categories = categoriesByUtility[activeUtility] ?? categoriesForUtility(activeUtility);
   const active = categories.find((item) => item.id === activeId) ?? categories[0];
   const alarms = alarmsByCategory[active?.id ?? "energy"] ?? [];
   const history = showAllHistory ? allHistory : allHistory.slice(0, 1);
@@ -391,17 +522,22 @@ export function AlertConfig() {
   }
 
   function removeCategory(id: CategoryId) {
-    setCategories((current) => {
-      const next = current.filter((item) => item.id !== id);
-      if (activeId === id) setActiveId(next[0]?.id ?? "");
-      return next;
-    });
+    setCategoriesByUtility((current) => ({
+      ...current,
+      [activeUtility]: (current[activeUtility] ?? []).filter((item) => item.id !== id),
+    }));
+    if (activeId === id) {
+      setActiveId(categories.find((item) => item.id !== id)?.id ?? "");
+    }
   }
 
   function addExistingCategory(category: Category) {
-    setCategories((current) =>
-      current.some((item) => item.id === category.id) ? current : [...current, category],
-    );
+    setCategoriesByUtility((current) => ({
+      ...current,
+      [activeUtility]: (current[activeUtility] ?? []).some((item) => item.id === category.id)
+        ? current[activeUtility]
+        : [...(current[activeUtility] ?? []), category],
+    }));
     setAlarmsByCategory((current) =>
       current[category.id] ? current : { ...current, [category.id]: defaultAlarmsFor(category.id, category.label) },
     );
@@ -428,9 +564,58 @@ export function AlertConfig() {
     addExistingCategory({ id: `custom-${Date.now()}`, label, icon: TagIcon });
   }
 
+  function selectUtility(utility: MeterType) {
+    const nextCategories = categoriesByUtility[utility] ?? categoriesForUtility(utility);
+    setActiveUtility(utility);
+    setActiveId((current) =>
+      nextCategories.some((category) => category.id === current)
+        ? current
+        : nextCategories[0]?.id ?? "",
+    );
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
+      <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+        <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+          Loại năng lượng của dự án
+        </div>
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Loại năng lượng">
+          {utilities.map((utility) => {
+            const selected = utility === activeUtility;
+            const Icon = utilityIcon(utility);
+            return (
+              <button
+                key={utility}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => selectUtility(utility)}
+                className={`inline-flex h-12 min-w-[132px] items-center gap-2.5 rounded-xl border px-3.5 text-sm font-bold transition-all ${
+                  selected
+                    ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-500/20"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700"
+                }`}
+              >
+                <span
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                    selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                {utility}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <div>
+        <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+          Nhóm cảnh báo của {activeUtility}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
         {categories.map((category) => {
           const selected = category.id === active?.id;
           const Icon = category.icon;
@@ -459,7 +644,7 @@ export function AlertConfig() {
                 className={`px-2 text-base leading-none ${
                   selected ? "text-emerald-700/70 hover:text-emerald-900" : "text-slate-400 hover:text-slate-600"
                 }`}
-                onClick={() => removeCategory(category.id)}
+                onClick={() => setCategoryToDelete({ id: category.id, label: category.label })}
               >
                 ×
               </button>
@@ -521,6 +706,7 @@ export function AlertConfig() {
             Thêm mới
           </button>
         )}
+      </div>
       </div>
 
       {!active ? (
@@ -640,6 +826,20 @@ export function AlertConfig() {
       </section>
         </>
       )}
+
+      <ConfirmDialog
+        open={Boolean(categoryToDelete)}
+        title="Xác nhận xóa nhóm cảnh báo"
+        description={`Bạn có chắc chắn muốn xóa nhóm cảnh báo "${categoryToDelete?.label}" của ${activeUtility} không? Các cấu hình cảnh báo thuộc nhóm này sẽ bị loại bỏ.`}
+        confirmText="Xóa nhóm"
+        onConfirm={() => {
+          if (categoryToDelete) {
+            removeCategory(categoryToDelete.id);
+            setCategoryToDelete(null);
+          }
+        }}
+        onCancel={() => setCategoryToDelete(null)}
+      />
     </div>
   );
 }

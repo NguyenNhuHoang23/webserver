@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/useAuth";
 import { logout } from "@/lib/auth";
-import { loadProjects, type Project } from "@/lib/projects";
+import { hydrateProjects, type Project } from "@/lib/projects";
 
 const navItems = [
   { href: "", label: "Trang chủ", icon: HomeIcon },
@@ -33,32 +33,39 @@ export function ClientShell({
   const homeHref = session?.portal === "admin" ? "/" : base;
 
   useEffect(() => {
-    const stored = loadProjects().find((item) => item.id === project.id);
-    setResolved(stored ?? project);
+    let active = true;
+    void hydrateProjects().then((projects) => {
+      if (active) setResolved(projects.find((item) => item.id === project.id) ?? project);
+    });
+    return () => {
+      active = false;
+    };
   }, [project]);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[#f8fafc] font-sans">
-      <header className="flex min-h-[56px] shrink-0 items-center justify-between gap-4 border-b border-slate-200/80 bg-white px-4 sm:px-6">
-        <div className="flex items-center gap-6 min-w-0">
+      <header className="flex min-h-[56px] shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white px-3 sm:px-6">
+        <div className="flex items-center gap-4 sm:gap-6 min-w-0">
           <Link
             href={homeHref}
             title={resolved.customer}
-            className="flex items-center gap-2.5 shrink-0"
+            aria-label={resolved.customer}
+            className="flex items-center shrink-0"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-xs">
-              <EnergyLogoIcon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <span className="block truncate text-sm font-bold tracking-tight text-slate-900 leading-none">
-                {resolved.customer}
-              </span>
-              <span className="block font-mono text-[10px] text-slate-400 mt-0.5">
-                {resolved.id}
-              </span>
+            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-emerald-600 text-[10px] font-bold text-white shadow-xs">
+              {resolved.logoUrl ? (
+                <img
+                  src={resolved.logoUrl}
+                  alt={`Logo ${resolved.customer}`}
+                  className="h-full w-full bg-white object-contain"
+                />
+              ) : (
+                resolved.initials
+              )}
             </div>
           </Link>
 
+          {/* Desktop/Tablet Nav */}
           <nav
             className="hidden sm:flex min-h-[56px] items-stretch gap-1 overflow-x-auto"
             aria-label="Điều hướng dự án"
@@ -90,15 +97,15 @@ export function ClientShell({
           </nav>
         </div>
 
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <div className="hidden sm:inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/70 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             <span>SCADA Online</span>
           </div>
 
-          <div className="h-4 w-px bg-slate-200" />
+          <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-700 font-semibold text-white text-[11px]">
               {(session?.displayName ?? session?.username ?? resolved.customer).slice(0, 2).toUpperCase()}
             </div>
@@ -117,7 +124,7 @@ export function ClientShell({
                 logout();
                 if (portal === "admin") router.replace("/");
               }}
-              className="inline-flex h-7 items-center rounded-lg border border-slate-200 px-2 text-[11px] font-medium text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors ml-1"
+              className="inline-flex h-7 items-center rounded-lg border border-slate-200 px-2 text-[11px] font-medium text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors ml-0.5"
             >
               Đăng xuất
             </button>
@@ -125,11 +132,41 @@ export function ClientShell({
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+      {/* Mobile Navigation Strip */}
+      <nav
+        className="flex sm:hidden overflow-x-auto border-b border-slate-200/80 bg-white px-2.5 py-1.5 gap-1 shrink-0 scrollbar-none"
+        aria-label="Điều hướng dự án mobile"
+      >
+        {navItems.map((item) => {
+          const href = `${base}${item.href}`;
+          const active =
+            item.href === ""
+              ? pathname === base
+              : pathname === href || pathname.startsWith(`${href}/`);
+          const Icon = item.icon;
+
+          return (
+            <Link
+              key={item.href || "home"}
+              href={href}
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                active
+                  ? "bg-emerald-600 text-white font-semibold shadow-xs"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              <Icon className={`h-3.5 w-3.5 shrink-0 ${active ? "text-white" : "text-slate-400"}`} />
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
 
       <footer className="flex h-9 shrink-0 items-center justify-between gap-4 border-t border-slate-200/80 bg-white px-4 text-[11px] text-slate-400 sm:px-6">
         <p className="truncate">
-          © 2026 {resolved.customer} • EMS Telemetry Gateway Node-04
+          © 2026 {resolved.customer} • EMS Telemetry Gateway
         </p>
         <p className="hidden shrink-0 items-center gap-1.5 sm:flex">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -137,28 +174,6 @@ export function ClientShell({
         </p>
       </footer>
     </div>
-  );
-}
-
-function EnergyLogoIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  );
-}
-
-function BellIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M6 10a6 6 0 1 1 12 0c0 4 1.2 5.5 1.8 6.2.3.4 0 .8-.6.8H4.8c-.6 0-.9-.4-.6-.8C4.8 15.5 6 14 6 10Z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-      <path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
   );
 }
 

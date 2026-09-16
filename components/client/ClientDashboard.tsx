@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Project } from "@/lib/projects";
+import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
+import { hydrateGhgSources } from "@/lib/ghg-sources";
+import { hydrateMeterReadings } from "@/lib/meter-readings";
+import { hydrateDevices } from "@/lib/devices";
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
 
@@ -35,7 +39,9 @@ const DEVICE_STATUS = [
   { label: "NGOẠI TUYẾN", value: 1, color: "#9aa3af" },
 ];
 
-const ALERTS = [
+type DashboardAlert = { time: string; point: string; param: string; value: string };
+
+const ALERTS: DashboardAlert[] = [
   { time: "2026-07-19 07:38:48", point: "Tủ điện văn phòng", param: "F_avg", value: "49.79" },
   { time: "2026-07-19 07:38:38", point: "Tủ điện văn phòng", param: "F_avg", value: "50.42" },
   { time: "2026-07-19 07:38:27", point: "Tủ điện văn phòng", param: "F_avg", value: "50.32" },
@@ -43,16 +49,70 @@ const ALERTS = [
 ];
 
 export function ClientDashboard({ project }: { project: Project }) {
+  const [energy, setEnergy] = useState(ENERGY);
+  const [deviceStatus, setDeviceStatus] = useState(DEVICE_STATUS);
+  const [alerts, setAlerts] = useState<DashboardAlert[]>(ALERTS);
+  const [co2, setCo2] = useState(2.21);
+
+  useEffect(() => {
+    let active = true;
+    const reload = () => {
+      void Promise.all([
+        hydrateMeterReadings(project.id),
+        hydrateAlertEvents(project.id),
+        hydrateDevices(),
+        hydrateGhgSources(project.id),
+      ]).then(([readings, alertEvents, devices, sources]) => {
+        if (!active) return;
+        const energyRows = readings.filter((row) => row.metric === "energy");
+        if (energyRows.length) {
+          setEnergy(energyRows.map((row) => ({
+            day: row.recordedAt.slice(5, 10),
+            kwh: row.value,
+          })));
+        }
+        if (devices.length) {
+          const counts = devices.reduce((result, device) => {
+            if (device.status === "offline") result.offline += 1;
+            else if (device.status === "maintenance") result.warning += 1;
+            else result.normal += 1;
+            return result;
+          }, { normal: 0, warning: 0, offline: 0 });
+          setDeviceStatus([
+            { label: "BÌNH THƯỜNG", value: counts.normal, color: "#43a047" },
+            { label: "CẢNH BÁO", value: counts.warning, color: "#ef8d3a" },
+            { label: "NGOẠI TUYẾN", value: counts.offline, color: "#9aa3af" },
+          ]);
+        }
+        if (alertEvents.length) setAlerts(alertEvents.slice(0, 8).map((event: AlertEvent) => ({
+          time: event.occurredAt,
+          point: event.pointName ?? event.meterPointId ?? "--",
+          param: event.parameter,
+          value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
+        })));
+        const totalCo2 = sources.reduce((sum, source) => sum + (source.tons ?? 0), 0);
+        if (totalCo2 > 0) setCo2(totalCo2);
+      }).catch(() => undefined);
+    };
+    reload();
+    window.addEventListener("ems-alert-events-changed", reload);
+    return () => {
+      active = false;
+      window.removeEventListener("ems-alert-events-changed", reload);
+    };
+  }, [project.id]);
+
+  const energyMax = Math.max(...energy.map((item) => item.kwh), 0);
+  const energyMin = Math.min(...energy.map((item) => item.kwh), 0);
+  const energyTotal = energy.reduce((sum, item) => sum + item.kwh, 0);
+
   return (
     <div className="mx-auto h-full max-w-[1480px] overflow-y-auto px-5 py-5 lg:px-6">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-slate-800">
-            Bảng điều khiển hệ thống
+            {project.customer}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Thống kê hoạt động năng lượng {project.name}
-          </p>
         </div>
         <MonthPicker defaultMonth={7} defaultYear={2026} />
       </div>
@@ -62,39 +122,24 @@ export function ClientDashboard({ project }: { project: Project }) {
           <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <p>
               Lớn nhất:{" "}
-              <span className="font-semibold text-emerald-700">236.8 kWh</span>
+              <span className="font-semibold text-emerald-700">{energyMax.toFixed(1)} kWh</span>
             </p>
             <p>
               Nhỏ nhất:{" "}
-              <span className="font-semibold text-emerald-600">46.4 kWh</span>
+              <span className="font-semibold text-emerald-600">{energyMin.toFixed(1)} kWh</span>
             </p>
             <p>
               Tổng:{" "}
-              <span className="font-semibold text-slate-800">3350.4 kWh</span>
+              <span className="font-semibold text-slate-800">{energyTotal.toFixed(1)} kWh</span>
             </p>
           </div>
-          <EnergyChart data={ENERGY} />
-        </DashboardCard>
-
-        <DashboardCard title="TRẠNG THÁI THIẾT BỊ">
-          <DeviceStatusChart items={DEVICE_STATUS} />
-        </DashboardCard>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        <DashboardCard title="CHI PHÍ">
-          <DonutChart
-            color="#1e5f8a"
-            value="6406.59"
-            unit="nghìn VNĐ"
-            caption="Tủ điện văn phòng: 100% chi phí hệ thống"
-          />
+          <EnergyChart data={energy} />
         </DashboardCard>
 
         <DashboardCard title="PHÁT THẢI CO2">
           <DonutChart
             color="#1e6b45"
-            value="2.21"
+            value={co2.toFixed(2)}
             unit="tấn CO2 tđ"
             caption={
               <span className="inline-flex items-center gap-1">
@@ -104,9 +149,24 @@ export function ClientDashboard({ project }: { project: Project }) {
             }
           />
         </DashboardCard>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <DashboardCard title="CHI PHÍ">
+          <DonutChart
+            color="#1e5f8a"
+            value={(energyTotal * 1.912).toFixed(2)}
+            unit="nghìn VNĐ"
+            caption="Tủ điện văn phòng: 100% chi phí hệ thống"
+          />
+        </DashboardCard>
+
+        <DashboardCard title="TRẠNG THÁI THIẾT BỊ">
+          <DeviceStatusChart items={deviceStatus} />
+        </DashboardCard>
 
         <DashboardCard title="NHẬT KÝ CẢNH BÁO" className="lg:col-span-2">
-          <AlertLogTable />
+          <AlertLogTable rows={alerts} />
         </DashboardCard>
       </div>
     </div>
@@ -365,13 +425,13 @@ function DonutChart({
   );
 }
 
-function AlertLogTable() {
+function AlertLogTable({ rows: sourceRows }: { rows: DashboardAlert[] }) {
   const [time, setTime] = useState("");
   const [point, setPoint] = useState("all");
   const [param, setParam] = useState("");
   const [value, setValue] = useState("");
 
-  const rows = ALERTS.filter((row) => {
+  const rows = sourceRows.filter((row) => {
     const matchTime = !time || row.time.includes(time);
     const matchPoint = point === "all" || row.point === point;
     const matchParam =
@@ -417,7 +477,9 @@ function AlertLogTable() {
                   className="h-8 w-full appearance-none rounded border border-slate-200 pr-7 pl-2 text-xs outline-none focus:border-emerald-500"
                 >
                   <option value="all" />
-                  <option value="Tủ điện văn phòng">Tủ điện văn phòng</option>
+                  {Array.from(new Set(sourceRows.map((row) => row.point))).map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
                 </select>
                 <FilterMark />
               </span>

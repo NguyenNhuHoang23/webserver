@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { DateSelectionControl, type CustomDateMode } from "./TimeFilterBar";
 
 const PHASE_COLORS = ["#e53935", "#43a047", "#1e88e5"];
 const U_CHANNELS = [
@@ -13,16 +14,14 @@ const I_CHANNELS = [
   { ch: 2, name: "I2" },
   { ch: 3, name: "I3" },
 ];
-const MEAS = ["rms", "pk+", "pk-", "dc", "cf"] as const;
 const AGGS = ["MAX", "AVG", "MIN"] as const;
-
-type Meas = (typeof MEAS)[number];
 type Agg = (typeof AGGS)[number];
+type Meas = "rms" | "pk+" | "pk-" | "dc" | "cf";
 
 const N = 500;
 const T0 = Date.parse("2026-01-27T09:40:00");
 
-function waveAt(i: number, phase: number, kind: "u" | "i", meas: Meas, agg: Agg) {
+function waveAt(i: number, phase: number, kind: "u" | "i", meas: Meas = "rms", agg: Agg = "AVG") {
   const seconds = (i / (N - 1)) * 240;
   if (kind === "u") {
     let v =
@@ -78,15 +77,14 @@ export function UiWaveform() {
   const [iQty, setIQty] = useState("I");
   const [uCh, setUCh] = useState([1, 2, 3]);
   const [iCh, setICh] = useState([1, 2, 3]);
-  const [uMeas, setUMeas] = useState<Meas[]>(["rms"]);
-  const [iMeas, setIMeas] = useState<Meas[]>(["rms"]);
   const [agg] = useState<Agg>("AVG");
   const [hover, setHover] = useState<number | null>(null);
   const [crosshair, setCrosshair] = useState(true);
   const [window, setWindow] = useState({ start: 0, end: N - 1 });
-  const RESOLUTIONS = ["Giờ", "Ngày", "Tuần", "Tháng", "Năm", "Khoảng ngày"] as const;
+  const RESOLUTIONS = ["Giờ", "Ngày", "Tuần", "Tháng", "Năm", "Ngày tự chọn"] as const;
   type Resolution = (typeof RESOLUTIONS)[number];
   const [resolution, setResolution] = useState<Resolution>("Giờ");
+  const [customDateMode, setCustomDateMode] = useState<CustomDateMode>("single");
   const [date, setDate] = useState("2026-07-19");
   const [startDate, setStartDate] = useState("2026-07-13");
   const [endDate, setEndDate] = useState("2026-07-19");
@@ -109,45 +107,47 @@ export function UiWaveform() {
     () =>
       U_CHANNELS.flatMap((item, idx) =>
         uCh.includes(item.ch)
-          ? uMeas.map((meas) => ({
-              key: `${item.name}-${meas}-${agg}`,
-              name: `${item.name} ${meas}`,
-              color: PHASE_COLORS[idx],
-              values: Array.from({ length: N }, (_, i) => waveAt(i, idx * 0.9, "u", meas, agg)),
-            }))
+          ? [
+              {
+                key: `${item.name}-${agg}`,
+                name: item.name,
+                color: PHASE_COLORS[idx],
+                values: Array.from({ length: N }, (_, i) => waveAt(i, idx * 0.9, "u", "rms", agg)),
+              },
+            ]
           : [],
       ),
-    [uCh, uMeas, agg],
+    [uCh, agg],
   );
 
   const iSeries = useMemo(
     () =>
       I_CHANNELS.flatMap((item, idx) =>
         iCh.includes(item.ch)
-          ? iMeas.map((meas) => ({
-              key: `${item.name}-${meas}-${agg}`,
-              name: `${item.name} ${meas}`,
-              color: PHASE_COLORS[idx],
-              values: Array.from({ length: N }, (_, i) => waveAt(i, idx * 1.1, "i", meas, agg)),
-            }))
+          ? [
+              {
+                key: `${item.name}-${agg}`,
+                name: item.name,
+                color: PHASE_COLORS[idx],
+                values: Array.from({ length: N }, (_, i) => waveAt(i, idx * 1.1, "i", "rms", agg)),
+              },
+            ]
           : [],
       ),
-    [iCh, iMeas, agg],
+    [iCh, agg],
   );
 
   return (
     <div className="font-sans">
-      {/* Top bar: Tham số bên trái, Bộ lọc thời gian bên phải (cho lên trên, bỏ phút, thêm khoảng ngày) */}
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+      {/* Top bar: Tham số bên trái, bộ lọc thời gian bên phải */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
           <ParamGroup
             qty={uQty}
             onQty={setUQty}
             options={["U", "Un", "U0"]}
             channels={uCh}
             onChannel={(ch) => setUCh((list) => toggleIn(list, ch))}
-            meas={uMeas}
-            onMeas={(m) => setUMeas((list) => toggleIn(list, m))}
           />
           <ParamGroup
             qty={iQty}
@@ -155,8 +155,6 @@ export function UiWaveform() {
             options={["I", "In", "I0"]}
             channels={iCh}
             onChannel={(ch) => setICh((list) => toggleIn(list, ch))}
-            meas={iMeas}
-            onMeas={(m) => setIMeas((list) => toggleIn(list, m))}
           />
         </div>
 
@@ -179,24 +177,18 @@ export function UiWaveform() {
             ))}
           </div>
 
-          {resolution === "Khoảng ngày" ? (
-            <div className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-500 bg-white px-2.5 text-[12px] font-medium text-emerald-800 shadow-xs">
-              <span className="text-[11px] text-slate-400">Từ</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
-              />
-              <span className="text-slate-300">-</span>
-              <span className="text-[11px] text-slate-400">Đến</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
-              />
-            </div>
+          {resolution === "Ngày tự chọn" ? (
+            <DateSelectionControl
+              compact
+              mode={customDateMode}
+              onModeChange={setCustomDateMode}
+              date={date}
+              onDateChange={setDate}
+              startDate={startDate}
+              endDate={endDate}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+            />
           ) : (
             <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-500 bg-white px-3 text-[13px] font-medium text-emerald-700 shadow-xs">
               <input
@@ -220,7 +212,7 @@ export function UiWaveform() {
           window={window}
           hover={crosshair ? hover : null}
           onHover={setHover}
-          domain={uMeas.includes("cf") && uMeas.length === 1 ? [1.2, 1.6] : [397, 401]}
+          domain={[397, 401]}
         />
         <div className="h-2 border-y border-slate-300 bg-slate-200" />
         <WavePane
@@ -229,7 +221,7 @@ export function UiWaveform() {
           window={window}
           hover={crosshair ? hover : null}
           onHover={setHover}
-          domain={iMeas.includes("cf") && iMeas.length === 1 ? [1.2, 1.8] : [450, 650]}
+          domain={[450, 650]}
           axis
         />
       </div>
@@ -250,8 +242,10 @@ export function UiWaveform() {
           </ToolBtn>
         </div>
         <span className="text-[11px] text-slate-400">
-          {resolution === "Khoảng ngày"
+          {resolution === "Ngày tự chọn" && customDateMode === "range"
             ? `Kỳ hiển thị: ${startDate} → ${endDate}`
+            : resolution === "Ngày tự chọn"
+            ? `Ngày tự chọn: ${date}`
             : `Độ phân giải: ${resolution} · Ngày: ${date}`}
         </span>
       </div>
@@ -265,43 +259,30 @@ function ParamGroup({
   options,
   channels,
   onChannel,
-  meas,
-  onMeas,
 }: {
   qty: string;
   onQty: (value: string) => void;
   options: string[];
   channels: number[];
   onChannel: (ch: number) => void;
-  meas: Meas[];
-  onMeas: (meas: Meas) => void;
 }) {
   return (
-    <div className="min-w-[280px]">
-      <div className="flex items-center gap-3 text-[12px] text-slate-600">
-        <select
-          value={qty}
-          onChange={(e) => onQty(e.target.value)}
-          className="h-8 rounded border border-slate-300 bg-white px-2 text-[13px] text-slate-700"
-        >
-          {options.map((opt) => (
-            <option key={opt}>{opt}</option>
-          ))}
-        </select>
-        <span className="text-slate-400">CH</span>
-        {[1, 2, 3].map((ch) => (
-          <Check key={ch} checked={channels.includes(ch)} onChange={() => onChannel(ch)}>
-            {ch}
-          </Check>
+    <div className="flex items-center gap-3 text-[12px] text-slate-600">
+      <select
+        value={qty}
+        onChange={(e) => onQty(e.target.value)}
+        className="h-8 rounded border border-slate-300 bg-white px-2 text-[13px] text-slate-700"
+      >
+        {options.map((opt) => (
+          <option key={opt}>{opt}</option>
         ))}
-      </div>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-slate-600">
-        {MEAS.map((item) => (
-          <Check key={item} checked={meas.includes(item)} onChange={() => onMeas(item)}>
-            {item}
-          </Check>
-        ))}
-      </div>
+      </select>
+      <span className="text-slate-400">CH</span>
+      {[1, 2, 3].map((ch) => (
+        <Check key={ch} checked={channels.includes(ch)} onChange={() => onChannel(ch)}>
+          {ch}
+        </Check>
+      ))}
     </div>
   );
 }

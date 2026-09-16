@@ -1,9 +1,12 @@
 "use client";
 
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  hydrateDevices,
   kindFromDeviceType,
   loadDevices,
   todaySyncLabel,
@@ -44,6 +47,8 @@ export function AddCustomDeviceForm() {
   const [existingName, setExistingName] = useState("");
   const [existingSn, setExistingSn] = useState("");
   const [extraFields, setExtraFields] = useState<ExtraField[]>([]);
+  const [fieldToDelete, setFieldToDelete] = useState<ExtraField | null>(null);
+  const [rowToDelete, setRowToDelete] = useState<RegisterRow | null>(null);
   const [rows, setRows] = useState<RegisterRow[]>(emptyRegisterRows());
 
   const lastEdited = useMemo(() => "Vừa xong", []);
@@ -53,22 +58,29 @@ export function AddCustomDeviceForm() {
       setIsEdit(false);
       return;
     }
-    const existing = loadDevices().find((item) => item.id === editingId);
-    if (!existing) {
-      setIsEdit(false);
-      return;
-    }
-    setIsEdit(true);
-    setExistingName(existing.name);
-    setExistingSn(existing.sn);
-    setBrand(existing.brand);
-    setModel(existing.brandModel.replace(`${existing.brand} `, "").trim() || existing.name);
-    setProtocol(existing.protocol || protocols[0]);
-    setDeviceType(existing.type);
-    setNotes(existing.notes ?? "");
-    setPreview(existing.image ?? null);
-    setExtraFields(existing.extraFields ?? []);
-    setRows(existing.registers?.length ? existing.registers : emptyRegisterRows());
+    let active = true;
+    void hydrateDevices().then((devices) => {
+      if (!active) return;
+      const existing = devices.find((item) => item.id === editingId);
+      if (!existing) {
+        setIsEdit(false);
+        return;
+      }
+      setIsEdit(true);
+      setExistingName(existing.name);
+      setExistingSn(existing.sn);
+      setBrand(existing.brand);
+      setModel(existing.brandModel.replace(`${existing.brand} `, "").trim() || existing.name);
+      setProtocol(existing.protocol || protocols[0]);
+      setDeviceType(existing.type);
+      setNotes(existing.notes ?? "");
+      setPreview(existing.image ?? null);
+      setExtraFields(existing.extraFields ?? []);
+      setRows(existing.registers?.length ? existing.registers : emptyRegisterRows());
+    });
+    return () => {
+      active = false;
+    };
   }, [editingId]);
 
   function addExtraField() {
@@ -401,6 +413,34 @@ export function AddCustomDeviceForm() {
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(fieldToDelete)}
+        title="Xác nhận xóa trường"
+        description={`Bạn có chắc chắn muốn xóa trường "${fieldToDelete?.label || "này"}" không?`}
+        confirmText="Xác nhận xóa"
+        onConfirm={() => {
+          if (fieldToDelete) {
+            setExtraFields((current) => current.filter((item) => item.id !== fieldToDelete.id));
+            setFieldToDelete(null);
+          }
+        }}
+        onCancel={() => setFieldToDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(rowToDelete)}
+        title="Xác nhận xóa thanh ghi"
+        description={`Bạn có chắc chắn muốn xóa thanh ghi "${rowToDelete?.name || "này"}" không?`}
+        confirmText="Xác nhận xóa"
+        onConfirm={() => {
+          if (rowToDelete) {
+            setRows((current) => current.filter((item) => item.id !== rowToDelete.id));
+            setRowToDelete(null);
+          }
+        }}
+        onCancel={() => setRowToDelete(null)}
+      />
     </form>
   );
 }

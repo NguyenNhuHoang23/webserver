@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { loadProjects, type Project } from "@/lib/projects";
+import { hydrateProjects, loadProjects, type Project } from "@/lib/projects";
 
 export function ProjectConfigHeader({
   project,
@@ -14,8 +14,13 @@ export function ProjectConfigHeader({
   const [resolved, setResolved] = useState(project);
 
   useEffect(() => {
-    const stored = loadProjects().find((item) => item.id === project.id);
-    setResolved(stored ?? project);
+    let active = true;
+    void hydrateProjects().then((projects) => {
+      if (active) setResolved(projects.find((item) => item.id === project.id) ?? project);
+    });
+    return () => {
+      active = false;
+    };
   }, [project]);
 
   return (

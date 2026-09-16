@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   flattenFactorGroups,
   formatFactorValue,
+  hydrateFactorGroups,
   INITIAL_FACTOR_GROUPS,
   loadFactorGroups,
   type GasKey,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/emission-factors";
 import {
   GHG_SCOPES,
+  hydrateGhgSources,
   INITIAL_GHG_SOURCES,
   loadGhgSources,
   saveGhgSources,
@@ -18,6 +20,11 @@ import {
   type GhgInputMethod,
   type ScopeId,
 } from "@/lib/ghg-sources";
+import {
+  hydrateClientMeters,
+  loadClientMeters,
+  type ClientMeter,
+} from "@/lib/client-meters";
 
 type InputMethod = GhgInputMethod;
 type EmissionSource = GhgEmissionSource;
@@ -43,9 +50,18 @@ function formatFactor(value: number) {
   });
 }
 
+type FactorHistoryRow = {
+  id: string;
+  label: string;
+  value: number;
+  unit: string;
+  validFrom: string;
+  validTo: string;
+};
+
 const initialSources: EmissionSource[] = INITIAL_GHG_SOURCES;
 
-export function GhgConfig() {
+export function GhgConfig({ projectId }: { projectId: string }) {
   const [activeScope, setActiveScope] = useState<ScopeId>(1);
   const [tableFilter, setTableFilter] = useState<ScopeId>(1);
   const [query, setQuery] = useState("");
@@ -53,6 +69,10 @@ export function GhgConfig() {
     flattenFactorGroups(INITIAL_FACTOR_GROUPS),
   );
   const [sources, setSources] = useState<EmissionSource[]>(initialSources);
+  const [sourcesProjectId, setSourcesProjectId] = useState<string | null>(null);
+  const [meters, setMeters] = useState<ClientMeter[]>([]);
+  const [metersProjectId, setMetersProjectId] = useState<string | null>(null);
+  const metersLoading = metersProjectId !== projectId;
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropHover, setDropHover] = useState(false);
@@ -60,20 +80,93 @@ export function GhgConfig() {
 
   const [name, setName] = useState("");
   const [method, setMethod] = useState<InputMethod>("meter");
+  const [meterPointId, setMeterPointId] = useState("");
   const [factorId, setFactorId] = useState("");
   const [formula, setFormula] = useState("{Giá trị điểm đo} * {Hệ số phát thải}");
-  const [factorValue, setFactorValue] = useState("74100");
   const [appliedAt, setAppliedAt] = useState("2024-01-01");
   const [formError, setFormError] = useState("");
 
+  const selectedMeter = useMemo(
+    () => meters.find((meter) => meter.id === meterPointId),
+    [meters, meterPointId],
+  );
+  const selectedFactor = useMemo(
+    () => factors.find((factor) => factor.id === factorId),
+    [factors, factorId],
+  );
+  const factorHistoryRows = useMemo<FactorHistoryRow[]>(() => {
+    if (!selectedFactor) return [];
+    return [
+      {
+        id: selectedFactor.id,
+        label: `${selectedFactor.name} · ${selectedFactor.gasLabel}`,
+        value: selectedFactor.value,
+        unit: selectedFactor.unit,
+        validFrom: appliedAt,
+        validTo: "Đang áp dụng",
+      },
+    ];
+  }, [appliedAt, selectedFactor]);
+
+  function handleMethodChange(nextMethod: InputMethod) {
+    setMethod(nextMethod);
+    if (nextMethod === "meter") {
+      const meter = meters.find((item) => item.id === meterPointId);
+      setName(meter?.name ?? "");
+      setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
+    } else if (nextMethod === "manual") {
+      setFormula("{Giá trị thủ công} * {Hệ số phát thải}");
+    }
+    setFormError("");
+  }
+
   useEffect(() => {
-    setFactors(flattenFactorGroups(loadFactorGroups()));
-    setSources(loadGhgSources());
+    let active = true;
+    void hydrateClientMeters(projectId)
+      .then((rows) => {
+        if (active) {
+          setMeters(rows);
+          setMetersProjectId(projectId);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setMeters(loadClientMeters(projectId));
+          setMetersProjectId(projectId);
+        }
+      });
+    void Promise.all([hydrateFactorGroups(), hydrateGhgSources(projectId)]).then(([groups, sources]) => {
+      if (!active) return;
+      setFactors(flattenFactorGroups(groups));
+      setSources(sources);
+      setSourcesProjectId(projectId);
+    }).catch(() => {
+      if (!active) return;
+      setFactors(flattenFactorGroups(loadFactorGroups()));
+      setSources(loadGhgSources());
+      setSourcesProjectId(projectId);
+    });
     if (window.location.hash === "#them-nguon-phat-thai") {
       const url = `${window.location.pathname}${window.location.search}`;
       window.history.replaceState(null, "", url);
     }
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (sourcesProjectId !== projectId || editingId) return;
+    const requestedId = new URLSearchParams(window.location.search).get("edit");
+    if (!requestedId) return;
+    const source = sources.find((item) => item.id === requestedId);
+    if (!source) return;
+
+    handleEdit(source);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("edit");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [editingId, projectId, sources, sourcesProjectId]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("ems-ghg-form-open", { detail: formOpen }));
@@ -84,9 +177,9 @@ export function GhgConfig() {
       setEditingId(null);
       setName("");
       setMethod("meter");
+      setMeterPointId("");
       setFactorId("");
       setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-      setFactorValue("74100");
       setAppliedAt("2024-01-01");
       setFormError("");
       setTableFilter((current) => {
@@ -100,8 +193,9 @@ export function GhgConfig() {
   }, []);
 
   function persistSources(next: EmissionSource[]) {
-    setSources(next);
-    saveGhgSources(next);
+    const withProject = next.map((source) => ({ ...source, projectId }));
+    setSources(withProject);
+    saveGhgSources(withProject, projectId);
   }
 
   const filteredFactors = useMemo(() => {
@@ -123,7 +217,6 @@ export function GhgConfig() {
 
   function applyFactor(factor: LibraryFactor) {
     setFactorId(factor.id);
-    setFactorValue(String(factor.value));
     setFormula((current) =>
       current.includes("{Hệ số phát thải}")
         ? current
@@ -135,9 +228,9 @@ export function GhgConfig() {
     setEditingId(null);
     setName("");
     setMethod("meter");
+    setMeterPointId("");
     setFactorId("");
     setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-    setFactorValue(factors[0] ? String(factors[0].value) : "0");
     setAppliedAt("2024-01-01");
     setFormError("");
     setFormOpen(false);
@@ -170,7 +263,15 @@ export function GhgConfig() {
       setFormError("Vui lòng nhập tên nguồn phát thải.");
       return;
     }
-    const parsed = Number(factorValue);
+    if (method === "meter" && !meterPointId) {
+      setFormError("Vui lòng chọn điểm đo cho nguồn phát thải.");
+      return;
+    }
+    if (!factorId || !selectedFactor) {
+      setFormError("Vui lòng chọn hệ số phát thải từ thư viện.");
+      return;
+    }
+    const parsed = selectedFactor.value;
     const existing = editingId ? sources.find((item) => item.id === editingId) : undefined;
     const next: EmissionSource = {
       ...existing,
@@ -182,6 +283,7 @@ export function GhgConfig() {
       factorValue: Number.isFinite(parsed) ? parsed : 0,
       formula,
       appliedAt,
+      meterPointId: method === "meter" ? meterPointId : undefined,
     };
     persistSources(
       editingId
@@ -198,9 +300,9 @@ export function GhgConfig() {
     setTableFilter(source.scope);
     setName(source.name);
     setMethod(source.method);
+    setMeterPointId(source.meterPointId ?? "");
     setFactorId(source.factorId);
     setFormula(source.formula);
-    setFactorValue(String(source.factorValue));
     setAppliedAt(source.appliedAt);
     setFormError("");
     setFormOpen(true);
@@ -272,16 +374,26 @@ export function GhgConfig() {
               handleSave();
             }}
           >
-            <Field label="TÊN NGUỒN PHÁT THẢI">
+            <Field label={method === "meter" ? "TÊN NGUỒN PHÁT THẢI (TỰ ĐỘNG)" : "TÊN NGUỒN PHÁT THẢI"}>
               <input
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
                   if (formError) setFormError("");
                 }}
-                placeholder="VD: Tiêu thụ điện sản xuất - Xưởng A"
-                className="input"
+                readOnly={method === "meter"}
+                placeholder={
+                  method === "meter"
+                    ? "Tên sẽ tự lấy sau khi chọn điểm đo"
+                    : "VD: Tiêu thụ điện sản xuất - Xưởng A"
+                }
+                className={`input ${method === "meter" ? "bg-slate-50 text-slate-600" : ""}`}
               />
+              {method === "meter" ? (
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Tên nguồn và thông tin điểm đo được tự động lấy từ lựa chọn bên dưới.
+                </p>
+              ) : null}
             </Field>
 
             <fieldset>
@@ -296,7 +408,7 @@ export function GhgConfig() {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setMethod(item.id)}
+                      onClick={() => handleMethodChange(item.id)}
                       className={`flex flex-col items-start gap-2 rounded-xl border px-4 py-3.5 text-left transition-colors ${
                         selected
                           ? "border-emerald-600 bg-emerald-50/70 text-emerald-700 shadow-[inset_0_0_0_1px_#059669]"
@@ -326,6 +438,61 @@ export function GhgConfig() {
               </div>
             </fieldset>
 
+            {method === "meter" ? (
+              <Field label="CHỌN ĐIỂM ĐO">
+                <div className="relative">
+                  <select
+                    value={meterPointId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setMeterPointId(nextId);
+                      const meter = meters.find((item) => item.id === nextId);
+                      setName(meter?.name ?? "");
+                      if (formError) setFormError("");
+                    }}
+                    required
+                    disabled={metersLoading || meters.length === 0}
+                    className="input appearance-none pr-9 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    <option value="">
+                      {metersLoading
+                        ? "Đang tải điểm đo..."
+                        : meters.length
+                          ? "Chọn điểm đo của dự án"
+                          : "Dự án chưa có điểm đo"}
+                    </option>
+                    {meters.map((meter) => (
+                      <option key={meter.id} value={meter.id}>
+                        {meter.name} · {meter.code} · {meter.utility}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Chọn điểm đo thuộc dự án làm dữ liệu đầu vào cho nguồn phát thải.
+                </p>
+                {selectedMeter ? (
+                  <div className="mt-3 grid gap-2 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs sm:grid-cols-3">
+                    <div>
+                      <span className="block text-slate-500">Mã điểm đo</span>
+                      <strong className="mt-0.5 block text-slate-800">{selectedMeter.code}</strong>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Loại năng lượng</span>
+                      <strong className="mt-0.5 block text-slate-800">{selectedMeter.utility}</strong>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Thiết bị</span>
+                      <strong className="mt-0.5 block text-slate-800">
+                        {selectedMeter.deviceId ? "Đã gắn thiết bị" : "Chưa gắn thiết bị"}
+                      </strong>
+                    </div>
+                  </div>
+                ) : null}
+              </Field>
+            ) : null}
+
             <Field label="LỰA CHỌN HỆ SỐ PHÁT THẢI">
               <div className="relative">
                 <select
@@ -333,9 +500,9 @@ export function GhgConfig() {
                   onChange={(e) => {
                     const nextId = e.target.value;
                     setFactorId(nextId);
-                    const factor = factors.find((item) => item.id === nextId);
-                    if (factor) setFactorValue(String(factor.value));
+                    if (formError) setFormError("");
                   }}
+                  required
                   className="input appearance-none pr-9"
                 >
                   <option value="">Chọn hệ số từ thư viện</option>
@@ -348,6 +515,18 @@ export function GhgConfig() {
                 </select>
                 <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
               </div>
+              {selectedFactor ? (
+                <div className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+                  <span className="text-slate-500">Giá trị tự lấy từ thư viện hệ số</span>
+                  <strong className="font-mono text-slate-800">
+                    {formatFactorValue(selectedFactor.value)} {selectedFactor.unit}
+                  </strong>
+                </div>
+              ) : (
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Chọn hệ số phù hợp với loại nhiên liệu/năng lượng và đơn vị dữ liệu đầu vào.
+                </p>
+              )}
             </Field>
 
             <Field label="NHẬP CÔNG THỨC TÍNH (KG CO₂E)">
@@ -357,16 +536,18 @@ export function GhgConfig() {
                   value={formula}
                   onChange={(e) => setFormula(e.target.value)}
                   rows={4}
-                  placeholder="{Giá trị điểm đo} * {Hệ số phát thải}"
+                  placeholder={`${method === "meter" ? "{Giá trị điểm đo}" : "{Giá trị thủ công}"} * {Hệ số phát thải}`}
                   className="w-full resize-none bg-white px-3 pt-3 pb-2 font-mono text-sm text-slate-800 outline-none placeholder:text-slate-400"
                 />
                 <div className="flex justify-end gap-2 px-3 pb-3">
                   <button
                     type="button"
-                    onClick={() => insertToken("{Giá trị điểm đo}")}
+                    onClick={() =>
+                      insertToken(method === "meter" ? "{Giá trị điểm đo}" : "{Giá trị thủ công}")
+                    }
                     className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
                   >
-                    [Điểm đo]
+                    {method === "meter" ? "[Điểm đo]" : "[Giá trị thủ công]"}
                   </button>
                   <button
                     type="button"
@@ -380,15 +561,7 @@ export function GhgConfig() {
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="GIÁ TRỊ HỆ SỐ ÁP DỤNG">
-                <input
-                  value={factorValue}
-                  onChange={(e) => setFactorValue(e.target.value)}
-                  inputMode="decimal"
-                  className="input font-mono"
-                />
-              </Field>
-              <Field label="NGÀY ÁP DỤNG">
+              <Field label="NGÀY BẮT ĐẦU ÁP DỤNG">
                 <input
                   type="date"
                   value={appliedAt}
@@ -397,6 +570,58 @@ export function GhgConfig() {
                 />
               </Field>
             </div>
+
+            <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">Lịch sử áp dụng hệ số</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                    Khi cập nhật hệ số, phiên bản cũ sẽ kết thúc vào ngày trước ngày bắt đầu của phiên bản mới.
+                  </p>
+                </div>
+                <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
+                  Theo thời gian hiệu lực
+                </span>
+              </div>
+              {factorHistoryRows.length ? (
+                <>
+                  <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                    <table className="w-full min-w-[560px] text-left text-xs">
+                      <thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2">Phiên bản</th>
+                          <th className="px-3 py-2">Giá trị</th>
+                          <th className="px-3 py-2">Từ ngày</th>
+                          <th className="px-3 py-2">Đến ngày</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {factorHistoryRows.map((row) => (
+                          <tr key={row.id} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-2.5 font-medium text-slate-700">{row.label}</td>
+                            <td className="px-3 py-2.5 font-mono text-slate-700">
+                              {formatFactorValue(row.value)} {row.unit}
+                            </td>
+                            <td className="px-3 py-2.5 text-slate-600">{row.validFrom}</td>
+                            <td className="px-3 py-2.5">
+                              <span className="font-medium text-emerald-700">{row.validTo}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    Chưa có phiên bản cũ trong dữ liệu giao diện hiện tại. Khi thư viện phát sinh phiên bản mới,
+                    phiên bản cũ sẽ được hiển thị với ngày kết thúc tương ứng.
+                  </p>
+                </>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-xs text-slate-400">
+                  Chọn một hệ số để xem các phiên bản và thời gian hiệu lực.
+                </div>
+              )}
+            </section>
 
             {formError ? <p className="text-sm font-medium text-red-500">{formError}</p> : null}
 
@@ -438,7 +663,7 @@ export function GhgConfig() {
 
           <ul className="max-h-[min(640px,70vh)] space-y-2 overflow-y-auto pr-1">
             {filteredFactors.map((factor) => {
-              const Icon = factorIcons[factor.gasKey];
+              const Icon = factorIcons[factor.gasKey as GasKey] ?? BoltIcon;
               return (
                 <li key={factor.id}>
                   <button
@@ -618,7 +843,7 @@ const methodIcons: Record<InputMethod, (props: { className?: string }) => ReactN
   file: UploadIcon,
 };
 
-const factorIcons: Record<GasKey, (props: { className?: string }) => ReactNode> = {
+const factorIcons: Record<string, (props: { className?: string }) => ReactNode> = {
   co2: BoltIcon,
   ch4: FlameIcon,
   n2o: DropIcon,

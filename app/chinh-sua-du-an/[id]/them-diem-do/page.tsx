@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { AddMeterPointForm } from "@/components/AddMeterPointForm";
-import { getProject } from "@/lib/projects";
+import { getProjectFromDb } from "@/lib/server-projects";
 import { projectConfigPath } from "@/lib/project-config";
 
 export default async function ProjectAddMeterPage({
@@ -9,7 +9,13 @@ export default async function ProjectAddMeterPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const project = getProject(id);
+  const project = await getProjectFromDb(id);
   if (!project) notFound();
-  return <AddMeterPointForm cancelHref={projectConfigPath(id)} projectId={id} />;
+  return (
+    <AddMeterPointForm
+      cancelHref={projectConfigPath(id)}
+      projectId={id}
+      configuredMeterTypes={project.meterTypes ?? []}
+    />
+  );
 }

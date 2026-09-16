@@ -1,8 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Project } from "@/lib/projects";
+import {
+  alertCategory,
+  alertStatus,
+  hydrateAlertEvents,
+  loadAlertEvents,
+  updateAlertEvent,
+  type AlertEvent,
+} from "@/lib/alert-events";
 
 export type AlertSeverity = "critical" | "warning" | "info";
 export type AlertStatus = "active" | "acknowledged" | "resolved";
@@ -166,6 +174,35 @@ const INITIAL_ALERTS: AlertItem[] = [
   },
 ];
 
+function dbAlertToItem(event: AlertEvent): AlertItem {
+  const parameterNames: Record<string, string> = {
+    F_avg: "Tần số trung bình",
+    U_unb: "Độ mất cân bằng điện áp",
+    I_rms: "Dòng điện hiệu dụng",
+    P_sum: "Công suất hữu công",
+  };
+  return {
+    id: event.id,
+    code: event.parameter,
+    timestamp: event.occurredAt,
+    pointCode: event.pointCode ?? event.meterPointId ?? "--",
+    pointName: event.pointName ?? "Điểm đo chưa gán",
+    location: event.utility ?? "EMS",
+    parameter: event.parameter,
+    paramName: parameterNames[event.parameter] ?? event.parameter,
+    actualValue: String(event.value),
+    thresholdValue: event.thresholdValue == null ? "--" : String(event.thresholdValue),
+    unit: event.unit ?? "",
+    severity: event.severity === "critical" || event.severity === "info" ? event.severity : "warning",
+    category: alertCategory(event.parameter, event.category) as AlertCategory,
+    status: alertStatus(event.status),
+    message: event.message ?? `Sự kiện ${event.parameter} tại ${event.pointName ?? "điểm đo"}`,
+    acknowledgedBy: event.acknowledgedBy,
+    acknowledgedAt: event.acknowledgedAt,
+    notes: event.note,
+  };
+}
+
 export function ClientAlerts({ project }: { project: Project }) {
   const [alerts, setAlerts] = useState<AlertItem[]>(INITIAL_ALERTS);
   const [search, setSearch] = useState("");
@@ -178,6 +215,22 @@ export function ClientAlerts({ project }: { project: Project }) {
   const [liveMode, setLiveMode] = useState(true);
   const [inspectAlert, setInspectAlert] = useState<AlertItem | null>(null);
   const [inspectNote, setInspectNote] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void hydrateAlertEvents(project.id)
+      .then((events) => {
+        if (!active) return;
+        const rows = events.length ? events.map(dbAlertToItem) : loadAlertEvents(project.id).map(dbAlertToItem);
+        setAlerts(rows.length ? rows : INITIAL_ALERTS);
+      })
+      .catch(() => {
+        if (active) setAlerts(INITIAL_ALERTS);
+      });
+    return () => {
+      active = false;
+    };
+  }, [project.id]);
 
   // Điểm đo unique
   const points = useMemo(() => {
@@ -236,14 +289,20 @@ export function ClientAlerts({ project }: { project: Project }) {
   // Xác nhận hàng loạt
   const batchAcknowledge = () => {
     if (selectedAlertIds.length === 0) return;
+    const acknowledgedAt = new Date().toISOString().replace("T", " ").substring(0, 19);
     setAlerts((prev) =>
       prev.map((item) => {
         if (selectedAlertIds.includes(item.id) && item.status === "active") {
+          void updateAlertEvent(project.id, item.id, {
+            status: "acknowledged",
+            acknowledgedBy: "Người vận hành",
+            acknowledgedAt,
+          }).catch(() => undefined);
           return {
             ...item,
             status: "acknowledged",
             acknowledgedBy: "Người vận hành",
-            acknowledgedAt: new Date().toISOString().replace("T", " ").substring(0, 19),
+            acknowledgedAt,
           };
         }
         return item;
@@ -255,14 +314,20 @@ export function ClientAlerts({ project }: { project: Project }) {
   // Đóng / giải quyết hàng loạt
   const batchResolve = () => {
     if (selectedAlertIds.length === 0) return;
+    const acknowledgedAt = new Date().toISOString().replace("T", " ").substring(0, 19);
     setAlerts((prev) =>
       prev.map((item) => {
         if (selectedAlertIds.includes(item.id)) {
+          void updateAlertEvent(project.id, item.id, {
+            status: "resolved",
+            acknowledgedBy: item.acknowledgedBy || "Người vận hành",
+            acknowledgedAt: item.acknowledgedAt || acknowledgedAt,
+          }).catch(() => undefined);
           return {
             ...item,
             status: "resolved",
             acknowledgedBy: item.acknowledgedBy || "Người vận hành",
-            acknowledgedAt: item.acknowledgedAt || new Date().toISOString().replace("T", " ").substring(0, 19),
+            acknowledgedAt: item.acknowledgedAt || acknowledgedAt,
           };
         }
         return item;
@@ -274,6 +339,14 @@ export function ClientAlerts({ project }: { project: Project }) {
   // Lưu ghi chú chi tiết
   const saveInspectNote = () => {
     if (!inspectAlert) return;
+    const acknowledgedAt = inspectAlert.acknowledgedAt || new Date().toISOString().replace("T", " ").substring(0, 19);
+    const nextStatus = inspectAlert.status === "active" ? "acknowledged" : inspectAlert.status;
+    void updateAlertEvent(project.id, inspectAlert.id, {
+      status: nextStatus,
+      note: inspectNote,
+      acknowledgedBy: inspectAlert.acknowledgedBy || "Kỹ sư ca trực",
+      acknowledgedAt,
+    }).catch(() => undefined);
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === inspectAlert.id
@@ -282,7 +355,7 @@ export function ClientAlerts({ project }: { project: Project }) {
               notes: inspectNote,
               status: a.status === "active" ? "acknowledged" : a.status,
               acknowledgedBy: a.acknowledgedBy || "Kỹ sư ca trực",
-              acknowledgedAt: a.acknowledgedAt || new Date().toISOString().replace("T", " ").substring(0, 19),
+              acknowledgedAt: a.acknowledgedAt || acknowledgedAt,
             }
           : a
       )

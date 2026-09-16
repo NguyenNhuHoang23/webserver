@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   INITIAL_DEVICES,
   loadDevices,
@@ -18,6 +19,7 @@ export function DeviceList() {
   const [view, setView] = useState<"list" | "grid">("list");
   const [page, setPage] = useState(1);
   const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
+  const [deviceToDelete, setDeviceToDelete] = useState<CatalogDevice | null>(null);
 
   useEffect(() => {
     setDevices(loadDevices());
@@ -58,12 +60,12 @@ export function DeviceList() {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] p-6 lg:p-8 font-sans">
+    <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8 font-sans">
       {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               Thư viện loại đồng hồ
             </h1>
             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
@@ -76,7 +78,7 @@ export function DeviceList() {
         </div>
         <Link
           href="/thiet-bi/them-moi"
-          className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors shrink-0"
         >
           <span className="text-base leading-none font-bold">+</span>
           Thêm loại đồng hồ
@@ -84,7 +86,7 @@ export function DeviceList() {
       </div>
 
       {/* KPI Cards */}
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 sm:mb-8 grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="TỔNG LOẠI ĐỒNG HỒ"
           value={String(stats.total)}
@@ -247,7 +249,7 @@ export function DeviceList() {
                             </Link>
                             <button
                               type="button"
-                              onClick={() => removeDevice(device.id)}
+                              onClick={() => setDeviceToDelete(device)}
                               className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
                               title="Xóa loại đồng hồ"
                             >
@@ -327,6 +329,20 @@ export function DeviceList() {
           </p>
         </div>
       </section>
+
+      <ConfirmDialog
+        open={Boolean(deviceToDelete)}
+        title="Xác nhận xóa loại đồng hồ"
+        description={`Bạn có chắc chắn muốn xóa thiết bị "${deviceToDelete?.name}" (${deviceToDelete?.brandModel}) không? Hành động này không thể hoàn tác.`}
+        confirmText="Xác nhận xóa"
+        onConfirm={() => {
+          if (deviceToDelete) {
+            removeDevice(deviceToDelete.id);
+            setDeviceToDelete(null);
+          }
+        }}
+        onCancel={() => setDeviceToDelete(null)}
+      />
     </div>
   );
 }

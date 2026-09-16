@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
+import { hydrateClientMeters } from "@/lib/client-meters";
 
 type YesNo = "Có" | "Không";
 type Format = ".pdf" | ".xlsx" | ".csv";
@@ -24,7 +27,9 @@ const POINTS = [
   { id: "main", name: "(DB-MAIN) Tủ điện tổng" },
 ];
 
-const ALERT_ROWS = [
+type ReportAlert = { time: string; point: string; param: string; value: string; level: string };
+
+const ALERT_ROWS: ReportAlert[] = [
   { time: "2026-07-19 07:38:48", point: "Tủ điện văn phòng", param: "F_avg", value: "49.79", level: "Cảnh báo" },
   { time: "2026-07-19 07:38:38", point: "Tủ điện văn phòng", param: "F_avg", value: "50.42", level: "Cảnh báo" },
   { time: "2026-07-19 07:22:11", point: "Tủ điện sản xuất", param: "U_unb", value: "2.14", level: "Nghiêm trọng" },
@@ -33,6 +38,8 @@ const ALERT_ROWS = [
 ];
 
 export function ClientReports({ initialId = "energy" }: { initialId?: (typeof REPORTS)[number]["id"] }) {
+  const params = useParams<{ id: string }>();
+  const projectId = params?.id ?? "default";
   const [template, setTemplate] = useState(TEMPLATES[0]);
   const [reportId, setReportId] = useState<(typeof REPORTS)[number]["id"]>(initialId);
   const report = REPORTS.find((item) => item.id === reportId) ?? REPORTS[0];
@@ -45,6 +52,36 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
   const [date, setDate] = useState("2026-07-19");
   const [selected, setSelected] = useState<string[]>(["off1"]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [points, setPoints] = useState(POINTS);
+  const [alertRows, setAlertRows] = useState<ReportAlert[]>(ALERT_ROWS);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([hydrateClientMeters(projectId), hydrateAlertEvents(projectId)]).then(([meters, events]) => {
+      if (!active) return;
+      const nextPoints = meters.map((meter) => ({
+        id: meter.id,
+        name: `(${meter.code}) ${meter.name}`,
+      }));
+      if (nextPoints.length) {
+        setPoints(nextPoints);
+        setSelected((current) => {
+          const valid = current.filter((id) => nextPoints.some((point) => point.id === id));
+          return valid.length ? valid : [nextPoints[0].id];
+        });
+      }
+      if (events.length) setAlertRows(events.map((event: AlertEvent) => ({
+        time: event.occurredAt,
+        point: event.pointName ?? event.meterPointId ?? "--",
+        param: event.parameter,
+        value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
+        level: event.severity === "critical" ? "Nghiêm trọng" : event.severity === "warning" ? "Cảnh báo" : "Thông tin",
+      })));
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
 
   const dateLabel = useMemo(() => {
     const [y, m, d] = date.split("-");
@@ -66,27 +103,27 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
   };
 
   const exportReport = () => {
-    const points = POINTS.filter((p) => selected.includes(p.id))
+    const selectedPoints = points.filter((p) => selected.includes(p.id))
       .map((p) => p.name)
       .join("; ");
     const body = [
       title,
       `Loại: ${report.name}`,
-      `Điểm đo: ${points}`,
+      `Điểm đo: ${selectedPoints}`,
       `Biểu đồ: ${chart}`,
       `Bảng tổng hợp: ${summary}`,
       `Bảng chi tiết: ${detail}`,
       `Kỳ: ${period} ${dateLabel}`,
       "",
       report.id === "alerts"
-        ? ALERT_ROWS.map((row) => `${row.time}\t${row.point}\t${row.param}\t${row.value}\t${row.level}`).join("\n")
+        ? alertRows.map((row) => `${row.time}\t${row.point}\t${row.param}\t${row.value}\t${row.level}`).join("\n")
         : "Dữ liệu mẫu theo cấu hình báo cáo.",
     ].join("\n");
 
     if (format === ".csv") {
       const csv =
         report.id === "alerts"
-          ? ["Thời điểm,Điểm đo,Tham số,Giá trị,Mức", ...ALERT_ROWS.map((r) => `${r.time},${r.point},${r.param},${r.value},${r.level}`)].join("\n")
+          ? ["Thời điểm,Điểm đo,Tham số,Giá trị,Mức", ...alertRows.map((r) => `${r.time},${r.point},${r.param},${r.value},${r.level}`)].join("\n")
           : body;
       download(csv, `${report.id}${format}`, "text/csv;charset=utf-8");
       return;
@@ -97,7 +134,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
       <body><h1>${title}</h1><pre>${body}</pre>
       ${
         report.id === "alerts"
-          ? `<table><thead><tr><th>Thời điểm</th><th>Điểm đo</th><th>Tham số</th><th>Giá trị</th><th>Mức</th></tr></thead><tbody>${ALERT_ROWS.map(
+          ? `<table><thead><tr><th>Thời điểm</th><th>Điểm đo</th><th>Tham số</th><th>Giá trị</th><th>Mức</th></tr></thead><tbody>${alertRows.map(
               (r) => `<tr><td>${r.time}</td><td>${r.point}</td><td>${r.param}</td><td>${r.value}</td><td>${r.level}</td></tr>`,
             ).join("")}</tbody></table>`
           : ""
@@ -175,7 +212,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
             </button>
             {pickerOpen ? (
               <div className="absolute right-0 top-9 z-20 w-64 rounded-md border border-slate-200 bg-white py-1 shadow-md">
-                {POINTS.map((item) => (
+                {points.map((item) => (
                   <label
                     key={item.id}
                     className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px] text-slate-600 hover:bg-slate-50"
@@ -236,7 +273,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
                   </tr>
                 </thead>
                 <tbody>
-                  {ALERT_ROWS.map((row) => (
+                  {alertRows.map((row) => (
                     <tr key={row.time} className="border-b border-slate-50 text-slate-700">
                       <td className="py-2.5">{row.time}</td>
                       <td className="py-2.5">{row.point}</td>

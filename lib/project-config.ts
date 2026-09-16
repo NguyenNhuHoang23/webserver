@@ -1,9 +1,12 @@
-export type ProjectConfigModule = "points" | "ghg" | "alerts" | "add-meter";
+export type ProjectConfigModule = "project-info" | "points" | "ghg" | "alerts" | "add-meter";
 
 export function matchProjectConfig(pathname: string): {
   projectId: string;
   module: ProjectConfigModule;
 } | null {
+  const projectInfoMatch = pathname.match(/^\/sua-du-an\/([^/]+)\/?$/);
+  if (projectInfoMatch) return { projectId: projectInfoMatch[1], module: "project-info" };
+
   const match = pathname.match(/^\/chinh-sua-du-an\/([^/]+)(?:\/([^/]+))?/);
   if (!match) return null;
   const projectId = match[1];
@@ -16,6 +19,7 @@ export function matchProjectConfig(pathname: string): {
 }
 
 export function projectConfigPath(projectId: string, module: ProjectConfigModule = "points") {
+  if (module === "project-info") return `/sua-du-an/${projectId}`;
   if (module === "ghg") return `/chinh-sua-du-an/${projectId}/khi-nha-kinh`;
   if (module === "alerts") return `/chinh-sua-du-an/${projectId}/canh-bao`;
   if (module === "add-meter") return `/chinh-sua-du-an/${projectId}/them-diem-do`;

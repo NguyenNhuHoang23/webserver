@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type DragEvent } from "react";
 import {
   buildMeterDepthMap,
   defaultClientMeters,
+  hydrateClientMeters,
   isMeterDescendant,
   loadClientMeters,
   orderMetersByTree,
@@ -80,6 +81,7 @@ export function ClientConfig() {
   const [tab, setTab] = useState<TabId>("meters");
   const [openParams, setOpenParams] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [utilities, setUtilities] = useState<string[]>(FALLBACK_UTILITIES);
   const [utility, setUtility] = useState<Utility>("Điện");
   const [meters, setMeters] = useState<ClientMeter[]>(() => defaultClientMeters());
@@ -110,14 +112,22 @@ export function ClientConfig() {
     const types = resolveMeterTypes(project);
     setUtilities(types.length ? types : FALLBACK_UTILITIES);
     setUtility((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
-    setMeters(loadClientMeters(projectId));
+    void hydrateClientMeters(projectId)
+      .then((rows) => setMeters(rows))
+      .catch(() => setMeters(loadClientMeters(projectId)));
     setDevices(loadDevices());
   }, [projectId]);
 
-  const markSaved = () => {
-    saveClientMeters(projectId, meters);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1600);
+  const markSaved = async () => {
+    setSaveError("");
+    try {
+      await saveClientMeters(projectId, meters);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1600);
+    } catch {
+      setSaved(false);
+      setSaveError("Không thể lưu cấu hình điểm đo. Vui lòng thử lại.");
+    }
   };
 
   const visibleMeters = useMemo(
@@ -297,7 +307,11 @@ export function ClientConfig() {
               </button>
             </div>
           ) : null}
-          {saved ? <p className="mt-3 text-right text-[12px] font-medium text-emerald-600">Đã lưu cấu hình</p> : null}
+          {saveError ? (
+            <p className="mt-3 text-right text-[12px] font-medium text-red-600">{saveError}</p>
+          ) : saved ? (
+            <p className="mt-3 text-right text-[12px] font-medium text-emerald-600">Đã lưu cấu hình</p>
+          ) : null}
         </section>
       </div>
     </div>
@@ -606,6 +620,15 @@ function MetersPanel({
                           </span>
                           <span className="mt-0.5 block truncate text-[10px] text-slate-400">
                             ID: {assigned.id}
+                          </span>
+                        </div>
+                      ) : item.serialNumber ? (
+                        <div>
+                          <span className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12px] font-medium text-amber-700">
+                            Serial: {item.serialNumber}
+                          </span>
+                          <span className="mt-0.5 block text-[10px] text-slate-400">
+                            Chờ ghép nối đồng hồ
                           </span>
                         </div>
                       ) : (

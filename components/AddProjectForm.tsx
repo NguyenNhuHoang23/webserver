@@ -1,22 +1,28 @@
 "use client";
 
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   formatProjectDate,
+  hydrateProjects,
   INITIAL_PROJECTS,
   nextProjectId,
   projectAccent,
   projectInitials,
+  resolveMeterTypes,
   upsertProject,
   type AlertRecipient,
   type MeterType,
+  type Project,
   type ProjectStatus,
 } from "@/lib/projects";
 import { ensureCustomerAccount } from "@/lib/customer-accounts";
 import {
   loadMeterTypeDefs,
+  hydrateMeterTypeDefs,
   removeMeterTypeDef,
   upsertMeterTypeDef,
   type MeterTypeDef,
@@ -34,32 +40,70 @@ function todayIso() {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-export function AddProjectForm() {
+function toInputDate(value?: string) {
+  if (!value) return todayIso();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return match ? `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}` : todayIso();
+}
+
+export function AddProjectForm({ initialProject }: { initialProject?: Project }) {
   const router = useRouter();
 
-  const [code, setCode] = useState(() => nextProjectId(INITIAL_PROJECTS));
-  const [name, setName] = useState("");
-  const [customer, setCustomer] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [startDate, setStartDate] = useState(todayIso);
-  const [status, setStatus] = useState<ProjectStatus>("active");
-  const [meterTypes, setMeterTypes] = useState<MeterType[]>(["Điện"]);
+  const [code, setCode] = useState(() => initialProject?.id ?? nextProjectId(INITIAL_PROJECTS));
+  const [name, setName] = useState(() => initialProject?.name ?? "");
+  const [customer, setCustomer] = useState(() => initialProject?.customer ?? "");
+  const [contactName, setContactName] = useState(() => initialProject?.contactName ?? "");
+  const [email, setEmail] = useState(() => initialProject?.email ?? "");
+  const [phone, setPhone] = useState(() => initialProject?.phone ?? "");
+  const [address, setAddress] = useState(() => initialProject?.address ?? "");
+  const [logoUrl, setLogoUrl] = useState(() => initialProject?.logoUrl ?? "");
+  const [startDate, setStartDate] = useState(() => toInputDate(initialProject?.startDate));
+  const [status, setStatus] = useState<ProjectStatus>(() => initialProject?.status ?? "active");
+  const [meterTypes, setMeterTypes] = useState<MeterType[]>(() =>
+    initialProject ? resolveMeterTypes(initialProject) : ["Điện"],
+  );
   const [meterCatalog, setMeterCatalog] = useState<MeterTypeDef[]>(loadMeterTypeDefs);
   const [meterEditor, setMeterEditor] = useState<"add" | string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [meterError, setMeterError] = useState("");
-  const [recipients, setRecipients] = useState<AlertRecipient[]>([
-    { id: "rcpt-new", name: "", email: "", phone: "" },
-  ]);
+  const [recipients, setRecipients] = useState<AlertRecipient[]>(() =>
+    initialProject?.recipients?.length
+      ? initialProject.recipients
+      : [{ id: "rcpt-new", name: "", email: "", phone: "" }],
+  );
   const [error, setError] = useState("");
+  const [meterTypeToDelete, setMeterTypeToDelete] = useState<MeterTypeDef | null>(null);
+  const [recipientToDelete, setRecipientToDelete] = useState<AlertRecipient | null>(null);
+
+  function handleLogoChange(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Logo phải là một tệp hình ảnh.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Logo không được vượt quá 2 MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setLogoUrl(reader.result);
+        setError("");
+      }
+    };
+    reader.onerror = () => setError("Không thể đọc tệp logo.");
+    reader.readAsDataURL(file);
+  }
 
   useEffect(() => {
-    setCode(nextProjectId());
-    setMeterCatalog(loadMeterTypeDefs());
+    void Promise.all([hydrateProjects(), hydrateMeterTypeDefs()]).then(([projects, meterTypes]) => {
+      if (!initialProject) setCode(nextProjectId(projects));
+      setMeterCatalog(meterTypes);
+    });
   }, []);
 
   function toggleMeter(type: MeterType) {
@@ -122,10 +166,10 @@ export function AddProjectForm() {
     setRecipients((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const projectName = name.trim();
     const customerName = customer.trim();
-    const projectCode = code.trim().toUpperCase() || nextProjectId();
+    const projectCode = (initialProject?.id ?? code.trim().toUpperCase()) || nextProjectId();
 
     if (!projectName || !customerName) {
       setError("Vui lòng nhập tên dự án và tên khách hàng.");
@@ -153,32 +197,41 @@ export function AddProjectForm() {
       return;
     }
 
-    upsertProject({
-      id: projectCode,
-      name: projectName,
-      customer: customerName,
-      initials: projectInitials(customerName || projectName),
-      accent: projectAccent(projectCode),
-      status,
-      startDate: formatProjectDate(startDate),
-      contactName: contactName.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-      address: address.trim(),
-      meterTypes,
-      recipients: cleanedRecipients,
-    });
-    ensureCustomerAccount({ id: projectCode, customer: customerName });
-
-    router.push("/");
+    try {
+      await hydrateProjects();
+      await upsertProject({
+        id: projectCode,
+        name: projectName,
+        customer: customerName,
+        initials: projectInitials(customerName || projectName),
+        accent: initialProject?.accent ?? projectAccent(projectCode),
+        logoUrl: logoUrl || undefined,
+        status,
+        startDate: formatProjectDate(startDate),
+        contactName: contactName.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        address: address.trim(),
+        meterTypes,
+        recipients: cleanedRecipients,
+      });
+      if (!initialProject) ensureCustomerAccount({ id: projectCode, customer: customerName });
+      router.push("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không thể lưu dự án vào database.");
+    }
   }
 
   return (
-    <div className="mx-auto max-w-[980px] p-6 lg:p-8">
+    <div className="mx-auto max-w-[980px] p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tạo dự án mới</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          {initialProject ? "Sửa thông tin dự án" : "Tạo dự án mới"}
+        </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Cấu hình thông tin khách hàng, loại điểm đo và người nhận thông báo cảnh báo.
+          {initialProject
+            ? "Cập nhật thông tin khách hàng, loại điểm đo và người nhận thông báo cảnh báo."
+            : "Cấu hình thông tin khách hàng, loại điểm đo và người nhận thông báo cảnh báo."}
         </p>
       </div>
 
@@ -204,6 +257,7 @@ export function AddProjectForm() {
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="VD: PRJ-2443"
                 className="input"
+                readOnly={Boolean(initialProject)}
                 required
               />
             </Field>
@@ -213,7 +267,7 @@ export function AddProjectForm() {
                 onChange={(e) => {
                   const value = e.target.value;
                   setName(value);
-                  setCustomer(value);
+                  if (!initialProject) setCustomer(value);
                 }}
                 placeholder="VD: Công ty TNHH ABC"
                 className="input"
@@ -288,6 +342,47 @@ export function AddProjectForm() {
                 placeholder="Địa chỉ nhà máy / văn phòng khách hàng"
                 className="input"
               />
+            </Field>
+          </div>
+
+          <div className="mt-4">
+            <Field label="LOGO CÔNG TY">
+              <div className="flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-4">
+                <div
+                  className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-lg font-bold text-white shadow-xs"
+                  style={{ backgroundColor: initialProject?.accent ?? "#059669" }}
+                >
+                  {logoUrl ? (
+                    <img src={logoUrl} alt={`Logo ${customer || name || "công ty"}`} className="h-full w-full object-contain bg-white" />
+                  ) : (
+                    projectInitials(customer || name)
+                  )}
+                </div>
+                <div className="min-w-[220px] flex-1">
+                  <label className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    Chọn logo công ty
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={(event) => {
+                        handleLogoChange(event.target.files?.[0]);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  <p className="mt-1.5 text-xs text-slate-400">PNG, JPG hoặc SVG · tối đa 2 MB</p>
+                  {logoUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => setLogoUrl("")}
+                      className="mt-1 text-xs font-semibold text-red-500 hover:underline"
+                    >
+                      Xóa logo, dùng chữ viết tắt
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             </Field>
           </div>
         </section>
@@ -420,7 +515,7 @@ export function AddProjectForm() {
                     {item.builtin ? null : (
                       <button
                         type="button"
-                        onClick={() => deleteMeterType(item)}
+                        onClick={() => setMeterTypeToDelete(item)}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
                         aria-label={`Xóa ${item.name}`}
                         title="Xóa"
@@ -517,10 +612,40 @@ export function AddProjectForm() {
             type="submit"
             className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
           >
-            Tạo dự án
+            {initialProject ? "Lưu thay đổi" : "Tạo dự án"}
           </button>
         </div>
       </form>
+
+      <ConfirmDialog
+        open={Boolean(meterTypeToDelete)}
+        title="Xác nhận xóa loại điểm đo"
+        description={`Bạn có chắc chắn muốn xóa loại điểm đo "${meterTypeToDelete?.name}" không?`}
+        confirmText="Xác nhận xóa"
+        onConfirm={() => {
+          if (meterTypeToDelete) {
+            deleteMeterType(meterTypeToDelete);
+            setMeterTypeToDelete(null);
+          }
+        }}
+        onCancel={() => setMeterTypeToDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(recipientToDelete)}
+        title="Xác nhận xóa người nhận"
+        description={`Bạn có chắc chắn muốn xóa người nhận thông báo "${recipientToDelete?.name || "này"}" không?`}
+        confirmText="Xác nhận xóa"
+        onConfirm={() => {
+          if (recipientToDelete) {
+            setRecipients((current) =>
+              current.length === 1 ? [nextRecipient()] : current.filter((row) => row.id !== recipientToDelete.id)
+            );
+            setRecipientToDelete(null);
+          }
+        }}
+        onCancel={() => setRecipientToDelete(null)}
+      />
     </div>
   );
 }

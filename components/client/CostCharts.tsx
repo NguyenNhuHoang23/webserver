@@ -9,8 +9,8 @@ import {
   getTimeFilterPeriods,
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
-import { loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
-import { loadProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
+import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
+import { hydrateProjects, loadProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
 
 type CostPoint = {
   id: string;
@@ -67,7 +67,8 @@ function costSeriesForFilter(seed: number, pointIndex: number, filter: TimeFilte
   const count = Math.max(periods.length, 1);
   const targets = [68719, 54210, 81340, 42180, 95880, 33400, 28900];
   const scaleByFilter =
-    filter.mode === "day" || filter.mode === "custom_date"
+    filter.mode === "day" ||
+    (filter.mode === "custom_date" && filter.customDateMode !== "range")
       ? 0.04
       : filter.mode === "month"
       ? 1.0
@@ -105,36 +106,34 @@ export function CostCharts() {
   const [query, setQuery] = useState("");
 
   useEffect(() => {
-    const project = loadProjects().find((item) => item.id === projectId);
-    const types = resolveMeterTypes(project);
-    setEnergyKinds(types);
-    setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
-
+    let active = true;
     const reload = () => {
-      const meters = orderMetersByTree(loadClientMeters(projectId));
-      if (!meters.length) {
-        setAllPoints(FALLBACK_POINTS);
-        return;
-      }
-      setAllPoints(
-        meters.map((meter, index) => ({
-          id: meter.id,
-          code: meter.code,
-          name: meter.name,
-          energy: meter.utility,
-          color: POINT_COLORS[index % POINT_COLORS.length],
-        })),
-      );
+      void Promise.all([hydrateProjects(), hydrateClientMeters(projectId)]).then(([projects, meterRows]) => {
+        if (!active) return;
+        const project = projects.find((item) => item.id === projectId);
+        const types = resolveMeterTypes(project);
+        setEnergyKinds(types);
+        setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
+        const meters = orderMetersByTree(meterRows.length ? meterRows : loadClientMeters(projectId));
+        if (!meters.length) {
+          setAllPoints(FALLBACK_POINTS);
+          return;
+        }
+        setAllPoints(
+          meters.map((meter, index) => ({
+            id: meter.id,
+            code: meter.code,
+            name: meter.name,
+            energy: meter.utility,
+            color: POINT_COLORS[index % POINT_COLORS.length],
+          })),
+        );
+      });
     };
     reload();
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === "ems-client-meters") reload();
-    };
-    window.addEventListener("storage", onStorage);
     window.addEventListener("ems-client-meters-changed", reload);
     return () => {
-      window.removeEventListener("storage", onStorage);
+      active = false;
       window.removeEventListener("ems-client-meters-changed", reload);
     };
   }, [projectId]);

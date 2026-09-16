@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { AlertConfig } from "@/components/AlertConfig";
-import { getProject } from "@/lib/projects";
+import { getProjectFromDb } from "@/lib/server-projects";
+import { resolveMeterTypes } from "@/lib/projects";
 import { ProjectConfigHeader } from "@/components/ProjectConfigHeader";
 
 export default async function ProjectAlertConfigPage({
@@ -9,12 +10,12 @@ export default async function ProjectAlertConfigPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const project = getProject(id);
+  const project = await getProjectFromDb(id);
   if (!project) notFound();
   return (
     <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
       <ProjectConfigHeader project={project} />
-      <AlertConfig />
+      <AlertConfig projectId={id} initialUtilities={resolveMeterTypes(project)} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { ClientShell } from "@/components/client/ClientShell";
-import { getProject } from "@/lib/projects";
+import { getProjectFromDb } from "@/lib/server-projects";
 
 export default async function ProjectClientLayout({
   children,
@@ -10,7 +10,7 @@ export default async function ProjectClientLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const project = getProject(id);
+  const project = await getProjectFromDb(id);
 
   if (!project) notFound();
 

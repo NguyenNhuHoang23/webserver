@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { DateSelectionControl, type CustomDateMode } from "./TimeFilterBar";
 
 const N = 160;
 const T0 = Date.parse("2026-01-27T09:40:00");
@@ -79,9 +80,10 @@ export function PowerChart({ seed }: { seed: number }) {
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
-  const RESOLUTIONS = ["Giờ", "Ngày", "Tuần", "Tháng", "Năm", "Khoảng ngày"] as const;
+  const RESOLUTIONS = ["Giờ", "Ngày", "Tuần", "Tháng", "Năm", "Ngày tự chọn"] as const;
   type Resolution = (typeof RESOLUTIONS)[number];
   const [resolution, setResolution] = useState<Resolution>("Giờ");
+  const [customDateMode, setCustomDateMode] = useState<CustomDateMode>("single");
   const [date, setDate] = useState("2026-07-19");
   const [startDate, setStartDate] = useState("2026-07-13");
   const [endDate, setEndDate] = useState("2026-07-19");
@@ -202,24 +204,18 @@ export function PowerChart({ seed }: { seed: number }) {
             ))}
           </div>
 
-          {resolution === "Khoảng ngày" ? (
-            <div className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-500 bg-white px-2.5 text-[12px] font-medium text-emerald-800 shadow-xs">
-              <span className="text-[11px] text-slate-400">Từ</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
-              />
-              <span className="text-slate-300">-</span>
-              <span className="text-[11px] text-slate-400">Đến</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
-              />
-            </div>
+          {resolution === "Ngày tự chọn" ? (
+            <DateSelectionControl
+              compact
+              mode={customDateMode}
+              onModeChange={setCustomDateMode}
+              date={date}
+              onDateChange={setDate}
+              startDate={startDate}
+              endDate={endDate}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+            />
           ) : (
             <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-500 bg-white px-3 text-[13px] font-medium text-emerald-700 shadow-xs">
               <input
@@ -303,8 +299,10 @@ export function PowerChart({ seed }: { seed: number }) {
           </ToolBtn>
         </div>
         <span className="text-[11px] text-slate-400">
-          {resolution === "Khoảng ngày"
+          {resolution === "Ngày tự chọn" && customDateMode === "range"
             ? `Kỳ hiển thị: ${startDate} → ${endDate}`
+            : resolution === "Ngày tự chọn"
+            ? `Ngày tự chọn: ${date}`
             : `Độ phân giải: ${resolution} · Ngày: ${date}`}
         </span>
       </div>

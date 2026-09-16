@@ -6,52 +6,134 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   deviceSpec,
   INITIAL_DEVICES,
+  hydrateDevices,
   loadDevices,
   type CatalogDevice,
 } from "@/lib/devices";
 import {
   loadClientMeters,
+  hydrateClientMeters,
   saveClientMeters,
+  isMeterDescendant,
   type ClientMeter,
 } from "@/lib/client-meters";
-import { loadMeterTypeDefs, type MeterTypeDef } from "@/lib/meter-types";
+import {
+  hydrateMeterTypeDefs,
+  inferMeterTypeIcon,
+  loadMeterTypeDefs,
+  type MeterTypeDef,
+} from "@/lib/meter-types";
 
 export function AddMeterPointForm({
   cancelHref = "/",
   projectId,
+  configuredMeterTypes,
+  initialMeter,
 }: {
   cancelHref?: string;
   projectId?: string;
+  configuredMeterTypes?: string[];
+  initialMeter?: ClientMeter;
 }) {
   const router = useRouter();
   const [energyTypes, setEnergyTypes] = useState<MeterTypeDef[]>(loadMeterTypeDefs);
-  const [energy, setEnergy] = useState("Điện");
-  const [parentId, setParentId] = useState("");
+  const [energy, setEnergy] = useState(
+    initialMeter?.utility ?? (configuredMeterTypes ? configuredMeterTypes.find(Boolean) ?? "" : "Điện"),
+  );
+  const [parentId, setParentId] = useState(initialMeter?.parentId ?? "");
   const [query, setQuery] = useState("");
   const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
   const [existingMeters, setExistingMeters] = useState<ClientMeter[]>([]);
   const [droppedDevice, setDroppedDevice] = useState<CatalogDevice | null>(null);
-  const [pointId, setPointId] = useState("");
-  const [pointName, setPointName] = useState("");
-  const [interval, setInterval] = useState("15");
+  const [deviceId, setDeviceId] = useState<string | null>(initialMeter?.deviceId ?? null);
+  const [serialNumber, setSerialNumber] = useState(initialMeter?.serialNumber ?? "");
+  const [pointId, setPointId] = useState(initialMeter?.code ?? "");
+  const [pointName, setPointName] = useState(initialMeter?.name ?? "");
   const [formula, setFormula] = useState("");
   const [error, setError] = useState("");
 
+  const configuredTypeNames = useMemo(
+    () =>
+      configuredMeterTypes === undefined
+        ? undefined
+        : Array.from(new Set(configuredMeterTypes.map((item) => item.trim()).filter(Boolean))),
+    [configuredMeterTypes],
+  );
+
+  const selectableEnergyTypes = (() => {
+    if (configuredTypeNames === undefined) return energyTypes;
+
+    const catalog = new Map(energyTypes.map((item) => [item.name, item]));
+    const names = [...configuredTypeNames];
+
+    // Keep an existing point's old type visible while editing so saving the
+    // form does not silently change data after that type is removed from the project.
+    if (initialMeter?.utility && !names.includes(initialMeter.utility)) {
+      names.push(initialMeter.utility);
+    }
+
+    return names.map(
+      (name) =>
+        catalog.get(name) ?? {
+          name,
+          description: "Loại điểm đo đã cấu hình cho dự án",
+          icon: inferMeterTypeIcon(name),
+          builtin: false,
+        },
+    );
+  })();
+
   useEffect(() => {
-    setDevices(loadDevices());
-    setEnergyTypes(loadMeterTypeDefs());
-    if (projectId) setExistingMeters(loadClientMeters(projectId));
-  }, [projectId]);
+    let active = true;
+    void Promise.all([
+      hydrateDevices(),
+      hydrateMeterTypeDefs(),
+      projectId ? hydrateClientMeters(projectId) : Promise.resolve([]),
+    ]).then(([devices, energyTypes, meters]) => {
+      if (!active) return;
+      setDevices(devices);
+      setEnergyTypes(energyTypes);
+      if (initialMeter?.deviceId) {
+        const device = devices.find((item) => item.id === initialMeter.deviceId) ?? null;
+        setDroppedDevice(device);
+        if (!initialMeter.serialNumber && device) setSerialNumber(device.sn);
+      }
+      if (projectId) setExistingMeters(meters);
+    }).catch(() => {
+      if (!active) return;
+      setDevices(loadDevices());
+      setEnergyTypes(loadMeterTypeDefs());
+      if (projectId) setExistingMeters(loadClientMeters(projectId));
+    });
+    return () => {
+      active = false;
+    };
+  }, [initialMeter, projectId]);
 
   const parentOptions = useMemo(
-    () => existingMeters.filter((meter) => meter.utility === energy),
-    [energy, existingMeters],
+    () => existingMeters.filter((meter) =>
+      meter.utility === energy &&
+      meter.id !== initialMeter?.id &&
+      (!initialMeter || !isMeterDescendant(existingMeters, initialMeter.id, meter.id)),
+    ),
+    [energy, existingMeters, initialMeter],
+  );
+
+  const compatibleDevices = useMemo(
+    () =>
+      configuredTypeNames === undefined
+        ? devices
+        : devices.filter((device) => {
+            const deviceEnergy = utilityForDevice(device);
+            return !deviceEnergy || configuredTypeNames.includes(deviceEnergy);
+          }),
+    [configuredTypeNames, devices],
   );
 
   const filteredDevices = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return devices;
-    return devices.filter(
+    if (!q) return compatibleDevices;
+    return compatibleDevices.filter(
       (d) =>
         d.name.toLowerCase().includes(q) ||
         d.brandModel.toLowerCase().includes(q) ||
@@ -59,12 +141,34 @@ export function AddMeterPointForm({
         d.sn.toLowerCase().includes(q) ||
         (d.protocol ?? "").toLowerCase().includes(q),
     );
-  }, [devices, query]);
+  }, [compatibleDevices, query]);
 
   function applyDevice(device: CatalogDevice) {
+    const deviceEnergy = utilityForDevice(device);
+    if (
+      configuredTypeNames !== undefined &&
+      deviceEnergy &&
+      !configuredTypeNames.includes(deviceEnergy)
+    ) {
+      setError(`Thiết bị này thuộc loại ${deviceEnergy}, chưa được cấu hình cho dự án.`);
+      return;
+    }
+    setError("");
     setDroppedDevice(device);
+    setDeviceId(device.id);
+    setSerialNumber(device.sn);
+    if (deviceEnergy) {
+      setEnergy(deviceEnergy);
+      const parent = existingMeters.find((meter) => meter.id === parentId);
+      if (parent && parent.utility !== deviceEnergy) setParentId("");
+    }
     setPointName((current) => current || device.name);
     setPointId((current) => current || device.id.toUpperCase());
+  }
+
+  function clearDevice() {
+    setDroppedDevice(null);
+    setDeviceId(null);
   }
 
   function selectParent(nextParentId: string) {
@@ -80,11 +184,23 @@ export function AddMeterPointForm({
     if (parent && parent.utility !== nextEnergy) setParentId("");
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const id = pointId.trim();
     const name = pointName.trim();
     if (!id || !name) {
       setError("Vui lòng nhập mã điểm đo và tên điểm đo.");
+      return;
+    }
+    if (!energy) {
+      setError("Dự án chưa cấu hình loại điểm đo. Vui lòng cấu hình trước khi thêm điểm đo.");
+      return;
+    }
+    if (
+      configuredTypeNames !== undefined &&
+      !configuredTypeNames.includes(energy) &&
+      energy !== initialMeter?.utility
+    ) {
+      setError("Loại điểm đo này chưa được cấu hình cho dự án.");
       return;
     }
     if (!projectId) {
@@ -92,26 +208,41 @@ export function AddMeterPointForm({
       return;
     }
 
-    const meters = loadClientMeters(projectId);
-    const next: ClientMeter = {
-      id: `m-${Date.now()}`,
-      name,
-      code: id,
-      type: droppedDevice?.brandModel || droppedDevice?.type || "Chưa gán thiết bị",
-      parentId: parentId || null,
-      utility: energy,
-      deviceId: droppedDevice?.id ?? null,
-    };
-    saveClientMeters(projectId, [...meters, next]);
-    router.push(cancelHref);
+    try {
+      const meters = await hydrateClientMeters(projectId);
+      const next: ClientMeter = {
+        id: initialMeter?.id ?? `m-${Date.now()}`,
+        name,
+        code: id,
+        type: droppedDevice?.brandModel || droppedDevice?.type || initialMeter?.type || "Chưa gán thiết bị",
+        parentId: parentId || null,
+        utility: energy,
+        deviceId,
+        serialNumber: serialNumber.trim() || null,
+      };
+      const updated = initialMeter
+        ? meters.map((meter) => (meter.id === initialMeter.id ? next : meter))
+        : [...meters, next];
+      if (initialMeter && !meters.some((meter) => meter.id === initialMeter.id)) {
+        throw new Error("Không tìm thấy điểm đo cần cập nhật trong dự án.");
+      }
+      await saveClientMeters(projectId, updated);
+      router.push(cancelHref);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không thể lưu điểm đo.");
+    }
   }
 
   return (
     <div className="mx-auto max-w-[1400px] p-6 lg:p-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Thêm mới điểm đo</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          {initialMeter ? "Chỉnh sửa điểm đo" : "Thêm mới điểm đo"}
+        </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Cấu hình điểm thu thập dữ liệu mới cho hệ thống giám sát năng lượng.
+          {initialMeter
+            ? "Cập nhật thông tin và cấu hình điểm đo trong dự án."
+            : "Cấu hình điểm thu thập dữ liệu mới cho hệ thống giám sát năng lượng."}
         </p>
       </div>
 
@@ -125,28 +256,52 @@ export function AddMeterPointForm({
               e.preventDefault();
               handleSubmit();
             }}
-          >
+            >
             <Field label="LOẠI ĐIỂM ĐO">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {energyTypes.map((type) => {
-                  const active = energy === type.name;
-                  return (
-                    <button
-                      key={type.name}
-                      type="button"
-                      onClick={() => selectEnergy(type.name)}
-                      title={type.description}
-                      className={`h-10 rounded-xl border text-sm font-semibold transition-all ${
-                        active
-                          ? "border-emerald-600 bg-emerald-50/80 text-emerald-700 ring-1 ring-emerald-500/20"
-                          : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
-                      }`}
-                    >
-                      {type.name}
-                    </button>
-                  );
-                })}
-              </div>
+              {selectableEnergyTypes.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {selectableEnergyTypes.map((type) => {
+                    const active = energy === type.name;
+                    const isOutsideProject =
+                      configuredTypeNames !== undefined && !configuredTypeNames.includes(type.name);
+                    return (
+                      <button
+                        key={type.name}
+                        type="button"
+                        onClick={() => selectEnergy(type.name)}
+                        title={
+                          isOutsideProject
+                            ? "Loại này đã được bỏ khỏi cấu hình hiện tại của dự án"
+                            : type.description
+                        }
+                        className={`h-10 rounded-xl border text-sm font-semibold transition-all ${
+                          active
+                            ? "border-emerald-600 bg-emerald-50/80 text-emerald-700 ring-1 ring-emerald-500/20"
+                            : isOutsideProject
+                              ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                              : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
+                        }`}
+                      >
+                        <span>{type.name}</span>
+                        {isOutsideProject ? <span className="ml-1 text-[10px]">(cũ)</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <p className="font-semibold">Dự án chưa cấu hình loại điểm đo.</p>
+                  <p className="mt-1 text-xs text-amber-700">
+                    Hãy quay lại cấu hình dự án để thêm Điện, Hơi hoặc loại năng lượng phù hợp.
+                  </p>
+                  <Link
+                    href={cancelHref}
+                    className="mt-2 inline-flex text-xs font-semibold text-emerald-700 hover:underline"
+                  >
+                    Mở cấu hình dự án
+                  </Link>
+                </div>
+              )}
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -170,6 +325,18 @@ export function AddMeterPointForm({
               </Field>
             </div>
 
+            <Field label="SỐ SERIAL ĐỒNG HỒ (NHẬP TAY)">
+              <input
+                value={serialNumber}
+                onChange={(e) => setSerialNumber(e.target.value)}
+                placeholder="VD: EM-992834-A"
+                className="input"
+              />
+              <p className="mt-1.5 text-xs text-slate-400">
+                Có thể nhập trước khi gán thiết bị. Serial chưa được ghép nối sẽ chưa có dữ liệu.
+              </p>
+            </Field>
+
             <Field label="THIẾT BỊ">
               <div
                 onDragOver={(e) => {
@@ -185,45 +352,55 @@ export function AddMeterPointForm({
                 className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 px-6 py-10 text-center"
               >
                 <ImportIcon className="mb-3 h-8 w-8 text-emerald-600" />
-                <p className="max-w-md text-sm text-slate-500">
-                  {droppedDevice
-                    ? `Đã gắn thiết bị: ${droppedDevice.name}`
-                    : "Kéo thiết bị từ thư viện vào đây để tự động cấu hình..."}
-                </p>
+                {droppedDevice ? (
+                  <>
+                    <p className="max-w-md text-sm font-semibold text-slate-700">
+                      Đã gán đồng hồ: {droppedDevice.name}
+                    </p>
+                    <p className="mt-1 max-w-md text-xs text-slate-500">
+                      {serialNumber || droppedDevice.sn} · {droppedDevice.brandModel}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={clearDevice}
+                      className="mt-2 rounded-md px-2 py-1 text-xs font-semibold text-red-500 hover:bg-red-50"
+                    >
+                      Bỏ gán đồng hồ
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="max-w-md text-sm text-slate-500">
+                      Chưa gán đồng hồ hoặc số serial
+                    </p>
+                    <p className="mt-1 max-w-md text-xs text-slate-400">
+                      Điểm đo vẫn được lưu; trạng thái và giá trị sẽ hiển thị chưa có dữ liệu cho đến khi gán đồng hồ.
+                    </p>
+                  </>
+                )}
               </div>
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="ĐIỂM ĐO CHA">
-                <div className="relative">
-                  <select
-                    value={parentId}
-                    onChange={(e) => selectParent(e.target.value)}
-                    className="input appearance-none pr-9"
-                  >
-                    <option value="">Không có điểm đo cha</option>
-                    {parentOptions.map((meter) => (
-                      <option key={meter.id} value={meter.id}>
-                        {meter.name} ({meter.code})
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                </div>
-                <p className="mt-1.5 text-xs text-slate-400">
-                  Chỉ chọn nếu điểm đo này có quan hệ cha–con. Nếu không, giữ “Không có điểm đo cha”.
-                </p>
-              </Field>
-              <Field label="CHU KỲ LẤY MẪU (PHÚT)">
-                <input
-                  type="number"
-                  min={1}
-                  value={interval}
-                  onChange={(e) => setInterval(e.target.value)}
-                  className="input"
-                />
-              </Field>
-            </div>
+            <Field label="ĐIỂM ĐO CHA">
+              <div className="relative">
+                <select
+                  value={parentId}
+                  onChange={(e) => selectParent(e.target.value)}
+                  className="input appearance-none pr-9"
+                >
+                  <option value="">Không có điểm đo cha</option>
+                  {parentOptions.map((meter) => (
+                    <option key={meter.id} value={meter.id}>
+                      {meter.name} ({meter.code})
+                    </option>
+                  ))}
+                </select>
+                <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              </div>
+              <p className="mt-1.5 text-xs text-slate-400">
+                Chỉ chọn nếu điểm đo này có quan hệ cha–con. Nếu không, giữ “Không có điểm đo cha”.
+              </p>
+            </Field>
 
             <Field label="CÔNG THỨC CHUYỂN ĐỔI (DATA TRANSFORM)">
               <div className="relative">
@@ -252,7 +429,7 @@ export function AddMeterPointForm({
                 type="submit"
                 className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
               >
-                Lưu thay đổi
+                {initialMeter ? "Lưu thay đổi" : "Thêm điểm đo"}
               </button>
             </div>
           </form>
@@ -309,6 +486,21 @@ export function AddMeterPointForm({
       </div>
     </div>
   );
+}
+
+function utilityForDevice(device: CatalogDevice): string | null {
+  switch (device.kind) {
+    case "flow":
+      return "Nước";
+    case "temp":
+      return "Nhiệt";
+    case "steam":
+      return "Hơi";
+    case "power":
+      return "Điện";
+    default:
+      return null;
+  }
 }
 
 function Field({

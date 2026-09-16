@@ -1,21 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AUTH_EVENT, readSession, type AuthSession } from "@/lib/auth";
+import { AUTH_EVENT, hydrateSession, type AuthSession } from "@/lib/auth";
 
 export function useAuth() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const sync = () => setSession(readSession());
+    let active = true;
+    const sync = () => {
+      void hydrateSession().then((next) => {
+        if (active) setSession(next);
+      }).catch(() => {
+        if (active) setSession(null);
+      });
+    };
     sync();
-    setReady(true);
+    void hydrateSession().finally(() => {
+      if (active) setReady(true);
+    });
     window.addEventListener(AUTH_EVENT, sync);
-    window.addEventListener("storage", sync);
     return () => {
+      active = false;
       window.removeEventListener(AUTH_EVENT, sync);
-      window.removeEventListener("storage", sync);
     };
   }, []);
 

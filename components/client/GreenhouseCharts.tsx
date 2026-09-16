@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_TIME_FILTER,
@@ -10,6 +11,7 @@ import {
 } from "@/components/client/TimeFilterBar";
 import {
   GHG_SCOPES,
+  hydrateGhgSources,
   loadGhgSources,
   scopeColor,
   scopeLabel,
@@ -25,7 +27,7 @@ function fmt(n: number, digits = 1) {
   });
 }
 
-export function GreenhouseCharts() {
+export function GreenhouseCharts({ projectId }: { projectId: string }) {
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>({
     ...DEFAULT_TIME_FILTER,
     mode: "year",
@@ -33,8 +35,16 @@ export function GreenhouseCharts() {
   const [sources, setSources] = useState<GhgEmissionSource[]>([]);
 
   useEffect(() => {
-    setSources(withDemoTons(loadGhgSources()));
-  }, []);
+    let active = true;
+    void hydrateGhgSources(projectId).then((sources) => {
+      if (active) setSources(withDemoTons(sources));
+    }).catch(() => {
+      if (active) setSources(withDemoTons(loadGhgSources()));
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
 
   const baseScale = 1 + (timeFilter.year - 2024) * 0.035;
   const timeScale = getTimeFilterScaleFactor(timeFilter);
@@ -151,6 +161,7 @@ export function GreenhouseCharts() {
                       <th className="py-2 font-semibold">PHẠM VI</th>
                       <th className="py-2 text-right font-semibold">GIÁ TRỊ (TẤN)</th>
                       <th className="py-2 text-right font-semibold">TỶ TRỌNG</th>
+                      <th className="py-2 text-right font-semibold">THAO TÁC</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -163,6 +174,16 @@ export function GreenhouseCharts() {
                         <td className="py-2.5 text-right text-slate-700">{fmt(row.tons)}</td>
                         <td className="py-2.5 text-right font-semibold text-slate-700">
                           {row.share.toFixed(1)}%
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <Link
+                            href={`/chinh-sua-du-an/${encodeURIComponent(projectId)}/khi-nha-kinh?edit=${encodeURIComponent(row.id)}`}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600"
+                            aria-label={`Chỉnh sửa ${row.name}`}
+                            title="Chỉnh sửa nguồn phát thải"
+                          >
+                            <PencilIcon className="h-4 w-4" />
+                          </Link>
                         </td>
                       </tr>
                     ))}
@@ -224,14 +245,16 @@ function ScopeDonut({
 }) {
   const r = 68;
   const c = 2 * Math.PI * r;
-  let offset = 0;
 
   return (
     <div className="relative mx-auto mt-4 h-[220px] w-[220px]">
       <svg viewBox="0 0 180 180" className="h-full w-full">
         <circle cx="90" cy="90" r={r} fill="none" stroke="#e8eef4" strokeWidth="26" />
-        {segments.map((item) => {
+        {segments.map((item, index) => {
           const dash = (item.share / 100) * c;
+          const offset = segments
+            .slice(0, index)
+            .reduce((sum, segment) => sum + (segment.share / 100) * c, 0);
           const el = (
             <circle
               key={item.id}
@@ -246,7 +269,6 @@ function ScopeDonut({
               transform="rotate(-90 90 90)"
             />
           );
-          offset += dash;
           return el;
         })}
       </svg>
@@ -302,6 +324,20 @@ function TrendArrow({ down }: { down: boolean }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function PencilIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 17.5V20h2.5L18 8.5 15.5 6 4 17.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="m14.5 7 2.5 2.5" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }

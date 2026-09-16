@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   formatFactorValue,
+  hydrateFactorGroups,
   INITIAL_FACTOR_GROUPS,
   loadFactorGroups,
   removeFactorGroup,
@@ -23,9 +24,10 @@ export function EmissionFactors() {
   const [groups, setGroups] = useState<FactorGroup[]>(INITIAL_FACTOR_GROUPS);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [groupToDelete, setGroupToDelete] = useState<FactorGroup | null>(null);
 
   useEffect(() => {
-    setGroups(loadFactorGroups());
+    void hydrateFactorGroups().then(setGroups).catch(() => setGroups(loadFactorGroups()));
   }, []);
 
   const filtered = useMemo(() => {
@@ -44,12 +46,12 @@ export function EmissionFactors() {
   const pageRows = filtered.slice(start, start + PAGE_SIZE);
 
   return (
-    <div className="mx-auto max-w-[1400px] p-6 lg:p-8 font-sans">
+    <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8 font-sans">
       {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               Quản lý hệ số phát thải
             </h1>
             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
@@ -62,7 +64,7 @@ export function EmissionFactors() {
         </div>
         <Link
           href="/he-so-phat-thai/them-moi"
-          className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors shrink-0"
         >
           <span className="text-base leading-none font-bold">+</span>
           Thêm hệ số
@@ -103,6 +105,10 @@ export function EmissionFactors() {
                 group.gases.map((gas, index) => {
                   const first = index === 0;
                   const last = index === group.gases.length - 1;
+                  const gasMeta = (GAS_META as Record<string, { label: string; className: string }>)[gas.key] ?? {
+                    label: gas.label || String(gas.key || "GAS").toUpperCase(),
+                    className: "bg-slate-50 text-slate-700 border-slate-200/60",
+                  };
                   return (
                     <tr
                       key={`${group.id}-${gas.key}`}
@@ -121,9 +127,9 @@ export function EmissionFactors() {
                       <td className="px-5 py-3">
                         <div className="inline-flex items-center gap-3">
                           <span
-                            className={`inline-flex min-w-11 justify-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${GAS_META[gas.key].className}`}
+                            className={`inline-flex min-w-11 justify-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${gasMeta.className}`}
                           >
-                            {GAS_META[gas.key].label}
+                            {gasMeta.label}
                           </span>
                           <span className="font-mono font-semibold text-slate-800 text-xs">
                             {formatFactorValue(gas.value)}
@@ -150,7 +156,7 @@ export function EmissionFactors() {
                               </Link>
                               <button
                                 type="button"
-                                onClick={() => setGroups(removeFactorGroup(group.id))}
+                                onClick={() => setGroupToDelete(group)}
                                 className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
                                 title={`Xóa ${group.name}`}
                               >

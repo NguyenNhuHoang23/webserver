@@ -14,8 +14,9 @@ import { HarmonicsChart } from "@/components/client/HarmonicsChart";
 import { PowerChart } from "@/components/client/PowerChart";
 import { UiWaveform } from "@/components/client/UiWaveform";
 import { UnbalanceChart } from "@/components/client/UnbalanceChart";
-import { loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
-import { loadProjects, resolveMeterTypes } from "@/lib/projects";
+import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
+import { hydrateProjects, loadProjects, resolveMeterTypes } from "@/lib/projects";
+import { hydrateMeterReadings, type MeterReading } from "@/lib/meter-readings";
 
 type EnergyKind = string;
 type MetricId = "energy" | "ui" | "freq" | "power" | "harm" | "unbalance" | "pst";
@@ -68,7 +69,9 @@ function energyBarsForFilter(seed: number, filter: TimeFilterValue): BarPoint[] 
   const periods = getTimeFilterPeriods(filter);
   const count = Math.max(periods.length, 1);
   return periods.map((p, i) => {
-    const isHourly = filter.mode === "day" || filter.mode === "custom_date";
+    const isHourly =
+      filter.mode === "day" ||
+      (filter.mode === "custom_date" && filter.customDateMode !== "range");
     let baseKwh = 95;
     if (isHourly) {
       const hour = Number(p.key);
@@ -88,6 +91,46 @@ function energyBarsForFilter(seed: number, filter: TimeFilterValue): BarPoint[] 
       kwh: Number(kwh.toFixed(1)),
     };
   });
+}
+
+function energyBarsFromReadings(
+  seed: number,
+  filter: TimeFilterValue,
+  pointId: string | undefined,
+  readings: MeterReading[],
+) {
+  const rows = readings.filter((row) => row.meterPointId === pointId && row.metric === "energy");
+  if (!rows.length) return energyBarsForFilter(seed, filter);
+  const periods = getTimeFilterPeriods(filter);
+  const values = new Map<number, number>();
+  for (const row of rows) {
+    const date = row.recordedAt.slice(0, 10);
+    let index = -1;
+    if (filter.mode === "month") {
+      if (date.slice(0, 7) === filter.month) index = Number(date.slice(8, 10)) - 1;
+    } else if (filter.mode === "year") {
+      if (Number(date.slice(0, 4)) === filter.year) index = Number(date.slice(5, 7)) - 1;
+    } else if (filter.mode === "day" && date === filter.date) {
+      index = Number(row.recordedAt.slice(11, 13));
+    } else if (
+      filter.mode === "custom_date" &&
+      filter.customDateMode !== "range" &&
+      date === filter.customDate
+    ) {
+      index = Number(row.recordedAt.slice(11, 13));
+    } else if (filter.mode === "custom_date" && filter.customDateMode === "range") {
+      const start = new Date(`${filter.startDate}T00:00:00`).getTime();
+      const current = new Date(`${date}T00:00:00`).getTime();
+      index = Math.round((current - start) / (24 * 60 * 60 * 1000));
+    }
+    if (index >= 0 && index < periods.length) values.set(index, (values.get(index) ?? 0) + row.value);
+  }
+  if (!values.size) return energyBarsForFilter(seed, filter);
+  return periods.map((period, index) => ({
+    minute: index,
+    label: period.label,
+    kwh: Number((values.get(index) ?? 0).toFixed(1)),
+  }));
 }
 
 function formatNum(n: number) {
@@ -151,38 +194,38 @@ export function EnergyCharts() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pointQuery, setPointQuery] = useState("");
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
+  const [readings, setReadings] = useState<MeterReading[]>([]);
 
   useEffect(() => {
-    const project = loadProjects().find((item) => item.id === projectId);
-    const types = resolveMeterTypes(project);
-    setEnergyKinds(types);
-    setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
-
+    let active = true;
     const reload = () => {
-      const meters = orderMetersByTree(loadClientMeters(projectId));
-      if (!meters.length) {
-        setAllPoints(FALLBACK_POINTS);
-        return;
-      }
-      setAllPoints(
-        meters.map((meter, index) => ({
-          id: meter.id,
-          code: meter.code,
-          name: meter.name,
-          energy: meter.utility,
-          color: POINT_COLORS[index % POINT_COLORS.length],
-        })),
-      );
+      void Promise.all([hydrateProjects(), hydrateClientMeters(projectId), hydrateMeterReadings(projectId)]).then(([projects, meterRows, readingRows]) => {
+        if (!active) return;
+        setReadings(readingRows);
+        const project = projects.find((item) => item.id === projectId);
+        const types = resolveMeterTypes(project);
+        setEnergyKinds(types);
+        setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
+        const meters = orderMetersByTree(meterRows.length ? meterRows : loadClientMeters(projectId));
+        if (!meters.length) {
+          setAllPoints(FALLBACK_POINTS);
+          return;
+        }
+        setAllPoints(
+          meters.map((meter, index) => ({
+            id: meter.id,
+            code: meter.code,
+            name: meter.name,
+            energy: meter.utility,
+            color: POINT_COLORS[index % POINT_COLORS.length],
+          })),
+        );
+      });
     };
     reload();
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === "ems-client-meters") reload();
-    };
-    window.addEventListener("storage", onStorage);
     window.addEventListener("ems-client-meters-changed", reload);
     return () => {
-      window.removeEventListener("storage", onStorage);
+      active = false;
       window.removeEventListener("ems-client-meters-changed", reload);
     };
   }, [projectId]);
@@ -226,9 +269,9 @@ export function EnergyCharts() {
     () =>
       selectedPoints.map((point, i) => ({
         point,
-        bars: energyBarsForFilter(seed + i * 1.7, timeFilter),
+        bars: energyBarsFromReadings(seed + i * 1.7, timeFilter, point.id, readings),
       })),
-    [selectedPoints, seed, timeFilter],
+    [readings, selectedPoints, seed, timeFilter],
   );
 
   const barCount = multiBars[0]?.bars.length ?? 30;
@@ -268,7 +311,7 @@ export function EnergyCharts() {
             ? "kWh"
             : "kWh";
 
-  const primaryBars = multiBars[0]?.bars ?? energyBarsForFilter(seed, timeFilter);
+  const primaryBars = multiBars[0]?.bars ?? energyBarsFromReadings(seed, timeFilter, selectedPoints[0]?.id, readings);
   const visibleBars = primaryBars.slice(range.start, range.end + 1);
   const barSum = multiBars.reduce(
     (sum, series) =>

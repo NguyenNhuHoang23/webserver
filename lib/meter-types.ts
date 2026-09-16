@@ -1,3 +1,5 @@
+import { dbFetch, emitDbChange } from "@/lib/db-client";
+
 export type MeterTypeIconId = "bolt" | "drop" | "thermo" | "steam" | "air" | "generic";
 
 export type MeterTypeDef = {
@@ -7,7 +9,8 @@ export type MeterTypeDef = {
   builtin: boolean;
 };
 
-const STORAGE_KEY = "ems-meter-types";
+let meterTypeCache: MeterTypeDef[] = [];
+let meterTypesHydration: Promise<MeterTypeDef[]> | null = null;
 
 export const DEFAULT_METER_TYPE_DEFS: MeterTypeDef[] = [
   {
@@ -47,40 +50,33 @@ export function inferMeterTypeIcon(name: string): MeterTypeIconId {
 }
 
 export function loadMeterTypeDefs(): MeterTypeDef[] {
-  if (typeof window === "undefined") return DEFAULT_METER_TYPE_DEFS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_METER_TYPE_DEFS;
-    const parsed = JSON.parse(raw) as MeterTypeDef[];
-    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_METER_TYPE_DEFS;
-    const custom = parsed.filter((item) => item?.name && !item.builtin);
-    const builtins = DEFAULT_METER_TYPE_DEFS.map((item) => {
-      const stored = parsed.find((row) => row.name === item.name && row.builtin);
-      return stored ? { ...item, description: stored.description || item.description } : item;
-    });
-    const seen = new Set(builtins.map((item) => item.name.toLowerCase()));
-    const extras = custom.filter((item) => {
-      const key = item.name.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    return [
-      ...builtins,
-      ...extras.map((item) => ({
-        name: item.name.trim(),
-        description: item.description?.trim() || "Loại điểm đo tùy chỉnh",
-        icon: item.icon || inferMeterTypeIcon(item.name),
-        builtin: false,
-      })),
-    ];
-  } catch {
-    return DEFAULT_METER_TYPE_DEFS;
-  }
+  return meterTypeCache.length ? meterTypeCache : DEFAULT_METER_TYPE_DEFS;
 }
 
 export function saveMeterTypeDefs(defs: MeterTypeDef[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(defs));
+  meterTypeCache = defs;
+  emitDbChange("meter-types");
+  for (const def of defs) {
+    void dbFetch("meter-types", {
+      method: "POST",
+      body: JSON.stringify(def),
+    }).catch((error) => console.error("Không thể lưu loại điểm đo", error));
+  }
+}
+
+export function hydrateMeterTypeDefs() {
+  if (typeof window === "undefined") return Promise.resolve(loadMeterTypeDefs());
+  if (meterTypesHydration) return meterTypesHydration;
+  meterTypesHydration = dbFetch<MeterTypeDef[]>("meter-types")
+    .then((defs) => {
+      meterTypeCache = defs.length ? defs : DEFAULT_METER_TYPE_DEFS;
+      emitDbChange("meter-types");
+      return meterTypeCache;
+    })
+    .finally(() => {
+      meterTypesHydration = null;
+    });
+  return meterTypesHydration;
 }
 
 export function upsertMeterTypeDef(input: { name: string; description: string }, previousName?: string) {

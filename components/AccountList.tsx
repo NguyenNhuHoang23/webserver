@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   INITIAL_ACCOUNTS,
   loadAccounts,
@@ -23,6 +24,7 @@ export function AccountList() {
   const [accounts, setAccounts] = useState<Account[]>(INITIAL_ACCOUNTS);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
   useEffect(() => {
     setAccounts(loadAccounts());
@@ -46,12 +48,12 @@ export function AccountList() {
   const pageNumbers = visiblePages(currentPage, totalPages);
 
   return (
-    <div className="mx-auto max-w-[1400px] p-6 lg:p-8 font-sans">
+    <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8 font-sans">
       {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               Quản lý tài khoản đăng nhập
             </h1>
             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
@@ -64,7 +66,7 @@ export function AccountList() {
         </div>
         <Link
           href="/tai-khoan/them-moi"
-          className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors shrink-0"
         >
           <span className="text-base leading-none font-bold">+</span>
           Thêm tài khoản
@@ -138,7 +140,7 @@ export function AccountList() {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => setAccounts(removeAccount(account.id))}
+                        onClick={() => setAccountToDelete(account)}
                         className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
                         title={`Xóa tài khoản ${account.username}`}
                       >
@@ -199,6 +201,20 @@ export function AccountList() {
           <strong className="font-semibold">Phân quyền bảo mật:</strong> Chỉ có tài khoản với vai trò Quản trị viên mới có quyền tạo mới, chỉnh sửa thông tin dự án và quản lý tài khoản người dùng khác trong hệ thống.
         </p>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(accountToDelete)}
+        title="Xác nhận xóa tài khoản"
+        description={`Bạn có chắc chắn muốn xóa tài khoản "${accountToDelete?.username}" (${accountToDelete?.email}) không? Người dùng sẽ không thể đăng nhập vào hệ thống sau khi bị xóa.`}
+        confirmText="Xác nhận xóa"
+        onConfirm={() => {
+          if (accountToDelete) {
+            setAccounts(removeAccount(accountToDelete.id));
+            setAccountToDelete(null);
+          }
+        }}
+        onCancel={() => setAccountToDelete(null)}
+      />
     </div>
   );
 }

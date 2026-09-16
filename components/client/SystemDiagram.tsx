@@ -16,10 +16,18 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
+  hydrateClientMeters,
   loadClientMeters,
   type ClientMeter,
 } from "@/lib/client-meters";
-import { loadProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
+import { hydrateProjects, loadProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
+import {
+  clearDiagramState,
+  hydrateDiagramState,
+  loadDiagramState,
+  saveDiagramState,
+  type SavedDiagramState,
+} from "@/lib/diagram-db";
 import { DiagramActionsContext } from "./diagram/context";
 import { MeterNode, NodeGlyph } from "./diagram/nodes";
 import type {
@@ -52,26 +60,13 @@ const NODE_W = 248;
 const H_GAP = 48;
 const V_GAP = 120;
 
+function waitForViewportPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
 // ---------------- Persistence System ----------------
-
-type SavedDiagramState = {
-  positions: Record<string, { x: number; y: number }>;
-  viewport?: { x: number; y: number; zoom: number };
-};
-
-function getStorageKey(projectId: string, energy: string) {
-  return `ems-diagram-layout-${projectId}-${energy}`;
-}
-
-function loadDiagramState(projectId: string, energy: string): SavedDiagramState | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(getStorageKey(projectId, energy));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
 
 function saveDiagramPositions(
   projectId: string,
@@ -79,15 +74,13 @@ function saveDiagramPositions(
   patches: Record<string, { x: number; y: number }>,
 ) {
   if (typeof window === "undefined") return;
-  try {
-    const key = getStorageKey(projectId, energy);
-    const current = loadDiagramState(projectId, energy) ?? { positions: {} };
-    const updated: SavedDiagramState = {
-      ...current,
-      positions: { ...current.positions, ...patches },
-    };
-    window.localStorage.setItem(key, JSON.stringify(updated));
-  } catch {}
+  const current = loadDiagramState(projectId, energy);
+  saveDiagramState({
+    projectId,
+    utility: energy,
+    positions: { ...(current?.positions ?? {}), ...patches },
+    viewport: current?.viewport,
+  });
 }
 
 function saveDiagramViewport(
@@ -96,24 +89,17 @@ function saveDiagramViewport(
   viewport: Viewport,
 ) {
   if (typeof window === "undefined") return;
-  try {
-    const key = getStorageKey(projectId, energy);
-    const current = loadDiagramState(projectId, energy) ?? { positions: {} };
-    const updated: SavedDiagramState = {
-      ...current,
-      viewport: {
-        x: Math.round(viewport.x),
-        y: Math.round(viewport.y),
-        zoom: Number(viewport.zoom.toFixed(3)),
-      },
-    };
-    window.localStorage.setItem(key, JSON.stringify(updated));
-  } catch {}
-}
-
-function clearDiagramState(projectId: string, energy: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(getStorageKey(projectId, energy));
+  const current = loadDiagramState(projectId, energy);
+  saveDiagramState({
+    projectId,
+    utility: energy,
+    positions: current?.positions ?? {},
+    viewport: {
+      x: Math.round(viewport.x),
+      y: Math.round(viewport.y),
+      zoom: Number(viewport.zoom.toFixed(3)),
+    },
+  });
 }
 
 function iconForUtility(utility: string): MeterIcon {
@@ -124,6 +110,12 @@ function iconForUtility(utility: string): MeterIcon {
 }
 
 function demoMetrics(meter: ClientMeter, status: MeterStatus): MeterNodeData["metrics"] {
+  if (!meter.deviceId) {
+    return [
+      { label: "Dữ liệu", value: "Chưa có dữ liệu" },
+      { label: "Trạng thái", value: "Chưa gán đồng hồ" },
+    ];
+  }
   if (meter.utility !== "Điện") {
     if (status === "offline") {
       return [
@@ -260,8 +252,11 @@ function SystemDiagramInner() {
 
   const [energyFilters, setEnergyFilters] = useState<MeterType[]>(() => resolveMeterTypes(null));
   const [energy, setEnergy] = useState<EnergyKind>("Điện");
+  const [projectName, setProjectName] = useState(projectId);
   const [meters, setMeters] = useState<ClientMeter[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [diagramVersion, setDiagramVersion] = useState(0);
+  const [diagramStateReady, setDiagramStateReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [displayOverrides, setDisplayOverrides] = useState<
@@ -269,36 +264,61 @@ function SystemDiagramInner() {
   >({});
   const [nodes, setNodes, onNodesChange] = useNodesState<DiagramNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<DiagramEdge>([]);
-  const { fitView, setCenter, getNode, setViewport } = useReactFlow();
+  const { fitView, setCenter, getNode, getViewport, setViewport } = useReactFlow();
+
+  const saveCurrentViewport = useCallback(() => {
+    saveDiagramViewport(projectId, energy, getViewport());
+  }, [projectId, energy, getViewport]);
+
+  const fitAndSaveViewport = useCallback(async () => {
+    await fitView({ padding: 0.28, duration: 220 });
+    await waitForViewportPaint();
+    saveCurrentViewport();
+  }, [fitView, saveCurrentViewport]);
 
   const reloadMeters = useCallback(() => {
-    const rows = loadClientMeters(projectId);
-    setMeters(rows);
+    void hydrateClientMeters(projectId).then((rows) => setMeters(rows.length ? rows : loadClientMeters(projectId)));
   }, [projectId]);
 
   useEffect(() => {
-    const project = loadProjects().find((item) => item.id === projectId);
-    const types = resolveMeterTypes(project);
-    setEnergyFilters(types);
-    setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
+    void hydrateProjects().then((projects) => {
+      const project = projects.find((item) => item.id === projectId);
+      setProjectName(project?.name ?? projectId);
+      const types = resolveMeterTypes(project);
+      setEnergyFilters(types);
+      setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
+    });
     reloadMeters();
   }, [projectId, reloadMeters]);
 
   useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === "ems-client-meters") reloadMeters();
-    };
     const onCustom = () => reloadMeters();
-    window.addEventListener("storage", onStorage);
     window.addEventListener("ems-client-meters-changed", onCustom);
     return () => {
-      window.removeEventListener("storage", onStorage);
       window.removeEventListener("ems-client-meters-changed", onCustom);
     };
   }, [reloadMeters]);
 
+  useEffect(() => {
+    let active = true;
+    setDiagramStateReady(false);
+    setNodes([]);
+    setEdges([]);
+    void hydrateDiagramState(projectId, energy)
+      .catch(() => null)
+      .then(() => {
+        if (!active) return;
+        setDiagramStateReady(true);
+        setDiagramVersion((value) => value + 1);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, energy, setNodes, setEdges]);
+
   // Load or build diagram nodes, restoring saved positions & viewport
   useEffect(() => {
+    if (!diagramStateReady) return;
     const filtered = meters.filter((meter) => meter.utility === energy);
     const built = buildFlowFromMeters(filtered);
     const savedState = loadDiagramState(projectId, energy);
@@ -343,7 +363,7 @@ function SystemDiagramInner() {
       return () => cancelAnimationFrame(frame);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meters, energy, displayOverrides, setNodes, setEdges, fitView, setViewport]);
+  }, [meters, energy, displayOverrides, setNodes, setEdges, fitView, setViewport, diagramVersion, diagramStateReady]);
 
   useEffect(() => {
     setNodes((current) =>
@@ -395,6 +415,7 @@ function SystemDiagramInner() {
           energy: meter.utility,
           code: meter.code,
           deviceId: meter.deviceId,
+          serialNumber: meter.serialNumber,
         };
       });
   }, [meters, energy, displayOverrides]);
@@ -453,9 +474,6 @@ function SystemDiagramInner() {
               <h2 className="text-xs font-bold tracking-wider uppercase text-slate-700">
                 Danh sách điểm đo
               </h2>
-              <span className="text-[11px] text-slate-400">
-                {listedPoints.length} điểm loại {energy}
-              </span>
             </div>
             <button
               type="button"
@@ -497,7 +515,11 @@ function SystemDiagramInner() {
                           }`}
                         >
                           {point.code}
-                          {!point.deviceId ? " • Chưa gán TB" : ""}
+                          {point.serialNumber
+                            ? ` • SN: ${point.serialNumber}`
+                            : !point.deviceId
+                              ? " • Chưa gán TB"
+                              : ""}
                         </span>
                       </span>
                       <span
@@ -520,41 +542,23 @@ function SystemDiagramInner() {
         {/* Center: SCADA Canvas */}
         <section className="flex min-w-0 flex-1 flex-col">
           {/* Top Canvas Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 px-6 py-3 bg-white">
-            <div className="flex items-center gap-4">
-              <div>
-                <h1 className="text-base font-bold text-slate-900 leading-tight">Sơ đồ Phân phối Năng lượng</h1>
-                <p className="text-[11px] text-slate-400">
-                  Kéo thả node để sắp xếp vị trí • Vị trí được tự động lưu vĩnh viễn
-                </p>
-              </div>
-
-              {/* Energy Utility Selector */}
-              <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/60 p-1">
-                {energyFilters.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setEnergy(item)}
-                    className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${
-                      energy === item
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-white"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Link
-                href={configHref}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
-              >
-                Cấu hình điểm đo
-              </Link>
+          <div className="flex flex-wrap items-center justify-start gap-4 border-b border-slate-200/80 bg-white px-6 py-3">
+            {/* Energy Utility Selector */}
+            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/60 p-1">
+              {energyFilters.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setEnergy(item)}
+                  className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${
+                    energy === item
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-white hover:text-slate-900"
+                  }`}
+                >
+                  {item}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -611,23 +615,21 @@ function SystemDiagramInner() {
                   </Panel>
                 )}
 
-                {/* Floating Info Guide */}
+                {/* Project diagram title */}
                 <Panel
-                  position="top-left"
-                  className="m-3 max-w-[280px] rounded-xl border border-slate-200/80 bg-white/95 p-3 text-[11px] leading-relaxed text-slate-500 shadow-xs backdrop-blur-sm"
+                  position="top-center"
+                  className="m-3 rounded-xl border border-slate-200/80 bg-white/95 px-5 py-3 text-sm font-semibold text-slate-800 shadow-xs backdrop-blur-sm"
                 >
-                  <p className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <p className="flex items-center gap-2 whitespace-nowrap">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    Bố cục tự do & Tự động lưu
-                  </p>
-                  <p className="mt-1 text-slate-600">
-                    Bạn có thể kéo thả bất kỳ điểm đo nào vào vị trí mong muốn. Hệ thống sẽ tự động lưu vị trí và giữ nguyên khi chuyển trang hoặc tắt trình duyệt.
+                    Sơ đồ hệ thống {projectName}
                   </p>
                 </Panel>
 
                 {/* Floating Controls */}
                 <CanvasControls
-                  onFit={() => fitView({ padding: 0.28, duration: 220 })}
+                  onFit={fitAndSaveViewport}
+                  onZoomChange={saveCurrentViewport}
                   onResetLayout={handleResetLayout}
                   onFullscreen={() => {
                     const el = wrapperRef.current;
@@ -798,10 +800,12 @@ function SettingsField({
 
 function CanvasControls({
   onFit,
+  onZoomChange,
   onResetLayout,
   onFullscreen,
 }: {
-  onFit: () => void;
+  onFit: () => void | Promise<void>;
+  onZoomChange: () => void;
   onResetLayout: () => void;
   onFullscreen: () => void;
 }) {
@@ -809,13 +813,27 @@ function CanvasControls({
 
   return (
     <Panel position="bottom-right" className="m-4 flex flex-col gap-2 font-sans">
-      <ControlButton label="Phóng to (+)" onClick={() => zoomIn({ duration: 160 })}>
+      <ControlButton
+        label="Phóng to (+)"
+        onClick={async () => {
+          await zoomIn({ duration: 160 });
+          await waitForViewportPaint();
+          onZoomChange();
+        }}
+      >
         +
       </ControlButton>
-      <ControlButton label="Thu nhỏ (-)" onClick={() => zoomOut({ duration: 160 })}>
+      <ControlButton
+        label="Thu nhỏ (-)"
+        onClick={async () => {
+          await zoomOut({ duration: 160 });
+          await waitForViewportPaint();
+          onZoomChange();
+        }}
+      >
         −
       </ControlButton>
-      <ControlButton label="Vừa khung hình" onClick={onFit}>
+      <ControlButton label="Vừa khung hình" onClick={() => void onFit()}>
         <FitIcon className="h-4 w-4" />
       </ControlButton>
       <ControlButton label="Đặt lại vị trí mặc định" onClick={onResetLayout}>

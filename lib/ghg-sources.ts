@@ -1,8 +1,11 @@
+import { dbFetch, emitDbChange } from "@/lib/db-client";
+
 export type ScopeId = 1 | 2 | 3;
 export type GhgInputMethod = "meter" | "manual" | "file";
 
 export type GhgEmissionSource = {
   id: string;
+  projectId?: string;
   scope: ScopeId;
   name: string;
   method: GhgInputMethod;
@@ -10,6 +13,8 @@ export type GhgEmissionSource = {
   factorValue: number;
   formula: string;
   appliedAt: string;
+  /** Điểm đo được chọn làm dữ liệu hoạt động cho nguồn phát thải */
+  meterPointId?: string;
   /** tấn CO₂e demo — dùng trang tổng quan */
   tons?: number;
 };
@@ -28,7 +33,9 @@ export function scopeColor(scope: ScopeId) {
   return GHG_SCOPES.find((item) => item.id === scope)?.color ?? "#64748b";
 }
 
-const STORAGE_KEY = "ems-ghg-sources";
+let ghgSourcesCache: GhgEmissionSource[] = [];
+const ghgSourcesByProject: Record<string, GhgEmissionSource[]> = {};
+const ghgHydration = new Map<string, Promise<GhgEmissionSource[]>>();
 
 export const INITIAL_GHG_SOURCES: GhgEmissionSource[] = [
   {
@@ -99,20 +106,42 @@ export const INITIAL_GHG_SOURCES: GhgEmissionSource[] = [
   },
 ];
 
-export function loadGhgSources(): GhgEmissionSource[] {
-  if (typeof window === "undefined") return INITIAL_GHG_SOURCES;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return INITIAL_GHG_SOURCES;
-    const parsed = JSON.parse(raw) as GhgEmissionSource[];
-    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_GHG_SOURCES;
-  } catch {
-    return INITIAL_GHG_SOURCES;
-  }
+export function loadGhgSources(projectId?: string): GhgEmissionSource[] {
+  if (projectId && ghgSourcesByProject[projectId]) return ghgSourcesByProject[projectId]!;
+  return ghgSourcesCache.length ? ghgSourcesCache : INITIAL_GHG_SOURCES;
 }
 
-export function saveGhgSources(sources: GhgEmissionSource[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sources));
+export function saveGhgSources(sources: GhgEmissionSource[], projectId?: string) {
+  ghgSourcesCache = sources;
+  emitDbChange("ghg-sources");
+  const resolvedProjectId = projectId ?? sources[0]?.projectId;
+  if (!resolvedProjectId) return;
+  ghgSourcesByProject[resolvedProjectId] = sources;
+  void dbFetch("ghg-sources", {
+    method: "POST",
+    body: JSON.stringify({ projectId: resolvedProjectId, sources }),
+  }).catch((error) => console.error("Không thể lưu nguồn GHG", error));
+}
+
+export function hydrateGhgSources(projectId?: string) {
+  if (typeof window === "undefined") return Promise.resolve(loadGhgSources());
+  const key = projectId ?? "all";
+  const active = ghgHydration.get(key);
+  if (active) return active;
+  const request = dbFetch<GhgEmissionSource[]>("ghg-sources", {
+    query: { projectId },
+  })
+    .then((sources) => {
+      ghgSourcesCache = sources;
+      if (projectId) ghgSourcesByProject[projectId] = sources;
+      emitDbChange("ghg-sources");
+      return sources;
+    })
+    .finally(() => {
+      ghgHydration.delete(key);
+    });
+  ghgHydration.set(key, request);
+  return request;
 }
 
 /** Gán tấn CO₂e demo nếu nguồn cấu hình chưa có */

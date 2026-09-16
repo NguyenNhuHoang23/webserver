@@ -1,4 +1,5 @@
 import { DEFAULT_PASSWORD } from "@/lib/auth-constants";
+import { dbFetch, emitDbChange } from "@/lib/db-client";
 import { loadProjects } from "@/lib/projects";
 
 export type CustomerAccount = {
@@ -10,7 +11,8 @@ export type CustomerAccount = {
   password?: string;
 };
 
-const STORAGE_KEY = "ems-customer-accounts";
+let customerAccountsCache: CustomerAccount[] = [];
+let customerAccountsHydration: Promise<CustomerAccount[]> | null = null;
 
 export const INITIAL_CUSTOMER_ACCOUNTS: CustomerAccount[] = [
   {
@@ -47,19 +49,35 @@ export function defaultCustomerAccount(project: {
 }
 
 export function loadCustomerAccounts(): CustomerAccount[] {
-  if (typeof window === "undefined") return INITIAL_CUSTOMER_ACCOUNTS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return INITIAL_CUSTOMER_ACCOUNTS;
-    const parsed = JSON.parse(raw) as CustomerAccount[];
-    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_CUSTOMER_ACCOUNTS;
-  } catch {
-    return INITIAL_CUSTOMER_ACCOUNTS;
-  }
+  return customerAccountsCache.length ? customerAccountsCache : INITIAL_CUSTOMER_ACCOUNTS;
 }
 
 export function saveCustomerAccounts(accounts: CustomerAccount[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
+  customerAccountsCache = accounts;
+  emitDbChange("customer-accounts");
+  for (const account of accounts) {
+    void dbFetch("customer-accounts", {
+      method: "POST",
+      body: JSON.stringify(account),
+    }).catch((error) => console.error("Không thể lưu tài khoản khách hàng", error));
+  }
+}
+
+export function hydrateCustomerAccounts(projectId?: string) {
+  if (typeof window === "undefined") return Promise.resolve(loadCustomerAccounts());
+  if (customerAccountsHydration) return customerAccountsHydration;
+  customerAccountsHydration = dbFetch<CustomerAccount[]>("customer-accounts", {
+    query: { projectId },
+  })
+    .then((accounts) => {
+      customerAccountsCache = accounts.length ? accounts : INITIAL_CUSTOMER_ACCOUNTS;
+      emitDbChange("customer-accounts");
+      return customerAccountsCache;
+    })
+    .finally(() => {
+      customerAccountsHydration = null;
+    });
+  return customerAccountsHydration;
 }
 
 export function upsertCustomerAccount(account: CustomerAccount) {

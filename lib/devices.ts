@@ -1,3 +1,5 @@
+import { dbFetch, emitDbChange } from "@/lib/db-client";
+
 export type DeviceKind = "power" | "flow" | "temp" | "steam";
 export type DeviceStatus = "active" | "maintenance" | "offline";
 
@@ -32,7 +34,8 @@ export type CatalogDevice = {
   registers?: DeviceRegister[];
 };
 
-const STORAGE_KEY = "ems-devices";
+let devicesCache: CatalogDevice[] = [];
+let devicesHydration: Promise<CatalogDevice[]> | null = null;
 
 const seeds: CatalogDevice[] = [
   {
@@ -168,19 +171,31 @@ export function deviceSpec(device: CatalogDevice) {
 }
 
 export function loadDevices(): CatalogDevice[] {
-  if (typeof window === "undefined") return INITIAL_DEVICES;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return INITIAL_DEVICES;
-    const parsed = JSON.parse(raw) as CatalogDevice[];
-    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_DEVICES;
-  } catch {
-    return INITIAL_DEVICES;
-  }
+  return devicesCache.length ? devicesCache : INITIAL_DEVICES;
 }
 
 export function saveDevices(devices: CatalogDevice[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(devices));
+  devicesCache = devices;
+  emitDbChange("devices");
+  void dbFetch("devices", {
+    method: "POST",
+    body: JSON.stringify({ items: devices }),
+  }).catch((error) => console.error("Không thể lưu thiết bị", error));
+}
+
+export function hydrateDevices() {
+  if (typeof window === "undefined") return Promise.resolve(loadDevices());
+  if (devicesHydration) return devicesHydration;
+  devicesHydration = dbFetch<CatalogDevice[]>("devices")
+    .then((devices) => {
+      devicesCache = devices.length ? devices : INITIAL_DEVICES;
+      emitDbChange("devices");
+      return devicesCache;
+    })
+    .finally(() => {
+      devicesHydration = null;
+    });
+  return devicesHydration;
 }
 
 export function upsertDevice(device: CatalogDevice) {

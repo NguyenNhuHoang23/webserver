@@ -1,7 +1,9 @@
+import { dbFetch, emitDbChange } from "@/lib/db-client";
+
 export type GasKey = "co2" | "ch4" | "n2o";
 
 export type GasValue = {
-  key: GasKey;
+  key: GasKey | string;
   label: string;
   value: number;
   unit: string;
@@ -17,7 +19,8 @@ export type FactorGroup = {
 export const SOURCE_2626 =
   "Quyết định số 2626/QĐ-BTNMT ngày 10/10/2022, Phụ lục I";
 
-const STORAGE_KEY = "ems-emission-factors";
+let factorGroupsCache: FactorGroup[] = [];
+let factorsHydration: Promise<FactorGroup[]> | null = null;
 
 export const INITIAL_FACTOR_GROUPS: FactorGroup[] = [
   {
@@ -100,19 +103,33 @@ export function formatFactorValue(value: number) {
 }
 
 export function loadFactorGroups(): FactorGroup[] {
-  if (typeof window === "undefined") return INITIAL_FACTOR_GROUPS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return INITIAL_FACTOR_GROUPS;
-    const parsed = JSON.parse(raw) as FactorGroup[];
-    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_FACTOR_GROUPS;
-  } catch {
-    return INITIAL_FACTOR_GROUPS;
-  }
+  return factorGroupsCache.length ? factorGroupsCache : INITIAL_FACTOR_GROUPS;
 }
 
 export function saveFactorGroups(groups: FactorGroup[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
+  factorGroupsCache = groups;
+  emitDbChange("emission-factors");
+  for (const group of groups) {
+    void dbFetch("emission-factors", {
+      method: "POST",
+      body: JSON.stringify(group),
+    }).catch((error) => console.error("Không thể lưu hệ số phát thải", error));
+  }
+}
+
+export function hydrateFactorGroups() {
+  if (typeof window === "undefined") return Promise.resolve(loadFactorGroups());
+  if (factorsHydration) return factorsHydration;
+  factorsHydration = dbFetch<FactorGroup[]>("emission-factors")
+    .then((groups) => {
+      factorGroupsCache = groups.length ? groups : INITIAL_FACTOR_GROUPS;
+      emitDbChange("emission-factors");
+      return factorGroupsCache;
+    })
+    .finally(() => {
+      factorsHydration = null;
+    });
+  return factorsHydration;
 }
 
 export function upsertFactorGroup(group: FactorGroup) {
@@ -136,7 +153,7 @@ export type LibraryFactor = {
   groupId: string;
   name: string;
   source: string;
-  gasKey: GasKey;
+  gasKey: GasKey | string;
   gasLabel: string;
   value: number;
   unit: string;

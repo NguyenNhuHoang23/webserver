@@ -1,3 +1,5 @@
+import { dbFetch, emitDbChange } from "@/lib/db-client";
+
 export type AccountRole =
   | "Quản trị viên"
   | "Kỹ sư vận hành"
@@ -20,7 +22,8 @@ export const ACCOUNT_ROLES: AccountRole[] = [
   "Nhân viên kỹ thuật",
 ];
 
-const STORAGE_KEY = "ems-accounts";
+let accountsCache: Account[] = [];
+let accountsHydration: Promise<Account[]> | null = null;
 
 export const INITIAL_ACCOUNTS: Account[] = [
   {
@@ -110,19 +113,31 @@ export const INITIAL_ACCOUNTS: Account[] = [
 ];
 
 export function loadAccounts(): Account[] {
-  if (typeof window === "undefined") return INITIAL_ACCOUNTS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return INITIAL_ACCOUNTS;
-    const parsed = JSON.parse(raw) as Account[];
-    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_ACCOUNTS;
-  } catch {
-    return INITIAL_ACCOUNTS;
-  }
+  return accountsCache.length ? accountsCache : INITIAL_ACCOUNTS;
 }
 
 export function saveAccounts(accounts: Account[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
+  accountsCache = accounts;
+  emitDbChange("accounts");
+  void dbFetch("accounts", {
+    method: "POST",
+    body: JSON.stringify({ items: accounts }),
+  }).catch((error) => console.error("Không thể lưu tài khoản", error));
+}
+
+export function hydrateAccounts() {
+  if (typeof window === "undefined") return Promise.resolve(loadAccounts());
+  if (accountsHydration) return accountsHydration;
+  accountsHydration = dbFetch<Account[]>("accounts")
+    .then((accounts) => {
+      accountsCache = accounts.length ? accounts : INITIAL_ACCOUNTS;
+      emitDbChange("accounts");
+      return accountsCache;
+    })
+    .finally(() => {
+      accountsHydration = null;
+    });
+  return accountsHydration;
 }
 
 export function upsertAccount(account: Account) {

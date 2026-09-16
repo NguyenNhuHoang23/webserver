@@ -1,3 +1,5 @@
+import { dbFetch, emitDbChange } from "@/lib/db-client";
+
 export type ProjectStatus = "active" | "maintenance" | "paused";
 /** Loại năng lượng / điểm đo — có thể mở rộng (vd: Khí nén) từ cấu hình dự án */
 export type MeterType = string;
@@ -24,17 +26,20 @@ export type Project = {
   phone?: string;
   email?: string;
   address?: string;
+  logoUrl?: string;
   meterTypes?: MeterType[];
   recipients?: AlertRecipient[];
 };
 
 export function resolveMeterTypes(project?: Pick<Project, "meterTypes"> | null): MeterType[] {
-  const list = project?.meterTypes?.filter(Boolean);
-  if (list && list.length > 0) return list;
+  if (project && Array.isArray(project.meterTypes)) {
+    return Array.from(new Set(project.meterTypes.filter(Boolean)));
+  }
   return [...METER_TYPES];
 }
 
-const STORAGE_KEY = "ems-projects";
+let projectsCache: Project[] = [];
+let projectsHydration: Promise<Project[]> | null = null;
 const ACCENTS = ["#1a73e8", "#0f9d58", "#7c3aed", "#ea580c", "#0284c7", "#0d9488", "#dc2626", "#2563eb"];
 
 export const INITIAL_PROJECTS: Project[] = [
@@ -166,7 +171,7 @@ export const INITIAL_PROJECTS: Project[] = [
 export const projects = INITIAL_PROJECTS;
 
 export function getProject(id: string) {
-  const found = INITIAL_PROJECTS.find((project) => project.id === id);
+  const found = projectsCache.find((project) => project.id === id) ?? INITIAL_PROJECTS.find((project) => project.id === id);
   if (found) return found;
   if (/^PRJ-/i.test(id)) {
     return {
@@ -183,28 +188,43 @@ export function getProject(id: string) {
 }
 
 export function loadProjects(): Project[] {
-  if (typeof window === "undefined") return INITIAL_PROJECTS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return INITIAL_PROJECTS;
-    const parsed = JSON.parse(raw) as Project[];
-    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_PROJECTS;
-  } catch {
-    return INITIAL_PROJECTS;
-  }
+  return projectsCache.length ? projectsCache : INITIAL_PROJECTS;
 }
 
-export function saveProjects(list: Project[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+export async function saveProjects(list: Project[]) {
+  projectsCache = list;
+  emitDbChange("projects");
+  const persisted = await dbFetch<Project[]>("projects", {
+    method: "POST",
+    body: JSON.stringify({ items: list }),
+  });
+  projectsCache = persisted;
+  emitDbChange("projects");
+  return persisted;
 }
 
-export function upsertProject(project: Project) {
+export function hydrateProjects() {
+  if (typeof window === "undefined") return Promise.resolve(loadProjects());
+  if (projectsHydration) return projectsHydration;
+  projectsHydration = dbFetch<Project[]>("projects")
+    .then((projects) => {
+      projectsCache = projects.length ? projects : INITIAL_PROJECTS;
+      emitDbChange("projects");
+      return projectsCache;
+    })
+    .finally(() => {
+      projectsHydration = null;
+    });
+  return projectsHydration;
+}
+
+export async function upsertProject(project: Project) {
   const list = loadProjects();
   const exists = list.some((item) => item.id === project.id);
   const next = exists
     ? list.map((item) => (item.id === project.id ? project : item))
     : [project, ...list];
-  saveProjects(next);
+  await saveProjects(next);
   return next;
 }
 

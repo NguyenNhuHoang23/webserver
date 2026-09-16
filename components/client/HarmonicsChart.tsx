@@ -6,7 +6,6 @@ const N = 160;
 const T0 = Date.parse("2026-01-27T09:40:00");
 const CHANNELS = [1, 2, 3] as const;
 const AGGS = ["MAX", "AVG", "MIN"] as const;
-const MODES = ["Level", "%fnd", "Phase(AVG)"] as const;
 const ORDERS = [3, 5, 7, 9, 11, 13] as const;
 const PHASES = [
   { ch: 1, u: "U12", i: "I1", color: "#e53935", dark: "#9b1c1c" },
@@ -16,7 +15,7 @@ const PHASES = [
 
 type Channel = (typeof CHANNELS)[number];
 type Agg = (typeof AGGS)[number];
-type Mode = (typeof MODES)[number];
+type ThduComponent = "up" | "ud";
 type Series = { key: string; name: string; color: string; values: number[] };
 
 function toggleIn<T>(list: T[], value: T) {
@@ -46,7 +45,7 @@ function smoothPath(pts: [number, number][]) {
   return d;
 }
 
-function thdWave(i: number, ch: Channel, agg: Agg, seed: number) {
+function thdWave(i: number, ch: Channel, agg: Agg, seed: number, component: ThduComponent = "up") {
   const t = (i / (N - 1)) * 240;
   const phase = ch * 0.85;
   let v =
@@ -56,10 +55,23 @@ function thdWave(i: number, ch: Channel, agg: Agg, seed: number) {
     0.025 * Math.sin(t / 16 + phase);
   if (agg === "MAX") v += 0.05;
   if (agg === "MIN") v -= 0.05;
-  return v;
+  return component === "ud" ? Math.max(0.2, v * 0.34) : v;
 }
 
-function uHarmWave(i: number, ch: Channel, order: number, agg: Agg, seed: number, mode: Mode) {
+function thdiWave(i: number, ch: Channel, agg: Agg, seed: number) {
+  const t = (i / (N - 1)) * 240;
+  const phase = ch * 0.95;
+  let v =
+    4.9 +
+    (ch - 1) * 0.16 +
+    0.24 * Math.sin(t / 42 + phase + seed * 0.18) +
+    0.12 * Math.sin(t / 15 + phase * 0.65);
+  if (agg === "MAX") v += 0.25;
+  if (agg === "MIN") v -= 0.25;
+  return Math.max(0.1, v);
+}
+
+function uHarmWave(i: number, ch: Channel, order: number, agg: Agg, seed: number) {
   const t = (i / (N - 1)) * 240;
   const phase = ch * 0.55 + order * 0.18;
   const base =
@@ -70,12 +82,10 @@ function uHarmWave(i: number, ch: Channel, order: number, agg: Agg, seed: number
     0.16 * Math.sin(t / 14 + phase * 0.7);
   if (agg === "MAX") v += 0.35;
   if (agg === "MIN") v -= 0.35;
-  if (mode === "%fnd") return Number((v / 3.9).toFixed(3));
-  if (mode === "Phase(AVG)") return (ch - 2) * 118 + 6 * Math.sin(t / 36 + phase);
   return Math.max(0, v);
 }
 
-function iHarmWave(i: number, ch: Channel, order: number, agg: Agg, seed: number, mode: Mode) {
+function iHarmWave(i: number, ch: Channel, order: number, agg: Agg, seed: number) {
   const t = (i / (N - 1)) * 240;
   const phase = ch * 0.9 + order * 0.25;
   const base = order === 5 ? 24 : order === 3 ? 18 : order === 7 ? 13 : 8 - (order - 9) * 0.6;
@@ -86,8 +96,6 @@ function iHarmWave(i: number, ch: Channel, order: number, agg: Agg, seed: number
     4.5 * Math.sin(t * 0.55 + phase * 1.4);
   if (agg === "MAX") v *= 1.12;
   if (agg === "MIN") v *= 0.82;
-  if (mode === "%fnd") return Number(Math.max(0, v / 6.2).toFixed(3));
-  if (mode === "Phase(AVG)") return (ch - 2) * 110 + 14 * Math.sin(t / 20 + phase);
   return Math.max(0.4, v);
 }
 
@@ -95,13 +103,13 @@ function orderColor(phase: (typeof PHASES)[number], order: number) {
   return order <= 5 ? phase.color : phase.dark;
 }
 
-function harmDomain(mode: Mode, kind: "u" | "i"): { domain: [number, number]; ticks: number[]; unit: string } {
-  if (mode === "Phase(AVG)") return { domain: [-180, 180], ticks: [-180, -90, 0, 90, 180], unit: "[deg]" };
-  if (mode === "%fnd") {
-    return kind === "u"
-      ? { domain: [0, 5], ticks: [0, 1, 2, 3, 4, 5], unit: "[%]" }
-      : { domain: [0, 8], ticks: [0, 2, 4, 6, 8], unit: "[%]" };
-  }
+function harmDomain(kind: "u" | "i"): { domain: [number, number]; ticks: number[]; unit: string } {
+  return kind === "u"
+    ? { domain: [0, 6], ticks: [0, 2, 4, 6], unit: "[%]" }
+    : { domain: [0, 8], ticks: [0, 2, 4, 6, 8], unit: "[%]" };
+}
+
+function peakHarmDomain(kind: "u" | "i"): { domain: [number, number]; ticks: number[]; unit: string } {
   return kind === "u"
     ? { domain: [0, 15], ticks: [0, 5, 10, 15], unit: "[V]" }
     : { domain: [0, 40], ticks: [0, 10, 20, 30, 40], unit: "[A]" };
@@ -109,14 +117,10 @@ function harmDomain(mode: Mode, kind: "u" | "i"): { domain: [number, number]; ti
 
 export function HarmonicsChart({ seed }: { seed: number }) {
   const [tab, setTab] = useState<"trend" | "peak">("trend");
-  const [thdQty, setThdQty] = useState("U thd-f");
-  const [uQty, setUQty] = useState("U harm");
-  const [iQty, setIQty] = useState("I harm");
-  const [thdCh, setThdCh] = useState<Channel[]>([1, 2, 3]);
-  const [uCh, setUCh] = useState<Channel[]>([1, 2, 3]);
-  const [iCh, setICh] = useState<Channel[]>([1, 2, 3]);
-  const [uMode, setUMode] = useState<Mode>("Level");
-  const [iMode, setIMode] = useState<Mode>("Level");
+  const [thduComponents, setThduComponents] = useState<ThduComponent[]>(["up"]);
+  const [thduChannels, setThduChannels] = useState<Channel[]>([1, 2, 3]);
+  const [thdiChannels, setThdiChannels] = useState<Channel[]>([1, 2, 3]);
+  const [thduSum, setThduSum] = useState(false);
   const [aggs, setAggs] = useState<Agg[]>(["AVG"]);
   const [orders, setOrders] = useState<number[]>([5, 7]);
   const [orderOpen, setOrderOpen] = useState(false);
@@ -124,55 +128,56 @@ export function HarmonicsChart({ seed }: { seed: number }) {
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
 
-  const thdSeries = useMemo<Series[]>(
+  const thduSeries = useMemo<Series[]>(
+    () => {
+      if (thduSum) {
+        return aggs.map((agg) => ({
+          key: `thdu-sum-${agg}`,
+          name: `THDu Sum ${agg}`,
+          color: "#0f9f6e",
+          values: Array.from({ length: N }, (_, i) => {
+            const samples = thduChannels.flatMap((ch) =>
+              thduComponents.map((component) => thdWave(i, ch, agg, seed, component)),
+            );
+            return Math.sqrt(samples.reduce((sum, value) => sum + value ** 2, 0) / Math.max(samples.length, 1));
+          }),
+        }));
+      }
+
+      return thduComponents.flatMap((component) =>
+        thduChannels.flatMap((ch) => {
+          const phase = PHASES[ch - 1];
+          return aggs.map((agg) => ({
+            key: `thdu-${component}-${ch}-${agg}`,
+            name: `${phase.u} ${component === "up" ? "Up" : "Ud"} ${agg}`,
+            color: component === "up" ? phase.color : phase.dark,
+            values: Array.from({ length: N }, (_, i) => thdWave(i, ch, agg, seed, component)),
+          }));
+        }),
+      );
+    },
+    [thduChannels, thduComponents, thduSum, aggs, seed],
+  );
+
+  const thdiSeries = useMemo<Series[]>(
     () =>
-      thdCh.flatMap((ch) => {
+      thdiChannels.flatMap((ch) => {
         const phase = PHASES[ch - 1];
         return aggs.map((agg) => ({
-          key: `thd-${ch}-${agg}`,
-          name: `${phase.u} thd-f ${agg}`,
+          key: `thdi-${ch}-${agg}`,
+          name: `${phase.i} THDi ${agg}`,
           color: phase.color,
-          values: Array.from({ length: N }, (_, i) => thdWave(i, ch, agg, seed)),
+          values: Array.from({ length: N }, (_, i) => thdiWave(i, ch, agg, seed)),
         }));
       }),
-    [thdCh, aggs, seed],
+    [thdiChannels, aggs, seed],
   );
 
-  const uSeries = useMemo<Series[]>(
-    () =>
-      uCh.flatMap((ch) => {
-        const phase = PHASES[ch - 1];
-        return orders.flatMap((order) =>
-          aggs.map((agg) => ({
-            key: `uh-${ch}-${order}-${agg}`,
-            name: `${phase.u} H${order} ${agg}`,
-            color: orderColor(phase, order),
-            values: Array.from({ length: N }, (_, i) => uHarmWave(i, ch, order, agg, seed, uMode)),
-          })),
-        );
-      }),
-    [uCh, orders, aggs, seed, uMode],
-  );
-
-  const iSeries = useMemo<Series[]>(
-    () =>
-      iCh.flatMap((ch) => {
-        const phase = PHASES[ch - 1];
-        return orders.flatMap((order) =>
-          aggs.map((agg) => ({
-            key: `ih-${ch}-${order}-${agg}`,
-            name: `${phase.i} H${order} ${agg}`,
-            color: orderColor(phase, order),
-            values: Array.from({ length: N }, (_, i) => iHarmWave(i, ch, order, agg, seed, iMode)),
-          })),
-        );
-      }),
-    [iCh, orders, aggs, seed, iMode],
-  );
-
-  const legend = [...thdSeries, ...uSeries, ...iSeries];
-  const uScale = harmDomain(uMode, "u");
-  const iScale = harmDomain(iMode, "i");
+  const legend = [...thduSeries, ...thdiSeries];
+  const thduScale = harmDomain("u");
+  const thdiScale = harmDomain("i");
+  const peakUScale = peakHarmDomain("u");
+  const peakIScale = peakHarmDomain("i");
 
   const span = viewWin.end - viewWin.start;
   const zoomIn = () => {
@@ -221,14 +226,44 @@ export function HarmonicsChart({ seed }: { seed: number }) {
       <div className="mb-3 rounded border border-slate-300 bg-slate-50/80 px-3 py-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1.5">
-            <QtyRow qty={thdQty} onQty={setThdQty} options={["U thd-f", "U thd-r", "I thd-f"]} channels={thdCh} onChannel={(ch) => setThdCh((list) => toggleIn(list, ch))} />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <QtyRow qty={uQty} onQty={setUQty} options={["U harm", "U thd-f"]} channels={uCh} onChannel={(ch) => setUCh((list) => toggleIn(list, ch))} />
-              <ModeRadios name="u-harm-mode" value={uMode} onChange={setUMode} />
+              <span className="w-12 text-[12px] font-semibold text-slate-700">THDu:</span>
+              <Check
+                checked={thduComponents.includes("up")}
+                onChange={() => setThduComponents((list) => toggleIn(list, "up"))}
+              >
+                Up
+              </Check>
+              <Check
+                checked={thduComponents.includes("ud")}
+                onChange={() => setThduComponents((list) => toggleIn(list, "ud"))}
+              >
+                Ud
+              </Check>
+              <Check checked={thduSum} onChange={() => setThduSum((checked) => !checked)}>
+                Sum
+              </Check>
+              {CHANNELS.map((ch) => (
+                <Check
+                  key={`thdu-${ch}`}
+                  checked={thduChannels.includes(ch)}
+                  onChange={() => setThduChannels((list) => toggleIn(list, ch))}
+                >
+                  {ch}
+                </Check>
+              ))}
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <QtyRow qty={iQty} onQty={setIQty} options={["I harm", "I thd-f"]} channels={iCh} onChannel={(ch) => setICh((list) => toggleIn(list, ch))} />
-              <ModeRadios name="i-harm-mode" value={iMode} onChange={setIMode} />
+              <span className="w-12 text-[12px] font-semibold text-slate-700">THDi:</span>
+              {CHANNELS.map((ch) => (
+                <Check
+                  key={`thdi-${ch}`}
+                  checked={thdiChannels.includes(ch)}
+                  onChange={() => setThdiChannels((list) => toggleIn(list, ch))}
+                >
+                  {ch}
+                </Check>
+              ))}
             </div>
           </div>
           <div className="flex items-center gap-3 pt-0.5">
@@ -300,40 +335,29 @@ export function HarmonicsChart({ seed }: { seed: number }) {
               </span>
             </div>
             <HarmPane
-              title={`${thdQty} [%]`}
-              series={thdSeries}
+              title={`THDu ${thduScale.unit}`}
+              series={thduSeries}
               viewWin={viewWin}
               hover={crosshair ? hover : null}
               onHover={setHover}
-              domain={[3.5, 4.5]}
-              ticks={[3.5, 4.0, 4.5]}
-              formatTick={(v) => v.toFixed(1)}
-            />
-            <div className="h-px bg-slate-400" />
-            <HarmPane
-              title={`${uQty} ${uScale.unit}`}
-              series={uSeries}
-              viewWin={viewWin}
-              hover={crosshair ? hover : null}
-              onHover={setHover}
-              domain={uScale.domain}
-              ticks={uScale.ticks}
+              domain={thduScale.domain}
+              ticks={thduScale.ticks}
               formatTick={(v) => String(v)}
             />
             <div className="h-px bg-slate-400" />
             <HarmPane
-              title={`${iQty} ${iScale.unit}`}
-              series={iSeries}
+              title={`THDi ${thdiScale.unit}`}
+              series={thdiSeries}
               viewWin={viewWin}
               hover={crosshair ? hover : null}
               onHover={setHover}
-              domain={iScale.domain}
-              ticks={iScale.ticks}
+              domain={thdiScale.domain}
+              ticks={thdiScale.ticks}
               formatTick={(v) => String(v)}
               axis
             />
           </div>
-          <ul className="h-[546px] w-[132px] shrink-0 overflow-y-auto py-2 text-[11px] leading-5">
+          <ul className="h-[364px] w-[132px] shrink-0 overflow-y-auto py-2 text-[11px] leading-5">
             {legend.map((s) => (
               <li key={s.key} className="flex items-center gap-1.5">
                 <span className="h-0.5 w-5 shrink-0" style={{ backgroundColor: s.color }} />
@@ -350,18 +374,16 @@ export function HarmonicsChart({ seed }: { seed: number }) {
           </ul>
         </div>
       ) : (
-        <PeakLevelView
-          uCh={uCh}
-          iCh={iCh}
+        <PeakOrderView
+          uCh={thduChannels}
+          iCh={thdiChannels}
           orders={orders}
           aggs={aggs}
           seed={seed}
-          uMode={uMode}
-          iMode={iMode}
-          uTitle={`${uQty} ${uScale.unit}`}
-          iTitle={`${iQty} ${iScale.unit}`}
-          uDomain={uScale.domain}
-          iDomain={iScale.domain}
+          uTitle={`U harmonic ${peakUScale.unit}`}
+          iTitle={`I harmonic ${peakIScale.unit}`}
+          uDomain={peakUScale.domain}
+          iDomain={peakIScale.domain}
         />
       )}
 
@@ -380,67 +402,6 @@ export function HarmonicsChart({ seed }: { seed: number }) {
         </ToolBtn>
       </div>
     </section>
-  );
-}
-
-function QtyRow({
-  qty,
-  onQty,
-  options,
-  channels,
-  onChannel,
-}: {
-  qty: string;
-  onQty: (value: string) => void;
-  options: string[];
-  channels: Channel[];
-  onChannel: (ch: Channel) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-[12px] text-slate-600">
-      <select
-        value={qty}
-        onChange={(e) => onQty(e.target.value)}
-        className="h-7 rounded border border-slate-300 bg-white px-2 text-[12px] text-slate-700"
-      >
-        {options.map((opt) => (
-          <option key={opt}>{opt}</option>
-        ))}
-      </select>
-      <span className="text-slate-400">CH</span>
-      {CHANNELS.map((ch) => (
-        <Check key={ch} checked={channels.includes(ch)} onChange={() => onChannel(ch)}>
-          {ch}
-        </Check>
-      ))}
-    </div>
-  );
-}
-
-function ModeRadios({
-  name,
-  value,
-  onChange,
-}: {
-  name: string;
-  value: Mode;
-  onChange: (mode: Mode) => void;
-}) {
-  return (
-    <div className="flex items-center gap-3 text-[12px] text-slate-600">
-      {MODES.map((mode) => (
-        <label key={mode} className="inline-flex cursor-pointer items-center gap-1">
-          <input
-            type="radio"
-            name={name}
-            checked={value === mode}
-            onChange={() => onChange(mode)}
-            className="accent-emerald-600"
-          />
-          {mode}
-        </label>
-      ))}
-    </div>
   );
 }
 
@@ -567,14 +528,12 @@ function HarmPane({
   );
 }
 
-function PeakLevelView({
+function PeakOrderView({
   uCh,
   iCh,
   orders,
   aggs,
   seed,
-  uMode,
-  iMode,
   uTitle,
   iTitle,
   uDomain,
@@ -585,8 +544,6 @@ function PeakLevelView({
   orders: number[];
   aggs: Agg[];
   seed: number;
-  uMode: Mode;
-  iMode: Mode;
   uTitle: string;
   iTitle: string;
   uDomain: [number, number];
@@ -602,7 +559,7 @@ function PeakLevelView({
         orders={showOrders}
         highlight={orders}
         values={(ch, order) => {
-          const samples = Array.from({ length: N }, (_, i) => uHarmWave(i, ch, order, aggs[0], seed, uMode));
+          const samples = Array.from({ length: N }, (_, i) => uHarmWave(i, ch, order, aggs[0], seed));
           return Math.max(...samples);
         }}
         kind="u"
@@ -615,7 +572,7 @@ function PeakLevelView({
         orders={showOrders}
         highlight={orders}
         values={(ch, order) => {
-          const samples = Array.from({ length: N }, (_, i) => iHarmWave(i, ch, order, aggs[0], seed, iMode));
+          const samples = Array.from({ length: N }, (_, i) => iHarmWave(i, ch, order, aggs[0], seed));
           return Math.max(...samples);
         }}
         kind="i"

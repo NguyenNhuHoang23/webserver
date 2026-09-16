@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   ACCOUNT_ROLES,
+  hydrateAccounts,
   loadAccounts,
   todayLabel,
   upsertAccount,
@@ -32,19 +33,26 @@ export function AddAccountForm() {
       setExisting(null);
       return;
     }
-    const found = loadAccounts().find((item) => item.id === editingId);
-    if (!found) {
-      setIsEdit(false);
-      setExisting(null);
-      return;
-    }
-    setIsEdit(true);
-    setExisting(found);
-    setUsername(found.username);
-    setEmail(found.email);
-    setRole(found.role);
-    setCreatedAt(found.createdAt);
-    setPassword("");
+    let active = true;
+    void hydrateAccounts().then((accounts) => {
+      if (!active) return;
+      const found = accounts.find((item) => item.id === editingId);
+      if (!found) {
+        setIsEdit(false);
+        setExisting(null);
+        return;
+      }
+      setIsEdit(true);
+      setExisting(found);
+      setUsername(found.username);
+      setEmail(found.email);
+      setRole(found.role);
+      setCreatedAt(found.createdAt);
+      setPassword("");
+    });
+    return () => {
+      active = false;
+    };
   }, [editingId]);
 
   function handleSubmit() {

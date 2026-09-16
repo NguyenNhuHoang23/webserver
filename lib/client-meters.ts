@@ -1,3 +1,5 @@
+import { dbFetch, emitDbChange } from "@/lib/db-client";
+
 /** Điểm đo khách hàng — cây cha-con + gán thiết bị (Cấu hình → Cụm điểm đo). */
 
 export type MeterUtility = string;
@@ -13,9 +15,12 @@ export type ClientMeter = {
   utility: MeterUtility;
   /** ID thiết bị trong thư viện (`lib/devices`) — bắt buộc để điểm đo có dữ liệu */
   deviceId: string | null;
+  /** Serial nhập tay khi chưa gán được thiết bị trong thư viện */
+  serialNumber?: string | null;
 };
 
-const STORAGE_KEY = "ems-client-meters";
+const meterCache: Store = {};
+const meterHydration = new Map<string, Promise<ClientMeter[]>>();
 
 const DEFAULT_METERS: ClientMeter[] = [
   {
@@ -26,6 +31,7 @@ const DEFAULT_METERS: ClientMeter[] = [
     parentId: null,
     utility: "Điện",
     deviceId: "dev-1",
+    serialNumber: "SN: EM-992834-A",
   },
   {
     id: "m2",
@@ -35,6 +41,7 @@ const DEFAULT_METERS: ClientMeter[] = [
     parentId: "m1",
     utility: "Điện",
     deviceId: "dev-5",
+    serialNumber: "SN: EM-883401-B",
   },
   {
     id: "m3",
@@ -62,6 +69,7 @@ const DEFAULT_METERS: ClientMeter[] = [
     parentId: null,
     utility: "Nước",
     deviceId: "dev-2",
+    serialNumber: "SN: WF-112093-X",
   },
   {
     id: "m6",
@@ -71,6 +79,7 @@ const DEFAULT_METERS: ClientMeter[] = [
     parentId: null,
     utility: "Hơi",
     deviceId: "dev-4",
+    serialNumber: "SN: SG-778120-K",
   },
   {
     id: "m7",
@@ -80,47 +89,55 @@ const DEFAULT_METERS: ClientMeter[] = [
     parentId: null,
     utility: "Nhiệt",
     deviceId: "dev-3",
+    serialNumber: "SN: TP-445021-Z",
   },
 ];
 
 type Store = Record<string, ClientMeter[]>;
-
-function readStore(): Store {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Store;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeStore(store: Store) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  window.dispatchEvent(new CustomEvent("ems-client-meters-changed"));
-}
 
 export function defaultClientMeters(): ClientMeter[] {
   return DEFAULT_METERS.map((meter) => ({ ...meter }));
 }
 
 export function loadClientMeters(projectId: string): ClientMeter[] {
-  const store = readStore();
-  const rows = store[projectId];
-  if (!rows?.length) return defaultClientMeters();
-  return rows.map((meter) => ({
+  if (!Object.prototype.hasOwnProperty.call(meterCache, projectId)) {
+    return defaultClientMeters();
+  }
+  const rows = meterCache[projectId];
+  return (rows ?? []).map((meter) => ({
     ...meter,
     deviceId: meter.deviceId ?? null,
     parentId: meter.parentId ?? null,
+    serialNumber: meter.serialNumber ?? null,
   }));
 }
 
-export function saveClientMeters(projectId: string, meters: ClientMeter[]) {
-  const store = readStore();
-  store[projectId] = meters;
-  writeStore(store);
+export async function saveClientMeters(projectId: string, meters: ClientMeter[]) {
+  meterCache[projectId] = meters;
+  emitDbChange("client-meters");
+  await dbFetch("client-meters", {
+    method: "POST",
+    body: JSON.stringify({ projectId, meters }),
+  });
+}
+
+export function hydrateClientMeters(projectId: string) {
+  if (typeof window === "undefined") return Promise.resolve(loadClientMeters(projectId));
+  const active = meterHydration.get(projectId);
+  if (active) return active;
+  const request = dbFetch<ClientMeter[]>("client-meters", { query: { projectId } })
+    .then((meters) => {
+      // An empty response is a valid project with no configured points.
+      // Do not inject demo meters into a real project after a successful DB read.
+      meterCache[projectId] = meters;
+      emitDbChange("client-meters");
+      return meterCache[projectId];
+    })
+    .finally(() => {
+      meterHydration.delete(projectId);
+    });
+  meterHydration.set(projectId, request);
+  return request;
 }
 
 export function orderMetersByTree(meters: ClientMeter[]): ClientMeter[] {

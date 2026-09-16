@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
-export type TimeFilterMode = "day" | "month" | "year" | "custom_date" | "date_range";
+export type TimeFilterMode = "day" | "month" | "year" | "custom_date";
+export type CustomDateMode = "single" | "range";
 
 export type TimeFilterValue = {
   mode: TimeFilterMode;
   date: string;       // YYYY-MM-DD
   month: string;      // YYYY-MM
   year: number;       // YYYY
+  customDateMode: CustomDateMode;
   customDate: string; // YYYY-MM-DD
   startDate: string;  // YYYY-MM-DD
   endDate: string;    // YYYY-MM-DD
@@ -19,6 +21,7 @@ export const DEFAULT_TIME_FILTER: TimeFilterValue = {
   date: "2026-09-12",
   month: "2026-09",
   year: 2026,
+  customDateMode: "single",
   customDate: "2026-09-12",
   startDate: "2026-09-01",
   endDate: "2026-09-12",
@@ -29,22 +32,22 @@ export function getTimeFilterLabel(value: TimeFilterValue): string {
     case "day":
       return `Hôm nay (${value.date})`;
     case "custom_date":
-      return `Ngày ${value.customDate}`;
+      return value.customDateMode === "range"
+        ? `${value.startDate} đến ${value.endDate}`
+        : `Ngày ${value.customDate}`;
     case "month": {
       const [y, m] = value.month.split("-");
       return `Tháng ${m}/${y}`;
     }
     case "year":
       return `Năm ${value.year}`;
-    case "date_range":
-      return `${value.startDate} đến ${value.endDate}`;
     default:
       return "";
   }
 }
 
 export function getTimeFilterPeriods(value: TimeFilterValue): { key: string | number; label: string }[] {
-  if (value.mode === "day" || value.mode === "custom_date") {
+  if (value.mode === "day" || (value.mode === "custom_date" && value.customDateMode !== "range")) {
     return Array.from({ length: 24 }, (_, i) => ({
       key: i,
       label: `${String(i).padStart(2, "0")}:00`,
@@ -67,7 +70,7 @@ export function getTimeFilterPeriods(value: TimeFilterValue): { key: string | nu
     }));
   }
 
-  if (value.mode === "date_range") {
+  if (value.mode === "custom_date" && value.customDateMode === "range") {
     const start = new Date(value.startDate);
     const end = new Date(value.endDate);
     const diffMs = Math.max(0, end.getTime() - start.getTime());
@@ -94,9 +97,9 @@ export function getTimeFilterScaleFactor(value: TimeFilterValue): number {
     case "month":
       return 1 / 12;
     case "day":
-    case "custom_date":
       return 1 / 365;
-    case "date_range": {
+    case "custom_date": {
+      if (value.customDateMode !== "range") return 1 / 365;
       const start = new Date(value.startDate);
       const end = new Date(value.endDate);
       const diffMs = Math.max(0, end.getTime() - start.getTime());
@@ -122,7 +125,6 @@ export function TimeFilterBar({
     { id: "month", label: "Tháng" },
     { id: "year", label: "Năm" },
     { id: "custom_date", label: "Ngày tự chọn" },
-    { id: "date_range", label: "Khoảng ngày" },
   ];
 
   const years = useMemo(() => [2023, 2024, 2025, 2026, 2027], []);
@@ -192,42 +194,91 @@ export function TimeFilterBar({
         )}
 
         {value.mode === "custom_date" && (
-          <label className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs hover:border-slate-300 transition-colors cursor-pointer">
-            <CalendarSmallIcon className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-            <span className="text-slate-500">Ngày chọn:</span>
-            <input
-              type="date"
-              value={value.customDate}
-              onChange={(e) => onChange({ ...value, customDate: e.target.value })}
-              className="border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none cursor-pointer [color-scheme:light]"
-            />
-          </label>
-        )}
-
-        {value.mode === "date_range" && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <label className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-xs hover:border-slate-300 transition-colors cursor-pointer">
-              <span className="text-slate-400">Từ:</span>
-              <input
-                type="date"
-                value={value.startDate}
-                onChange={(e) => onChange({ ...value, startDate: e.target.value })}
-                className="border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none cursor-pointer [color-scheme:light]"
-              />
-            </label>
-            <span className="text-slate-400 text-xs font-bold">→</span>
-            <label className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-xs hover:border-slate-300 transition-colors cursor-pointer">
-              <span className="text-slate-400">Đến:</span>
-              <input
-                type="date"
-                value={value.endDate}
-                onChange={(e) => onChange({ ...value, endDate: e.target.value })}
-                className="border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none cursor-pointer [color-scheme:light]"
-              />
-            </label>
-          </div>
+          <DateSelectionControl
+            mode={value.customDateMode}
+            onModeChange={(customDateMode) => onChange({ ...value, customDateMode })}
+            date={value.customDate}
+            onDateChange={(customDate) => onChange({ ...value, customDate })}
+            startDate={value.startDate}
+            endDate={value.endDate}
+            onStartDateChange={(startDate) => onChange({ ...value, startDate })}
+            onEndDateChange={(endDate) => onChange({ ...value, endDate })}
+          />
         )}
       </div>
+    </div>
+  );
+}
+
+export function DateSelectionControl({
+  mode,
+  onModeChange,
+  date,
+  onDateChange,
+  startDate,
+  endDate,
+  onStartDateChange,
+  onEndDateChange,
+  compact = false,
+}: {
+  mode: CustomDateMode;
+  onModeChange: (mode: CustomDateMode) => void;
+  date: string;
+  onDateChange: (date: string) => void;
+  startDate: string;
+  endDate: string;
+  onStartDateChange: (date: string) => void;
+  onEndDateChange: (date: string) => void;
+  compact?: boolean;
+}) {
+  const textClass = compact ? "text-[12px]" : "text-xs";
+  const inputClass = compact
+    ? "border-0 bg-transparent text-[12px] font-medium text-emerald-800 outline-none [color-scheme:light]"
+    : "border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none cursor-pointer [color-scheme:light]";
+
+  return (
+    <div
+      className={`inline-flex min-h-9 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 ${textClass} font-medium text-slate-700 shadow-xs transition-colors hover:border-slate-300`}
+    >
+      <CalendarSmallIcon className={`${compact ? "h-3.5 w-3.5" : "h-3.5 w-3.5"} shrink-0 text-emerald-600`} />
+      <span className="whitespace-nowrap text-slate-500">Ngày tự chọn:</span>
+      <select
+        value={mode}
+        onChange={(e) => onModeChange(e.target.value as CustomDateMode)}
+        className={`${textClass} cursor-pointer border-0 bg-transparent font-semibold text-slate-900 outline-none`}
+      >
+        <option value="single">Một ngày</option>
+        <option value="range">Khoảng ngày</option>
+      </select>
+
+      {mode === "single" ? (
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => onDateChange(e.target.value)}
+          className={inputClass}
+        />
+      ) : (
+        <>
+          <span className="text-slate-400">Từ</span>
+          <input
+            type="date"
+            value={startDate}
+            max={endDate || undefined}
+            onChange={(e) => onStartDateChange(e.target.value)}
+            className={inputClass}
+          />
+          <span className="text-slate-400">→</span>
+          <span className="text-slate-400">Đến</span>
+          <input
+            type="date"
+            value={endDate}
+            min={startDate || undefined}
+            onChange={(e) => onEndDateChange(e.target.value)}
+            className={inputClass}
+          />
+        </>
+      )}
     </div>
   );
 }

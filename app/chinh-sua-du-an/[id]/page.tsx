@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { ProjectMeterConfig } from "@/components/ProjectMeterConfig";
-import { getProject } from "@/lib/projects";
+import { getProjectFromDb } from "@/lib/server-projects";
 
 export default async function EditProjectPage({
   params,
@@ -8,7 +8,7 @@ export default async function EditProjectPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const project = getProject(id);
+  const project = await getProjectFromDb(id);
   if (!project) notFound();
   return <ProjectMeterConfig project={project} />;
 }
