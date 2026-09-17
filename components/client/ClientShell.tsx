@@ -30,7 +30,6 @@ export function ClientShell({
   const { session } = useAuth();
   const [resolved, setResolved] = useState(project);
   const base = `/du-an/${project.id}`;
-  const homeHref = session?.portal === "admin" ? "/" : base;
 
   useEffect(() => {
     let active = true;
@@ -47,7 +46,7 @@ export function ClientShell({
       <header className="flex min-h-[56px] shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white px-3 sm:px-6">
         <div className="flex items-center gap-4 sm:gap-6 min-w-0">
           <Link
-            href={homeHref}
+            href={base}
             title={resolved.customer}
             aria-label={resolved.customer}
             className="flex items-center shrink-0"
