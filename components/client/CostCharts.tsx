@@ -492,16 +492,13 @@ function MultiCostBarChart({
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const base = series[0]?.bars ?? [];
-  const yMax = Math.max(
-    10000,
-    Math.ceil(
-      Math.max(...series.flatMap((s) => s.bars.map((b) => b.dark)), 1) / 2000,
-    ) * 2000,
-  );
+  const maxValue = Math.max(...series.flatMap((s) => s.bars.map((b) => b.dark)), 1);
+  const yMax = Math.max(1000, Math.ceil(maxValue / 2000) * 2000);
   const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * innerH;
   const groupW = innerW / Math.max(base.length, 1);
   const barCount = Math.max(series.length, 1);
   const barW = Math.max(4, groupW / (barCount + 0.8));
+  const labelStep = Math.max(1, Math.ceil(base.length / 12));
   const tickCount = 5;
   const ticks = Array.from({ length: tickCount + 1 }, (_, i) => (yMax * i) / tickCount);
 
@@ -544,15 +541,17 @@ function MultiCostBarChart({
                 />
               );
             })}
-            <text
-              x={gx + groupW / 2}
-              y={H - 10}
-              textAnchor="middle"
-              className="fill-slate-500"
-              fontSize="11"
-            >
-              {bar.label}
-            </text>
+            {i % labelStep === 0 || i === base.length - 1 ? (
+              <text
+                x={gx + groupW / 2}
+                y={H - 10}
+                textAnchor="middle"
+                className="fill-slate-500"
+                fontSize="11"
+              >
+                {bar.label}
+              </text>
+            ) : null}
           </g>
         );
       })}
