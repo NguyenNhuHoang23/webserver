@@ -33,6 +33,14 @@ function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
+function projectDateForDb(value: unknown) {
+  const input = asString(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+  const match = input.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return "";
+  return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+}
+
 function asNumber(value: unknown, fallback = 0) {
   const result = Number(value);
   return Number.isFinite(result) ? result : fallback;
@@ -301,11 +309,13 @@ async function saveResource(resource: string, body: Row) {
     }
     const meterTypes = Array.isArray(body.meterTypes) ? body.meterTypes.filter(Boolean) as string[] : [];
     const recipients = Array.isArray(body.recipients) ? body.recipients as Row[] : [];
+    const startDate = projectDateForDb(body.startDate);
+    if (!startDate) throw new Error("startDate must use YYYY-MM-DD or DD/MM/YYYY format");
     await transaction(async (connection) => {
       await connection.execute(
         `INSERT INTO projects (id, initials, accent, name, customer, status, start_date,
            contact_name, phone, email, address, logo_url)
-         VALUES (?, ?, ?, ?, ?, ?, COALESCE(STR_TO_DATE(?, '%Y-%m-%d'), STR_TO_DATE(?, '%d/%m/%Y')),
+         VALUES (?, ?, ?, ?, ?, ?, STR_TO_DATE(?, '%Y-%m-%d'),
            ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE initials=VALUES(initials), accent=VALUES(accent),
            name=VALUES(name), customer=VALUES(customer), status=VALUES(status),
@@ -313,7 +323,7 @@ async function saveResource(resource: string, body: Row) {
            phone=VALUES(phone), email=VALUES(email), address=VALUES(address),
            logo_url=VALUES(logo_url)`,
         [body.id, body.initials, body.accent, body.name, body.customer, body.status,
-          body.startDate, body.startDate, body.contactName || null, body.phone || null,
+          startDate, body.contactName || null, body.phone || null,
           body.email || null, body.address || null, body.logoUrl || null],
       );
       await connection.execute("DELETE FROM project_meter_types WHERE project_id = ?", [body.id]);
