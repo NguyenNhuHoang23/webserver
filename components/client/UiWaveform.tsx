@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { DateSelectionControl, type CustomDateMode } from "./TimeFilterBar";
+import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
 const PHASE_COLORS = ["#e53935", "#43a047", "#1e88e5"];
 const U_CHANNELS = [
@@ -72,7 +72,7 @@ function timeLabel(index: number, kind: "full" | "min" | "sec" | "tooltip") {
   return ss === "30" ? "30" : ss;
 }
 
-export function UiWaveform() {
+export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
   const [uQty, setUQty] = useState("U");
   const [iQty, setIQty] = useState("I");
   const [uCh, setUCh] = useState([1, 2, 3]);
@@ -81,13 +81,6 @@ export function UiWaveform() {
   const [hover, setHover] = useState<number | null>(null);
   const [crosshair, setCrosshair] = useState(true);
   const [window, setWindow] = useState({ start: 0, end: N - 1 });
-  const RESOLUTIONS = ["Giờ", "Ngày", "Tuần", "Tháng", "Năm", "Ngày tự chọn"] as const;
-  type Resolution = (typeof RESOLUTIONS)[number];
-  const [resolution, setResolution] = useState<Resolution>("Giờ");
-  const [customDateMode, setCustomDateMode] = useState<CustomDateMode>("single");
-  const [date, setDate] = useState("2026-07-19");
-  const [startDate, setStartDate] = useState("2026-07-13");
-  const [endDate, setEndDate] = useState("2026-07-19");
 
   const span = window.end - window.start;
   const zoomIn = () => {
@@ -139,7 +132,7 @@ export function UiWaveform() {
 
   return (
     <div className="font-sans">
-      {/* Top bar: Tham số bên trái, bộ lọc thời gian bên phải */}
+      {/* Top bar: thông số U/I; bộ lọc thời gian dùng thanh chung của trang */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
         <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
           <ParamGroup
@@ -158,48 +151,6 @@ export function UiWaveform() {
           />
         </div>
 
-        {/* Cụm bộ lọc thời gian đưa lên trên */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xs">
-            {RESOLUTIONS.map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setResolution(item)}
-                className={`h-9 px-3 text-[12px] font-medium transition-colors ${
-                  resolution === item
-                    ? "bg-emerald-600 text-white shadow-xs"
-                    : "text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-
-          {resolution === "Ngày tự chọn" ? (
-            <DateSelectionControl
-              compact
-              mode={customDateMode}
-              onModeChange={setCustomDateMode}
-              date={date}
-              onDateChange={setDate}
-              startDate={startDate}
-              endDate={endDate}
-              onStartDateChange={setStartDate}
-              onEndDateChange={setEndDate}
-            />
-          ) : (
-            <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-500 bg-white px-3 text-[13px] font-medium text-emerald-700 shadow-xs">
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="border-0 bg-transparent text-[13px] font-medium text-emerald-700 outline-none [color-scheme:light]"
-              />
-            </label>
-          )}
-        </div>
       </div>
 
       <div className="-mx-1 min-w-0 overflow-hidden rounded-[2px] border border-slate-400 bg-white sm:-mx-2">
@@ -242,11 +193,7 @@ export function UiWaveform() {
           </ToolBtn>
         </div>
         <span className="text-[11px] text-slate-400">
-          {resolution === "Ngày tự chọn" && customDateMode === "range"
-            ? `Kỳ hiển thị: ${startDate} → ${endDate}`
-            : resolution === "Ngày tự chọn"
-            ? `Ngày tự chọn: ${date}`
-            : `Độ phân giải: ${resolution} · Ngày: ${date}`}
+          Kỳ hiển thị: {getTimeFilterLabel(timeFilter)}
         </span>
       </div>
     </div>

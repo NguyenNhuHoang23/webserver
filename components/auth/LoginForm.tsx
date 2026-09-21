@@ -7,6 +7,7 @@ import {
   DEFAULT_PASSWORD,
   homePathFor,
   isAuthPath,
+  isClientPath,
   login,
   type AuthPortal,
 } from "@/lib/auth";
@@ -62,7 +63,7 @@ export function LoginForm({
       return;
     }
 
-    if (isAuthPath(pathname)) {
+    if (isAuthPath(pathname) || isClientPath(pathname)) {
       router.replace(homePathFor(result.session));
       return;
     }

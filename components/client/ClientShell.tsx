@@ -30,7 +30,6 @@ export function ClientShell({
   const { session } = useAuth();
   const [resolved, setResolved] = useState(project);
   const base = `/du-an/${project.id}`;
-  const homeHref = session?.portal === "admin" ? "/" : base;
 
   useEffect(() => {
     let active = true;
@@ -47,7 +46,7 @@ export function ClientShell({
       <header className="flex min-h-[56px] shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white px-3 sm:px-6">
         <div className="flex items-center gap-4 sm:gap-6 min-w-0">
           <Link
-            href={homeHref}
+            href={base}
             title={resolved.customer}
             aria-label={resolved.customer}
             className="flex items-center shrink-0"
@@ -98,6 +97,18 @@ export function ClientShell({
         </div>
 
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          {session?.portal === "admin" ? (
+            <Link
+              href="/"
+              title="Quay lại danh sách dự án"
+              className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 px-2 text-[11px] font-medium text-slate-600 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+            >
+              <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden lg:inline">Quay lại danh sách dự án</span>
+              <span className="lg:hidden">Dự án</span>
+            </Link>
+          ) : null}
+
           <div className="hidden sm:inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/70 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             <span>SCADA Online</span>
@@ -181,6 +192,14 @@ function HomeIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-5v-5H10v5H5a1 1 0 0 1-1-1v-8Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ArrowLeftIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

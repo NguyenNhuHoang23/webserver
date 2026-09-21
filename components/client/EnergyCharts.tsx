@@ -537,12 +537,12 @@ export function EnergyCharts() {
         <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         {isUiChart ? (
           <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
-            <UiWaveform />
+            <UiWaveform timeFilter={timeFilter} />
           </section>
         ) : isFreqChart ? (
-          <FrequencyChart seed={seed} onRefresh={() => setSeed((n) => n + 1)} />
+          <FrequencyChart seed={seed} timeFilter={timeFilter} onRefresh={() => setSeed((n) => n + 1)} />
         ) : isPowerChart ? (
-          <PowerChart seed={seed} />
+          <PowerChart seed={seed} timeFilter={timeFilter} />
         ) : isHarmChart ? (
           <HarmonicsChart seed={seed} />
         ) : isUnbChart ? (

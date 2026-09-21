@@ -14,6 +14,7 @@ import {
 } from "@/lib/client-meters";
 import { loadDevices, type CatalogDevice } from "@/lib/devices";
 import { loadProjects, resolveMeterTypes } from "@/lib/projects";
+import { hydrateProjectSettings, saveProjectSettings } from "@/lib/project-settings";
 
 type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
 type Utility = string;
@@ -33,6 +34,12 @@ const FALLBACK_UTILITIES = ["Điện", "Nước", "Nhiệt", "Hơi"];
 const ALERT_TAGS = ["Energy", "U/I", "Tần số", "Công suất", "Sóng hài", "Mất cân bằng pha"];
 
 type Slot = { id: string; name: string; color: string; from: string; to: string; price: string };
+type SavedCostConfig = {
+  utility?: string;
+  applyDate?: string;
+  slots?: Slot[];
+  flatPrices?: Record<string, string>;
+};
 type AccountRow = {
   id: string;
   username: string;
@@ -88,6 +95,7 @@ export function ClientConfig() {
   const [devices, setDevices] = useState<CatalogDevice[]>([]);
   const [slots, setSlots] = useState(INITIAL_SLOTS);
   const [applyDate, setApplyDate] = useState("2025-10-01");
+  const [flatPrices, setFlatPrices] = useState<Record<string, string>>({});
   const [accounts, setAccounts] = useState(INITIAL_ACCOUNTS);
   const [adding, setAdding] = useState(false);
 
@@ -112,8 +120,15 @@ export function ClientConfig() {
     const types = resolveMeterTypes(project);
     setUtilities(types.length ? types : FALLBACK_UTILITIES);
     setUtility((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
-    void hydrateClientMeters(projectId)
-      .then((rows) => setMeters(rows))
+    void Promise.all([hydrateClientMeters(projectId), hydrateProjectSettings(projectId)])
+      .then(([rows, settings]) => {
+        setMeters(rows);
+        const saved = settings.costConfig as SavedCostConfig | undefined;
+        if (saved?.applyDate) setApplyDate(saved.applyDate);
+        if (saved?.slots?.length) setSlots(saved.slots.map((slot) => ({ ...slot })));
+        if (saved?.flatPrices) setFlatPrices({ ...saved.flatPrices });
+        if (saved?.utility && types.includes(saved.utility)) setUtility(saved.utility);
+      })
       .catch(() => setMeters(loadClientMeters(projectId)));
     setDevices(loadDevices());
   }, [projectId]);
@@ -121,7 +136,20 @@ export function ClientConfig() {
   const markSaved = async () => {
     setSaveError("");
     try {
-      await saveClientMeters(projectId, meters);
+      if (tab === "cost") {
+        const settings = await hydrateProjectSettings(projectId);
+        await saveProjectSettings(projectId, {
+          ...settings,
+          costConfig: {
+            utility,
+            applyDate,
+            slots,
+            flatPrices,
+          },
+        });
+      } else {
+        await saveClientMeters(projectId, meters);
+      }
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1600);
     } catch {
@@ -244,6 +272,8 @@ export function ClientConfig() {
               onApplyDate={setApplyDate}
               slots={slots}
               onSlots={setSlots}
+              flatPrice={flatPrices[utility]}
+              onFlatPrice={(value) => setFlatPrices((current) => ({ ...current, [utility]: value }))}
             />
           ) : null}
 
@@ -292,6 +322,8 @@ export function ClientConfig() {
                 onClick={() => {
                   setMeters(defaultClientMeters());
                   setSlots(INITIAL_SLOTS);
+                  setApplyDate("2025-10-01");
+                  setFlatPrices({});
                   setAccounts(INITIAL_ACCOUNTS);
                 }}
                 className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
@@ -712,6 +744,8 @@ function CostPanel({
   onApplyDate,
   slots,
   onSlots,
+  flatPrice,
+  onFlatPrice,
 }: {
   utility: Utility;
   utilities: string[];
@@ -720,6 +754,8 @@ function CostPanel({
   onApplyDate: (v: string) => void;
   slots: Slot[];
   onSlots: (rows: Slot[]) => void;
+  flatPrice?: string;
+  onFlatPrice: (value: string) => void;
 }) {
   const isElectric = utility === "Điện";
   const unitMeta: Record<string, { title: string; hint: string; unit: string; defaultPrice: string }> = {
@@ -754,11 +790,7 @@ function CostPanel({
     unit: "VNĐ",
     defaultPrice: "0",
   };
-  const [flatPrice, setFlatPrice] = useState(meta.defaultPrice);
-
-  useEffect(() => {
-    setFlatPrice((unitMeta[utility] ?? meta).defaultPrice);
-  }, [utility]);
+  const flatPriceValue = flatPrice ?? meta.defaultPrice;
 
   return (
     <div>
@@ -881,8 +913,8 @@ function CostPanel({
               </span>
               <span className="relative block">
                 <input
-                  value={flatPrice}
-                  onChange={(e) => setFlatPrice(e.target.value)}
+                  value={flatPriceValue}
+                  onChange={(e) => onFlatPrice(e.target.value)}
                   className="h-10 w-full rounded-md border border-slate-200 pr-14 pl-3 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500"
                 />
                 <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[11px] text-slate-400">
