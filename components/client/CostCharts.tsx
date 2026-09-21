@@ -348,7 +348,7 @@ export function CostCharts() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-3 lg:p-4">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-3 lg:p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xs">
             {energyKinds.map((item) => {
@@ -371,7 +371,7 @@ export function CostCharts() {
           <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
         </div>
 
-        <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
+        <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
           <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -465,7 +465,7 @@ export function CostCharts() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[12px] text-slate-500">
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-4 text-[12px] text-slate-500">
           <p className="inline-flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
             Hệ thống đang hoạt động bình thường
