@@ -82,7 +82,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
   }, [rows, total, sources]);
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bg-[#f4f6f9] p-3 lg:p-4">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-[#f4f6f9] p-3 lg:p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-[20px] font-bold tracking-tight text-slate-800 sm:text-[22px]">
@@ -121,8 +121,8 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
         </article>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="mt-4 grid min-h-0 flex-1 gap-4 xl:auto-rows-fr xl:grid-cols-2">
+        <article className="flex h-full min-h-[360px] flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <h3 className="text-[13px] font-bold tracking-[0.06em] text-slate-700">
             PHÂN BỐ THEO PHẠM VI
           </h3>
@@ -140,7 +140,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
           </div>
         </article>
 
-        <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <article className="flex h-full min-h-[360px] flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <h3 className="text-[13px] font-bold tracking-[0.06em] text-slate-700">
             CHI TIẾT PHÁT THẢI (TẤN CO₂E)
           </h3>
@@ -148,7 +148,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
             Nguồn phát thải lấy từ cấu hình Phạm vi 1 / 2 / 3
           </p>
           {rows.length === 0 ? (
-            <p className="py-10 text-center text-sm text-slate-400">
+            <p className="flex flex-1 items-center justify-center text-center text-sm text-slate-400">
               Chưa có nguồn phát thải trong cấu hình
             </p>
           ) : (
