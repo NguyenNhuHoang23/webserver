@@ -247,7 +247,7 @@ function ScopeDonut({
   const c = 2 * Math.PI * r;
 
   return (
-    <div className="relative mx-auto mt-4 h-[220px] w-[220px]">
+    <div className="relative mx-auto mt-4 h-[300px] w-[300px] max-w-full">
       <svg viewBox="0 0 180 180" className="h-full w-full">
         <circle cx="90" cy="90" r={r} fill="none" stroke="#e8eef4" strokeWidth="26" />
         {segments.map((item, index) => {
@@ -273,7 +273,7 @@ function ScopeDonut({
         })}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <p className="text-[28px] font-bold leading-none text-slate-800">100%</p>
+        <p className="text-[36px] font-bold leading-none text-slate-800">100%</p>
         <p className="mt-1 text-[11px] font-semibold tracking-[0.12em] text-slate-400">
           TỔNG CỘNG
         </p>
