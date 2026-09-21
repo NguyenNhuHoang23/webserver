@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
 const PHASE_COLORS = ["#e53935", "#43a047", "#1e88e5"];
@@ -20,6 +20,13 @@ type Meas = "rms" | "pk+" | "pk-" | "dc" | "cf";
 
 const N = 500;
 const T0 = Date.parse("2026-01-27T09:40:00");
+
+export type UiWaveformPreferences = {
+  uQty: string;
+  iQty: string;
+  uCh: number[];
+  iCh: number[];
+};
 
 function waveAt(i: number, phase: number, kind: "u" | "i", meas: Meas = "rms", agg: Agg = "AVG") {
   const seconds = (i / (N - 1)) * 240;
@@ -72,15 +79,42 @@ function timeLabel(index: number, kind: "full" | "min" | "sec" | "tooltip") {
   return ss === "30" ? "30" : ss;
 }
 
-export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
-  const [uQty, setUQty] = useState("U");
-  const [iQty, setIQty] = useState("I");
-  const [uCh, setUCh] = useState([1, 2, 3]);
-  const [iCh, setICh] = useState([1, 2, 3]);
+export function UiWaveform({
+  timeFilter,
+  preferences,
+  onPreferencesChange,
+}: {
+  timeFilter: TimeFilterValue;
+  preferences?: UiWaveformPreferences;
+  onPreferencesChange?: (next: UiWaveformPreferences) => void;
+}) {
+  const [uQty, setUQty] = useState(preferences?.uQty ?? "U");
+  const [iQty, setIQty] = useState(preferences?.iQty ?? "I");
+  const [uCh, setUCh] = useState(preferences?.uCh ?? [1, 2, 3]);
+  const [iCh, setICh] = useState(preferences?.iCh ?? [1, 2, 3]);
   const [agg] = useState<Agg>("AVG");
   const [hover, setHover] = useState<number | null>(null);
   const [crosshair, setCrosshair] = useState(true);
   const [window, setWindow] = useState({ start: 0, end: N - 1 });
+
+  useEffect(() => {
+    if (!preferences) return;
+    setUQty(preferences.uQty);
+    setIQty(preferences.iQty);
+    setUCh(preferences.uCh);
+    setICh(preferences.iCh);
+  }, [preferences]);
+
+  const updatePreferences = (patch: Partial<UiWaveformPreferences>) => {
+    const next = {
+      uQty,
+      iQty,
+      uCh,
+      iCh,
+      ...patch,
+    };
+    onPreferencesChange?.(next);
+  };
 
   const span = window.end - window.start;
   const zoomIn = () => {
@@ -137,17 +171,31 @@ export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
         <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
           <ParamGroup
             qty={uQty}
-            onQty={setUQty}
+            onQty={(next) => {
+              setUQty(next);
+              updatePreferences({ uQty: next });
+            }}
             options={["U", "Un", "U0"]}
             channels={uCh}
-            onChannel={(ch) => setUCh((list) => toggleIn(list, ch))}
+            onChannel={(ch) => {
+              const next = toggleIn(uCh, ch);
+              setUCh(next);
+              updatePreferences({ uCh: next });
+            }}
           />
           <ParamGroup
             qty={iQty}
-            onQty={setIQty}
+            onQty={(next) => {
+              setIQty(next);
+              updatePreferences({ iQty: next });
+            }}
             options={["I", "In", "I0"]}
             channels={iCh}
-            onChannel={(ch) => setICh((list) => toggleIn(list, ch))}
+            onChannel={(ch) => {
+              const next = toggleIn(iCh, ch);
+              setICh(next);
+              updatePreferences({ iCh: next });
+            }}
           />
         </div>
 

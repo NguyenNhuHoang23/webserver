@@ -12,11 +12,12 @@ import {
 import { FrequencyChart } from "@/components/client/FrequencyChart";
 import { HarmonicsChart } from "@/components/client/HarmonicsChart";
 import { PowerChart } from "@/components/client/PowerChart";
-import { UiWaveform } from "@/components/client/UiWaveform";
+import { UiWaveform, type UiWaveformPreferences } from "@/components/client/UiWaveform";
 import { UnbalanceChart } from "@/components/client/UnbalanceChart";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { hydrateProjects, loadProjects, resolveMeterTypes } from "@/lib/projects";
 import { hydrateMeterReadings, type MeterReading } from "@/lib/meter-readings";
+import { hydrateProjectSettings, saveProjectSettings } from "@/lib/project-settings";
 
 type EnergyKind = string;
 type MetricId = "energy" | "ui" | "freq" | "power" | "harm" | "unbalance" | "pst";
@@ -64,6 +65,25 @@ const METRICS: { id: MetricId; label: string }[] = [
 ];
 
 type BarPoint = { minute: number; label: string; kwh: number };
+
+type ChartPreferences = {
+  energy: EnergyKind;
+  metric: MetricId;
+  selectedIds: string[];
+  timeFilter: TimeFilterValue;
+  ui: UiWaveformPreferences;
+};
+
+const DEFAULT_UI_PREFERENCES: UiWaveformPreferences = {
+  uQty: "U",
+  iQty: "I",
+  uCh: [1, 2, 3],
+  iCh: [1, 2, 3],
+};
+
+function isMetricId(value: unknown): value is MetricId {
+  return METRICS.some((item) => item.id === value);
+}
 
 function energyBarsForFilter(seed: number, filter: TimeFilterValue): BarPoint[] {
   const periods = getTimeFilterPeriods(filter);
@@ -192,16 +212,53 @@ export function EnergyCharts() {
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [allPoints, setAllPoints] = useState<MeterPoint[]>(FALLBACK_POINTS);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [preferredPointIds, setPreferredPointIds] = useState<string[] | undefined>(undefined);
   const [pointQuery, setPointQuery] = useState("");
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
   const [readings, setReadings] = useState<MeterReading[]>([]);
+  const [uiPreferences, setUiPreferences] = useState<UiWaveformPreferences>(DEFAULT_UI_PREFERENCES);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
     let active = true;
     const reload = () => {
-      void Promise.all([hydrateProjects(), hydrateClientMeters(projectId), hydrateMeterReadings(projectId)]).then(([projects, meterRows, readingRows]) => {
+      void Promise.all([
+        hydrateProjects(),
+        hydrateClientMeters(projectId),
+        hydrateMeterReadings(projectId),
+        hydrateProjectSettings(projectId),
+      ]).then(([projects, meterRows, readingRows, settings]) => {
         if (!active) return;
         setReadings(readingRows);
+        const rawPreferences = settings.chartPreferences;
+        if (rawPreferences && typeof rawPreferences === "object" && !Array.isArray(rawPreferences)) {
+          const preferences = rawPreferences as Partial<ChartPreferences>;
+          if (typeof preferences.energy === "string") setEnergy(preferences.energy);
+          if (isMetricId(preferences.metric)) setMetric(preferences.metric);
+          if (Array.isArray(preferences.selectedIds)) {
+            setPreferredPointIds(preferences.selectedIds.filter((id): id is string => typeof id === "string"));
+          } else {
+            setPreferredPointIds(undefined);
+          }
+          if (preferences.timeFilter && typeof preferences.timeFilter === "object") {
+            setTimeFilter({
+              ...DEFAULT_TIME_FILTER,
+              ...(preferences.timeFilter as Partial<TimeFilterValue>),
+            });
+          }
+          if (preferences.ui && typeof preferences.ui === "object") {
+            const ui = preferences.ui as Partial<UiWaveformPreferences>;
+            setUiPreferences({
+              ...DEFAULT_UI_PREFERENCES,
+              ...ui,
+              uCh: Array.isArray(ui.uCh) ? ui.uCh.filter((ch): ch is number => typeof ch === "number") : DEFAULT_UI_PREFERENCES.uCh,
+              iCh: Array.isArray(ui.iCh) ? ui.iCh.filter((ch): ch is number => typeof ch === "number") : DEFAULT_UI_PREFERENCES.iCh,
+            });
+          }
+        } else {
+          setPreferredPointIds(undefined);
+          setUiPreferences(DEFAULT_UI_PREFERENCES);
+        }
         const project = projects.find((item) => item.id === projectId);
         const types = resolveMeterTypes(project);
         setEnergyKinds(types);
@@ -249,11 +306,15 @@ export function EnergyCharts() {
   // Khi đổi loại năng lượng, giữ các điểm đã chọn thuộc loại đó; nếu trống thì chọn 1–2 điểm đầu
   useEffect(() => {
     setSelectedIds((current) => {
+      if (preferredPointIds !== undefined) {
+        const preferred = preferredPointIds.filter((id) => pointsForEnergy.some((p) => p.id === id));
+        if (preferred.length > 0 || preferredPointIds.length === 0) return preferred;
+      }
       const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
       if (kept.length > 0) return kept;
       return pointsForEnergy.slice(0, Math.min(2, pointsForEnergy.length)).map((p) => p.id);
     });
-  }, [pointsForEnergy]);
+  }, [pointsForEnergy, preferredPointIds]);
 
   const selectedPoints = useMemo(
     () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
@@ -392,6 +453,27 @@ export function EnergyCharts() {
     setSelectedIds([]);
   }
 
+  async function saveChartDefaults() {
+    setSaveState("saving");
+    try {
+      const current = await hydrateProjectSettings(projectId);
+      const chartPreferences: ChartPreferences = {
+        energy,
+        metric,
+        selectedIds,
+        timeFilter,
+        ui: uiPreferences,
+      };
+      await saveProjectSettings(projectId, {
+        ...current,
+        chartPreferences,
+      });
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 bg-[#f4f6f9]">
       <aside className="flex w-[280px] shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -512,7 +594,29 @@ export function EnergyCharts() {
                 </button>
               ))}
             </div>
-            <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={saveChartDefaults}
+                disabled={saveState === "saving"}
+                className={`inline-flex h-8 items-center rounded-md border px-2.5 text-[12px] font-semibold transition-colors ${
+                  saveState === "saved"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : saveState === "error"
+                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                }`}
+              >
+                {saveState === "saving"
+                  ? "Đang lưu..."
+                  : saveState === "saved"
+                    ? "Đã lưu mặc định"
+                    : saveState === "error"
+                      ? "Lưu thất bại"
+                      : "Lưu mặc định"}
+              </button>
+              <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
+            </div>
           </div>
           {isElectric ? (
             <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
@@ -537,7 +641,11 @@ export function EnergyCharts() {
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2 sm:p-3">
         {isUiChart ? (
           <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
-            <UiWaveform timeFilter={timeFilter} />
+            <UiWaveform
+              timeFilter={timeFilter}
+              preferences={uiPreferences}
+              onPreferencesChange={setUiPreferences}
+            />
           </section>
         ) : isFreqChart ? (
           <FrequencyChart seed={seed} timeFilter={timeFilter} onRefresh={() => setSeed((n) => n + 1)} />
