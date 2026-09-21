@@ -15,18 +15,26 @@ import {
 import { loadDevices, type CatalogDevice } from "@/lib/devices";
 import { loadProjects, resolveMeterTypes } from "@/lib/projects";
 import { hydrateProjectSettings, saveProjectSettings } from "@/lib/project-settings";
+import {
+  CHART_METRICS,
+  DEFAULT_CHART_VISIBILITY,
+  normalizeChartVisibility,
+  type ChartMetricId,
+  type ChartVisibilitySettings,
+} from "@/lib/chart-settings";
 
-type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
+type TabId = "project" | "meters" | "charts" | "cost" | "alerts" | "accounts";
 type Utility = string;
 type DropPosition = "before" | "after" | "child";
 type Meter = ClientMeter;
 
-const NAV: { id: TabId; n: number; label: string; icon: "doc" | "nodes" | "cash" | "warn" | "user" }[] = [
+const NAV: { id: TabId; n: number; label: string; icon: "doc" | "nodes" | "chart" | "cash" | "warn" | "user" }[] = [
   { id: "project", n: 1, label: "Dự án", icon: "doc" },
   { id: "meters", n: 2, label: "Cụm điểm đo", icon: "nodes" },
-  { id: "cost", n: 3, label: "Chi phí", icon: "cash" },
-  { id: "alerts", n: 4, label: "Cảnh báo", icon: "warn" },
-  { id: "accounts", n: 5, label: "Quản lý tài khoản", icon: "user" },
+  { id: "charts", n: 3, label: "Biểu đồ", icon: "chart" },
+  { id: "cost", n: 4, label: "Chi phí", icon: "cash" },
+  { id: "alerts", n: 5, label: "Cảnh báo", icon: "warn" },
+  { id: "accounts", n: 6, label: "Quản lý tài khoản", icon: "user" },
 ];
 
 const FALLBACK_UTILITIES = ["Điện", "Nước", "Nhiệt", "Hơi"];
@@ -96,6 +104,10 @@ export function ClientConfig() {
   const [slots, setSlots] = useState(INITIAL_SLOTS);
   const [applyDate, setApplyDate] = useState("2025-10-01");
   const [flatPrices, setFlatPrices] = useState<Record<string, string>>({});
+  const [chartVisibility, setChartVisibility] = useState<ChartVisibilitySettings>(() => ({
+    project: { ...DEFAULT_CHART_VISIBILITY.project },
+    meters: {},
+  }));
   const [accounts, setAccounts] = useState(INITIAL_ACCOUNTS);
   const [adding, setAdding] = useState(false);
 
@@ -123,6 +135,7 @@ export function ClientConfig() {
     void Promise.all([hydrateClientMeters(projectId), hydrateProjectSettings(projectId)])
       .then(([rows, settings]) => {
         setMeters(rows);
+        setChartVisibility(normalizeChartVisibility(settings.chartVisibility));
         const saved = settings.costConfig as SavedCostConfig | undefined;
         if (saved?.applyDate) setApplyDate(saved.applyDate);
         if (saved?.slots?.length) setSlots(saved.slots.map((slot) => ({ ...slot })));
@@ -136,7 +149,13 @@ export function ClientConfig() {
   const markSaved = async () => {
     setSaveError("");
     try {
-      if (tab === "cost") {
+      if (tab === "charts") {
+        const settings = await hydrateProjectSettings(projectId);
+        await saveProjectSettings(projectId, {
+          ...settings,
+          chartVisibility,
+        });
+      } else if (tab === "cost") {
         const settings = await hydrateProjectSettings(projectId);
         await saveProjectSettings(projectId, {
           ...settings,
@@ -154,7 +173,7 @@ export function ClientConfig() {
       window.setTimeout(() => setSaved(false), 1600);
     } catch {
       setSaved(false);
-      setSaveError("Không thể lưu cấu hình điểm đo. Vui lòng thử lại.");
+      setSaveError("Không thể lưu cấu hình. Vui lòng thử lại.");
     }
   };
 
@@ -168,6 +187,10 @@ export function ClientConfig() {
     meters: {
       title: "Cụm điểm đo",
       hint: `Cấu hình phân cấp cây cha–con của các điểm đo trên Sơ đồ · Dự án ${projectId}`,
+    },
+    charts: {
+      title: "Cấu hình biểu đồ",
+      hint: "Chọn các danh mục được phép hiển thị trên Tab Biểu đồ theo dự án hoặc từng điểm đo",
     },
     cost: { title: "Cấu hình chi phí", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
     alerts: { title: "Cấu hình cảnh báo", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
@@ -263,6 +286,14 @@ export function ClientConfig() {
             />
           ) : null}
 
+          {tab === "charts" ? (
+            <ChartConfigPanel
+              meters={meters}
+              visibility={chartVisibility}
+              onChange={setChartVisibility}
+            />
+          ) : null}
+
           {tab === "cost" ? (
             <CostPanel
               utility={utility}
@@ -324,6 +355,10 @@ export function ClientConfig() {
                   setSlots(INITIAL_SLOTS);
                   setApplyDate("2025-10-01");
                   setFlatPrices({});
+                  setChartVisibility({
+                    project: { ...DEFAULT_CHART_VISIBILITY.project },
+                    meters: {},
+                  });
                   setAccounts(INITIAL_ACCOUNTS);
                 }}
                 className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
@@ -734,6 +769,148 @@ function applyMeterDrop(
   }
 
   return next;
+}
+
+function ChartConfigPanel({
+  meters,
+  visibility,
+  onChange,
+}: {
+  meters: Meter[];
+  visibility: ChartVisibilitySettings;
+  onChange: (next: ChartVisibilitySettings) => void;
+}) {
+  const [scope, setScope] = useState("project");
+  const selectedMeter = meters.find((meter) => meter.id === scope);
+  const overrides = selectedMeter ? visibility.meters[selectedMeter.id] ?? {} : {};
+  const activeMetrics = selectedMeter
+    ? CHART_METRICS.reduce((result, metric) => {
+        result[metric.id] = overrides[metric.id] ?? visibility.project[metric.id];
+        return result;
+      }, {} as Record<ChartMetricId, boolean>)
+    : visibility.project;
+  const hasOverrides = selectedMeter ? Object.keys(overrides).length > 0 : false;
+
+  function toggleMetric(metric: ChartMetricId) {
+    if (!selectedMeter) {
+      onChange({
+        ...visibility,
+        project: { ...visibility.project, [metric]: !visibility.project[metric] },
+      });
+      return;
+    }
+
+    onChange({
+      ...visibility,
+      meters: {
+        ...visibility.meters,
+        [selectedMeter.id]: { ...overrides, [metric]: !activeMetrics[metric] },
+      },
+    });
+  }
+
+  function resetMeter() {
+    if (!selectedMeter) return;
+    const metersNext = { ...visibility.meters };
+    delete metersNext[selectedMeter.id];
+    onChange({ ...visibility, meters: metersNext });
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-4">
+        <h3 className="text-[15px] font-semibold text-slate-800">Danh mục biểu đồ hiển thị</h3>
+        <p className="mt-1 max-w-3xl text-[12px] leading-5 text-slate-600">
+          Bật hoặc tắt từng danh mục sẽ xuất hiện trên Tab Biểu đồ. Cấu hình <strong>Toàn dự án</strong> là mặc định;
+          mỗi điểm đo có thể ghi đè riêng khi thiết bị chỉ hỗ trợ một số thông số.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold tracking-[0.08em] text-slate-400">PHẠM VI CẤU HÌNH</p>
+          <p className="mt-1 text-[12px] text-slate-500">Chọn dự án hoặc một điểm đo / thiết bị cụ thể.</p>
+        </div>
+        <select
+          value={scope}
+          onChange={(event) => setScope(event.target.value)}
+          className="h-10 min-w-[300px] rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none focus:border-emerald-500"
+        >
+          <option value="project">Toàn dự án · Mặc định chung</option>
+          {meters.map((meter) => (
+            <option key={meter.id} value={meter.id}>
+              {meter.name} · {meter.code}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selectedMeter ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <div>
+            <p className="text-[13px] font-semibold text-slate-800">{selectedMeter.name}</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {selectedMeter.code} · {selectedMeter.utility} · {selectedMeter.deviceId ? `Thiết bị ${selectedMeter.deviceId}` : "Chưa gán thiết bị"}
+            </p>
+          </div>
+          {hasOverrides ? (
+            <button
+              type="button"
+              onClick={resetMeter}
+              className="h-8 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-600 hover:border-emerald-200 hover:text-emerald-700"
+            >
+              Dùng mặc định dự án
+            </button>
+          ) : (
+            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+              Đang dùng mặc định dự án
+            </span>
+          )}
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-lg border border-slate-200">
+        <div className="grid grid-cols-[minmax(0,1fr)_160px] border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-[11px] font-semibold tracking-wide text-slate-400">
+          <span>DANH MỤC ĐỒ THỊ</span>
+          <span className="text-right">HIỂN THỊ</span>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {CHART_METRICS.map((metric) => {
+            const enabled = activeMetrics[metric.id];
+            return (
+              <div key={metric.id} className="grid grid-cols-[minmax(0,1fr)_160px] items-center px-4 py-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-slate-800">{metric.label}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">{metric.hint}</p>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    onClick={() => toggleMetric(metric.id)}
+                    className={`relative h-6 w-11 rounded-full transition-colors ${enabled ? "bg-emerald-600" : "bg-slate-300"}`}
+                  >
+                    <span
+                      className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform"
+                      style={{ transform: `translateX(${enabled ? 22 : 2}px)` }}
+                    />
+                  </button>
+                  <span className={`ml-2 w-14 text-right text-[12px] font-semibold ${enabled ? "text-emerald-700" : "text-slate-400"}`}>
+                    {enabled ? "Bật" : "Tắt"}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <p className="text-[11px] leading-5 text-slate-400">
+        Khi chọn nhiều điểm đo trong Tab Biểu đồ, một danh mục chỉ xuất hiện nếu đang được bật cho tất cả điểm đo được chọn.
+      </p>
+    </div>
+  );
 }
 
 function CostPanel({
@@ -1253,7 +1430,7 @@ function IconBtn({
   );
 }
 
-function NavIcon({ type, className }: { type: "doc" | "nodes" | "cash" | "warn" | "user"; className?: string }) {
+function NavIcon({ type, className }: { type: "doc" | "nodes" | "chart" | "cash" | "warn" | "user"; className?: string }) {
   if (type === "nodes") {
     return (
       <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1269,6 +1446,14 @@ function NavIcon({ type, className }: { type: "doc" | "nodes" | "cash" | "warn" 
       <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
         <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.7" />
         <circle cx="12" cy="12" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+  if (type === "chart") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M5 19V11M12 19V5M19 19v-8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        <path d="M3.5 19.5h17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
       </svg>
     );
   }

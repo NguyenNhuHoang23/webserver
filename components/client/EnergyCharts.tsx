@@ -18,9 +18,17 @@ import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/
 import { hydrateProjects, loadProjects, resolveMeterTypes } from "@/lib/projects";
 import { hydrateMeterReadings, type MeterReading } from "@/lib/meter-readings";
 import { hydrateProjectSettings, saveProjectSettings } from "@/lib/project-settings";
+import {
+  CHART_METRICS,
+  DEFAULT_CHART_VISIBILITY,
+  chartMetricEnabled,
+  normalizeChartVisibility,
+  type ChartMetricId,
+  type ChartVisibilitySettings,
+} from "@/lib/chart-settings";
 
 type EnergyKind = string;
-type MetricId = "energy" | "ui" | "freq" | "power" | "harm" | "unbalance" | "pst";
+type MetricId = ChartMetricId;
 type ViewMode = "chart" | "table";
 
 type MeterPoint = {
@@ -54,15 +62,7 @@ const ENERGY_KIND_META: Record<string, "bolt" | "heat" | "air" | "water" | "stea
   Hơi: "steam",
 };
 
-const METRICS: { id: MetricId; label: string }[] = [
-  { id: "energy", label: "Energy" },
-  { id: "ui", label: "U / I" },
-  { id: "freq", label: "Tần số" },
-  { id: "power", label: "Công suất" },
-  { id: "harm", label: "Sóng hài" },
-  { id: "unbalance", label: "Mất cân bằng pha" },
-  { id: "pst", label: "Pst/Plt" },
-];
+const METRICS: { id: MetricId; label: string }[] = CHART_METRICS.map(({ id, label }) => ({ id, label }));
 
 type BarPoint = { minute: number; label: string; kwh: number };
 
@@ -217,6 +217,10 @@ export function EnergyCharts() {
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [uiPreferences, setUiPreferences] = useState<UiWaveformPreferences>(DEFAULT_UI_PREFERENCES);
+  const [chartVisibility, setChartVisibility] = useState<ChartVisibilitySettings>(() => ({
+    project: { ...DEFAULT_CHART_VISIBILITY.project },
+    meters: {},
+  }));
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
@@ -230,6 +234,7 @@ export function EnergyCharts() {
       ]).then(([projects, meterRows, readingRows, settings]) => {
         if (!active) return;
         setReadings(readingRows);
+        setChartVisibility(normalizeChartVisibility(settings.chartVisibility));
         const rawPreferences = settings.chartPreferences;
         if (rawPreferences && typeof rawPreferences === "object" && !Array.isArray(rawPreferences)) {
           const preferences = rawPreferences as Partial<ChartPreferences>;
@@ -350,6 +355,11 @@ export function EnergyCharts() {
   const isPowerChart = isElectric && metric === "power";
   const isHarmChart = isElectric && metric === "harm";
   const isUnbChart = isElectric && metric === "unbalance";
+  const visibleMetrics = useMemo(
+    () => METRICS.filter((item) => chartMetricEnabled(chartVisibility, item.id, selectedIds)),
+    [chartVisibility, selectedIds],
+  );
+  const currentMetricVisible = visibleMetrics.some((item) => item.id === metric);
   const meta = metricMeta(energy, isElectric ? metric : "energy");
   const yMax = isConsumptionChart ? 7 : Math.max(...values.flat(), 1) * 1.08;
   const yMin = isConsumptionChart ? 0 : Math.min(0, Math.min(...values.flat()) * 0.92);
@@ -358,8 +368,12 @@ export function EnergyCharts() {
   useEffect(() => {
     if (!isElectric && metric !== "energy") {
       setMetric("energy");
+      return;
     }
-  }, [isElectric, metric]);
+    if (isElectric && visibleMetrics.length > 0 && !visibleMetrics.some((item) => item.id === metric)) {
+      setMetric(visibleMetrics[0].id);
+    }
+  }, [isElectric, metric, visibleMetrics]);
 
   const consumptionUnit =
     energy === "Nước"
@@ -620,7 +634,7 @@ export function EnergyCharts() {
           </div>
           {isElectric ? (
             <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
-              {METRICS.map((item) => (
+              {visibleMetrics.map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -634,12 +648,24 @@ export function EnergyCharts() {
                   {item.label}
                 </button>
               ))}
+              {visibleMetrics.length === 0 ? (
+                <span className="px-2 py-1 text-[11.5px] font-medium text-slate-400">
+                  Chưa bật danh mục biểu đồ cho điểm đo này
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2 sm:p-3">
-        {isUiChart ? (
+        {!currentMetricVisible ? (
+          <section className="flex min-h-[260px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white p-8 text-center">
+            <div>
+              <p className="text-sm font-semibold text-slate-700">Chưa có danh mục biểu đồ được bật</p>
+              <p className="mt-1 text-xs text-slate-400">Mở Cấu hình → Biểu đồ để kích hoạt thông số cho dự án hoặc điểm đo.</p>
+            </div>
+          </section>
+        ) : isUiChart ? (
           <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
             <UiWaveform
               timeFilter={timeFilter}
