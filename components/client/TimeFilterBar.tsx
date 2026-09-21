@@ -21,7 +21,7 @@ export const DEFAULT_TIME_FILTER: TimeFilterValue = {
   date: "2026-09-12",
   month: "2026-09",
   year: 2026,
-  customDateMode: "single",
+  customDateMode: "range",
   customDate: "2026-09-12",
   startDate: "2026-09-01",
   endDate: "2026-09-12",
@@ -30,11 +30,9 @@ export const DEFAULT_TIME_FILTER: TimeFilterValue = {
 export function getTimeFilterLabel(value: TimeFilterValue): string {
   switch (value.mode) {
     case "day":
-      return `Hôm nay (${value.date})`;
+      return `Ngày ${value.date}`;
     case "custom_date":
-      return value.customDateMode === "range"
-        ? `${value.startDate} đến ${value.endDate}`
-        : `Ngày ${value.customDate}`;
+      return `${value.startDate} đến ${value.endDate}`;
     case "month": {
       const [y, m] = value.month.split("-");
       return `Tháng ${m}/${y}`;
@@ -47,7 +45,7 @@ export function getTimeFilterLabel(value: TimeFilterValue): string {
 }
 
 export function getTimeFilterPeriods(value: TimeFilterValue): { key: string | number; label: string }[] {
-  if (value.mode === "day" || (value.mode === "custom_date" && value.customDateMode !== "range")) {
+  if (value.mode === "day") {
     return Array.from({ length: 24 }, (_, i) => ({
       key: i,
       label: `${String(i).padStart(2, "0")}:00`,
@@ -70,7 +68,7 @@ export function getTimeFilterPeriods(value: TimeFilterValue): { key: string | nu
     }));
   }
 
-  if (value.mode === "custom_date" && value.customDateMode === "range") {
+  if (value.mode === "custom_date") {
     const start = new Date(value.startDate);
     const end = new Date(value.endDate);
     const diffMs = Math.max(0, end.getTime() - start.getTime());
@@ -99,7 +97,6 @@ export function getTimeFilterScaleFactor(value: TimeFilterValue): number {
     case "day":
       return 1 / 365;
     case "custom_date": {
-      if (value.customDateMode !== "range") return 1 / 365;
       const start = new Date(value.startDate);
       const end = new Date(value.endDate);
       const diffMs = Math.max(0, end.getTime() - start.getTime());
@@ -139,7 +136,11 @@ export function TimeFilterBar({
             <button
               key={item.id}
               type="button"
-              onClick={() => onChange({ ...value, mode: item.id })}
+              onClick={() => onChange({
+                ...value,
+                mode: item.id,
+                ...(item.id === "custom_date" ? { customDateMode: "range" } : {}),
+              })}
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
                 active
                   ? "bg-slate-900 text-white shadow-xs"
@@ -155,10 +156,16 @@ export function TimeFilterBar({
       {/* Dynamic Selector Input based on active mode */}
       <div className="inline-flex items-center">
         {value.mode === "day" && (
-          <div className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs">
+          <label className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs hover:border-slate-300 transition-colors cursor-pointer">
             <CalendarSmallIcon className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Hôm nay: <strong className="font-mono text-slate-900">{value.date}</strong></span>
-          </div>
+            <span className="text-slate-500">Ngày:</span>
+            <input
+              type="date"
+              value={value.date}
+              onChange={(e) => onChange({ ...value, date: e.target.value })}
+              className="border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none cursor-pointer [color-scheme:light]"
+            />
+          </label>
         )}
 
         {value.mode === "month" && (
@@ -195,10 +202,6 @@ export function TimeFilterBar({
 
         {value.mode === "custom_date" && (
           <DateSelectionControl
-            mode={value.customDateMode}
-            onModeChange={(customDateMode) => onChange({ ...value, customDateMode })}
-            date={value.customDate}
-            onDateChange={(customDate) => onChange({ ...value, customDate })}
             startDate={value.startDate}
             endDate={value.endDate}
             onStartDateChange={(startDate) => onChange({ ...value, startDate })}
@@ -211,20 +214,12 @@ export function TimeFilterBar({
 }
 
 export function DateSelectionControl({
-  mode,
-  onModeChange,
-  date,
-  onDateChange,
   startDate,
   endDate,
   onStartDateChange,
   onEndDateChange,
   compact = false,
 }: {
-  mode: CustomDateMode;
-  onModeChange: (mode: CustomDateMode) => void;
-  date: string;
-  onDateChange: (date: string) => void;
   startDate: string;
   endDate: string;
   onStartDateChange: (date: string) => void;
@@ -241,44 +236,24 @@ export function DateSelectionControl({
       className={`inline-flex min-h-9 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 ${textClass} font-medium text-slate-700 shadow-xs transition-colors hover:border-slate-300`}
     >
       <CalendarSmallIcon className={`${compact ? "h-3.5 w-3.5" : "h-3.5 w-3.5"} shrink-0 text-emerald-600`} />
-      <span className="whitespace-nowrap text-slate-500">Ngày tự chọn:</span>
-      <select
-        value={mode}
-        onChange={(e) => onModeChange(e.target.value as CustomDateMode)}
-        className={`${textClass} cursor-pointer border-0 bg-transparent font-semibold text-slate-900 outline-none`}
-      >
-        <option value="single">Một ngày</option>
-        <option value="range">Khoảng ngày</option>
-      </select>
-
-      {mode === "single" ? (
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => onDateChange(e.target.value)}
-          className={inputClass}
-        />
-      ) : (
-        <>
-          <span className="text-slate-400">Từ</span>
-          <input
-            type="date"
-            value={startDate}
-            max={endDate || undefined}
-            onChange={(e) => onStartDateChange(e.target.value)}
-            className={inputClass}
-          />
-          <span className="text-slate-400">→</span>
-          <span className="text-slate-400">Đến</span>
-          <input
-            type="date"
-            value={endDate}
-            min={startDate || undefined}
-            onChange={(e) => onEndDateChange(e.target.value)}
-            className={inputClass}
-          />
-        </>
-      )}
+      <span className="whitespace-nowrap text-slate-500">Khoảng ngày:</span>
+      <span className="text-slate-400">Từ</span>
+      <input
+        type="date"
+        value={startDate}
+        max={endDate || undefined}
+        onChange={(e) => onStartDateChange(e.target.value)}
+        className={inputClass}
+      />
+      <span className="text-slate-400">→</span>
+      <span className="text-slate-400">Đến</span>
+      <input
+        type="date"
+        value={endDate}
+        min={startDate || undefined}
+        onChange={(e) => onEndDateChange(e.target.value)}
+        className={inputClass}
+      />
     </div>
   );
 }
