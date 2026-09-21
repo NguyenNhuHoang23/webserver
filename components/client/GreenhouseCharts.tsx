@@ -82,7 +82,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
   }, [rows, total, sources]);
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bg-[#f4f6f9] p-4 lg:p-5">
+    <div className="h-full min-h-0 overflow-y-auto bg-[#f4f6f9] p-3 lg:p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-[20px] font-bold tracking-tight text-slate-800 sm:text-[22px]">

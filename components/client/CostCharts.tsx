@@ -348,7 +348,7 @@ export function CostCharts() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
+      <div className="min-w-0 flex-1 overflow-y-auto p-3 lg:p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xs">
             {energyKinds.map((item) => {
@@ -371,7 +371,7 @@ export function CostCharts() {
           <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
         </div>
 
-        <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
+        <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
           <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
             <div className="flex items-start justify-between gap-3">
               <div>

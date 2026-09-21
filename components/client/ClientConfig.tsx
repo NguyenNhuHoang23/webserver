@@ -207,8 +207,8 @@ export function ClientConfig() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-6">
+      <div className="min-w-0 flex-1 overflow-y-auto p-3 lg:p-4">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-5">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-[22px] font-bold text-slate-800">{meta.title}</h2>

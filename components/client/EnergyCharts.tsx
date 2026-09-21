@@ -534,7 +534,7 @@ export function EnergyCharts() {
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-2 sm:p-3">
         {isUiChart ? (
           <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
             <UiWaveform timeFilter={timeFilter} />
@@ -549,7 +549,7 @@ export function EnergyCharts() {
           <UnbalanceChart seed={seed} />
         ) : isConsumptionChart ? (
           <>
-            <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
+            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
               <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>

@@ -188,8 +188,8 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
         </nav>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-6">
-        <section className="rounded-lg border border-slate-200 bg-white px-6 py-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="min-w-0 flex-1 overflow-y-auto p-3 lg:p-4">
+        <section className="rounded-lg border border-slate-200 bg-white px-4 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:px-5">
           <div className="relative mb-2">
             <h2 className="text-center text-[20px] font-semibold text-slate-800">{report.name}</h2>
             <div className="absolute top-0 right-0 flex items-center gap-1">

@@ -107,7 +107,7 @@ export function ClientDashboard({ project }: { project: Project }) {
   const energyTotal = energy.reduce((sum, item) => sum + item.kwh, 0);
 
   return (
-    <div className="mx-auto h-full max-w-[1480px] overflow-y-auto px-5 py-5 lg:px-6">
+    <div className="h-full overflow-y-auto px-3 py-3 sm:px-4 lg:px-5">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-slate-800">

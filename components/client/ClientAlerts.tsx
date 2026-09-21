@@ -629,7 +629,7 @@ export function ClientAlerts({ project }: { project: Project }) {
       </div>
 
       {/* Main Table Content */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 lg:px-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 lg:px-5 lg:py-4">
         <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-xs">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1000px] text-left text-xs">
