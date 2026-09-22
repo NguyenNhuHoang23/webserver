@@ -27,12 +27,18 @@ function fmt(n: number, digits = 1) {
   });
 }
 
+type GreenhouseSelection =
+  | { kind: "all" }
+  | { kind: "scope"; scope: ScopeId }
+  | { kind: "source"; sourceId: string };
+
 export function GreenhouseCharts({ projectId }: { projectId: string }) {
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>({
     ...DEFAULT_TIME_FILTER,
     mode: "year",
   });
   const [sources, setSources] = useState<GhgEmissionSource[]>([]);
+  const [selection, setSelection] = useState<GreenhouseSelection>({ kind: "all" });
 
   useEffect(() => {
     let active = true;
@@ -68,21 +74,123 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
       .sort((a, b) => b.tons - a.tons);
   }, [sources, scale]);
 
-  const total = Number(rows.reduce((s, r) => s + r.tons, 0).toFixed(1));
+  const selectedRows = useMemo(() => {
+    if (selection.kind === "scope") return rows.filter((row) => row.scope === selection.scope);
+    if (selection.kind === "source") return rows.filter((row) => row.id === selection.sourceId);
+    return rows;
+  }, [rows, selection]);
+
+  const total = Number(selectedRows.reduce((s, r) => s + r.tons, 0).toFixed(1));
+  const visibleRows = useMemo(
+    () =>
+      selectedRows.map((row) => ({
+        ...row,
+        share: total > 0 ? Number(((row.tons / total) * 100).toFixed(1)) : 0,
+      })),
+    [selectedRows, total],
+  );
   const goal = Math.max(62, Math.min(96, 85 - (timeFilter.year - 2024) * 4));
 
   const scopeShares = useMemo(() => {
     return GHG_SCOPES.map((scope) => {
-      const tons = rows
+      const tons = visibleRows
         .filter((row) => row.scope === scope.id)
         .reduce((s, r) => s + r.tons, 0);
       const share = total > 0 ? Number(((tons / total) * 100).toFixed(1)) : 0;
       return { ...scope, tons, share };
-    }).filter((item) => item.tons > 0 || sources.some((s) => s.scope === item.id));
-  }, [rows, total, sources]);
+    }).filter((item) => item.tons > 0 || visibleRows.some((s) => s.scope === item.id));
+  }, [total, visibleRows]);
+
+  const selectionLabel =
+    selection.kind === "scope"
+      ? scopeLabel(selection.scope)
+      : selection.kind === "source"
+      ? visibleRows[0]?.name ?? "Nguồn phát thải"
+      : "Tất cả nguồn phát thải";
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bg-[#f4f6f9] p-4 lg:p-5">
+    <div className="flex h-full min-h-0 overflow-hidden bg-[#f4f6f9]">
+      <aside className="hidden w-[250px] shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
+        <div className="border-b border-slate-100 px-4 py-4">
+          <p className="text-[11px] font-bold tracking-[0.08em] text-slate-500">PHẠM VI & NGUỒN PHÁT THẢI</p>
+          <p className="mt-1 text-xs text-slate-400">{rows.length} nguồn đang cấu hình</p>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <button
+            type="button"
+            onClick={() => setSelection({ kind: "all" })}
+            className={`mb-3 flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-colors ${
+              selection.kind === "all"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-slate-200 text-slate-600 hover:border-emerald-200 hover:bg-emerald-50/50"
+            }`}
+          >
+            <span className="text-[13px] font-semibold">Tất cả nguồn phát thải</span>
+            <span className="text-[11px] font-semibold text-slate-400">{rows.length}</span>
+          </button>
+
+          <div className="space-y-4">
+            {GHG_SCOPES.map((scope) => {
+              const scopeRows = rows.filter((row) => row.scope === scope.id);
+              const scopeActive = selection.kind === "scope" && selection.scope === scope.id;
+              return (
+                <section key={scope.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelection({ kind: "scope", scope: scope.id })}
+                    className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors ${
+                      scopeActive ? "bg-slate-100" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2 text-[12px] font-bold text-slate-700">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: scope.color }} />
+                      {scope.label}
+                    </span>
+                    <span className="text-[11px] text-slate-400">{scopeRows.length}</span>
+                  </button>
+
+                  {scopeRows.length ? (
+                    <div className="mt-1 space-y-1 border-l border-slate-200 pl-3">
+                      {scopeRows.map((row) => {
+                        const sourceActive = selection.kind === "source" && selection.sourceId === row.id;
+                        return (
+                          <button
+                            key={row.id}
+                            type="button"
+                            onClick={() => setSelection({ kind: "source", sourceId: row.id })}
+                            className={`flex w-full items-start justify-between gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                              sourceActive
+                                ? "bg-emerald-50 text-emerald-800"
+                                : "text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[12px] font-medium">{row.name}</span>
+                              <span className="mt-0.5 block text-[10px] text-slate-400">{scope.label}</span>
+                            </span>
+                            <span className="shrink-0 pt-0.5 text-[10px] font-semibold text-slate-400">
+                              {fmt(row.tons)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="px-4 py-1 text-[11px] text-slate-400">Chưa có nguồn</p>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100 px-4 py-3 text-[11px] text-slate-400">
+          Chọn phạm vi hoặc nguồn để xem chi tiết
+        </div>
+      </aside>
+
+      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-[20px] font-bold tracking-tight text-slate-800 sm:text-[22px]">
@@ -90,6 +198,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
           </h2>
           <p className="mt-0.5 text-xs text-slate-500">
             Theo dõi phát thải CO₂e theo phạm vi Scope 1, 2, 3 · Kỳ: <strong className="text-slate-800">{getTimeFilterLabel(timeFilter)}</strong>
+            <span className="ml-2 text-slate-400">· {selectionLabel}</span>
           </p>
         </div>
         <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
@@ -147,7 +256,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
           <p className="mt-1 text-[12px] text-slate-400">
             Nguồn phát thải lấy từ cấu hình Phạm vi 1 / 2 / 3
           </p>
-          {rows.length === 0 ? (
+          {visibleRows.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">
               Chưa có nguồn phát thải trong cấu hình
             </p>
@@ -165,7 +274,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
+                    {visibleRows.map((row) => (
                       <tr key={row.id} className="border-b border-slate-50">
                         <td className="py-2.5 font-medium text-slate-700">{row.name}</td>
                         <td className="py-2.5">
@@ -195,7 +304,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
                 BIỂU ĐỒ TỶ TRỌNG PHÁT THẢI
               </h4>
               <ul className="mt-3 space-y-3">
-                {rows.map((row) => (
+                {visibleRows.map((row) => (
                   <li key={row.id}>
                     <div className="mb-1 flex items-center justify-between text-[12px] text-slate-600">
                       <span>
@@ -219,6 +328,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
           )}
         </article>
       </div>
+    </div>
     </div>
   );
 }
