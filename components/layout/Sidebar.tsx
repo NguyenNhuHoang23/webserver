@@ -23,6 +23,11 @@ const navGroups = [
         label: "Thư viện loại đồng hồ",
         icon: DeviceIcon,
       },
+      {
+        href: "/gateway",
+        label: "Gateway Server",
+        icon: GatewayIcon,
+      },
     ],
   },
   {
@@ -411,6 +416,16 @@ function AlertConfigIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 4 3.5 19h17L12 4Z" />
       <path d="M12 10v5M12 17.4v.01" />
+    </svg>
+  );
+}
+
+function GatewayIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="8" width="18" height="8" rx="2" />
+      <path d="M7 12h.01M12 12h.01M17 12h.01" strokeWidth="2.4" />
+      <path d="M12 8V4M8 16v3M16 16v3" />
     </svg>
   );
 }

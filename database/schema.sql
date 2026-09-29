@@ -423,3 +423,112 @@ INSERT IGNORE INTO meter_readings (meter_point_id, recorded_at, metric, value, u
   ('m3', '2026-07-19 06:51:03', 'current', 612.4, 'A', 'good');
 
 INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-09-14-ems-initial-schema');
+
+CREATE TABLE IF NOT EXISTS gateway_devices (
+  gateway_id VARCHAR(64) NOT NULL,
+  protocol_version VARCHAR(20) NULL,
+  internet CHAR(1) NULL,
+  gateway_temperature VARCHAR(64) NULL,
+  gateway_humidity VARCHAR(64) NULL,
+  packet_number VARCHAR(64) NULL,
+  meter_type CHAR(1) NULL,
+  meter_model VARCHAR(191) NULL,
+  meter_id VARCHAR(191) NULL,
+  last_reading_time VARCHAR(64) NULL,
+  last_is_replay TINYINT(1) NULL,
+  last_error INT NULL,
+  last_values JSON NULL,
+  last_disposition VARCHAR(32) NULL,
+  last_seen_at VARCHAR(40) NULL,
+  wifi_ssid VARCHAR(191) NULL,
+  wifi_password VARCHAR(191) NULL,
+  time_update_seconds INT NOT NULL DEFAULT 30,
+  PRIMARY KEY (gateway_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gateway_reading_keys (
+  meter_model VARCHAR(191) NOT NULL,
+  meter_id VARCHAR(191) NOT NULL,
+  reading_time_raw VARCHAR(64) NOT NULL,
+  PRIMARY KEY (meter_model, meter_id, reading_time_raw)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gateway_packets (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  received_at VARCHAR(40) NOT NULL,
+  disposition VARCHAR(32) NOT NULL,
+  protocol_version VARCHAR(20) NOT NULL,
+  internet CHAR(1) NOT NULL,
+  packet_number VARCHAR(64) NOT NULL,
+  gateway_id VARCHAR(64) NOT NULL,
+  gateway_temperature VARCHAR(64) NULL,
+  gateway_humidity VARCHAR(64) NULL,
+  meter_type CHAR(1) NOT NULL,
+  meter_model VARCHAR(191) NOT NULL,
+  meter_id VARCHAR(191) NOT NULL,
+  reading_time_raw VARCHAR(64) NOT NULL,
+  is_replay TINYINT(1) NOT NULL,
+  error_code INT NOT NULL,
+  values_json JSON NOT NULL,
+  date_time_alarm VARCHAR(64) NULL,
+  id_alarm INT NULL,
+  value_alarm DECIMAL(20,6) NULL,
+  checksum VARCHAR(64) NOT NULL,
+  raw_text MEDIUMTEXT NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_gateway_packets_received (received_at),
+  KEY idx_gateway_packets_gateway (gateway_id, received_at),
+  KEY idx_gateway_packets_identity (meter_model, meter_id, reading_time_raw)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gateway_logs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  received_at VARCHAR(40) NOT NULL,
+  level VARCHAR(20) NOT NULL,
+  reason VARCHAR(500) NOT NULL,
+  gateway_id VARCHAR(64) NULL,
+  meter_model VARCHAR(191) NULL,
+  meter_id VARCHAR(191) NULL,
+  reading_time_raw VARCHAR(64) NULL,
+  packet_number VARCHAR(64) NULL,
+  raw_text MEDIUMTEXT NULL,
+  PRIMARY KEY (id),
+  KEY idx_gateway_logs_received (received_at),
+  KEY idx_gateway_logs_gateway (gateway_id, received_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gateway_alarms (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  source VARCHAR(20) NOT NULL,
+  gateway_id VARCHAR(64) NOT NULL,
+  meter_model VARCHAR(191) NULL,
+  meter_id VARCHAR(191) NULL,
+  occurred_at VARCHAR(64) NULL,
+  alarm_code INT NULL,
+  alarm_name VARCHAR(120) NULL,
+  alarm_value DECIMAL(20,6) NULL,
+  parameter_name VARCHAR(120) NULL,
+  parameter_value DECIMAL(20,6) NULL,
+  min_value DECIMAL(20,6) NULL,
+  max_value DECIMAL(20,6) NULL,
+  packet_id BIGINT UNSIGNED NULL,
+  created_at VARCHAR(40) NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_gateway_alarms_created (created_at),
+  KEY idx_gateway_alarms_gateway (gateway_id, created_at),
+  KEY idx_gateway_alarms_source (source, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gateway_thresholds (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  gateway_id VARCHAR(64) NOT NULL DEFAULT '',
+  meter_model VARCHAR(191) NOT NULL DEFAULT '',
+  meter_id VARCHAR(191) NOT NULL DEFAULT '',
+  parameter_name VARCHAR(120) NOT NULL,
+  min_value DECIMAL(20,6) NULL,
+  max_value DECIMAL(20,6) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_gateway_threshold (gateway_id, meter_model, meter_id, parameter_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-09-23-gateway-server-1');
