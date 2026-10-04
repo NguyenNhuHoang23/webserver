@@ -246,7 +246,17 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
   if (!valuesField || typeof valuesField !== "object" || Array.isArray(valuesField)) missing.push("values");
   if (checksumField == null || String(checksumField).trim() === "") missing.push("checksum");
 
-  if (missing.length || !internet || !meterType || !meterModel || !meterId || !reading || isReplay == null || error == null) {
+  if (
+    missing.length ||
+    !protocolVersion ||
+    !internet ||
+    !meterType ||
+    !meterModel ||
+    !meterId ||
+    !reading ||
+    isReplay == null ||
+    error == null
+  ) {
     return {
       ...base,
       reason: `Lỗi format: thiếu hoặc sai ${missing.join(", ") || "trường bắt buộc"}.`,
