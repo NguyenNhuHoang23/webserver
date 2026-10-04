@@ -21,6 +21,7 @@ type RegisterRow = DeviceRegister;
 
 const protocols = ["Modbus TCP", "Modbus RTU", "M-Bus", "BACnet", "MQTT"];
 const dataTypes = ["UINT16", "UINT32", "INT32", "FLOAT32", "FLOAT64"];
+const deviceCategories = ["PM2230", "PM5100", "iEM3000", "SITRANS F", "MAG 5100", "SensyTemp", "EJX"];
 
 function nextId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
@@ -40,12 +41,14 @@ export function AddCustomDeviceForm() {
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [deviceType, setDeviceType] = useState("");
+  const [category, setCategory] = useState("");
+  const [serial, setSerial] = useState("");
+  const [error, setError] = useState("");
   const [protocol, setProtocol] = useState(protocols[0]);
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [isEdit, setIsEdit] = useState(false);
   const [existingName, setExistingName] = useState("");
-  const [existingSn, setExistingSn] = useState("");
   const [extraFields, setExtraFields] = useState<ExtraField[]>([]);
   const [fieldToDelete, setFieldToDelete] = useState<ExtraField | null>(null);
   const [rowToDelete, setRowToDelete] = useState<RegisterRow | null>(null);
@@ -54,13 +57,13 @@ export function AddCustomDeviceForm() {
   const lastEdited = useMemo(() => "Vừa xong", []);
 
   useEffect(() => {
-    if (!editingId) {
-      setIsEdit(false);
-      return;
-    }
     let active = true;
     void hydrateDevices().then((devices) => {
       if (!active) return;
+      if (!editingId) {
+        setIsEdit(false);
+        return;
+      }
       const existing = devices.find((item) => item.id === editingId);
       if (!existing) {
         setIsEdit(false);
@@ -68,11 +71,12 @@ export function AddCustomDeviceForm() {
       }
       setIsEdit(true);
       setExistingName(existing.name);
-      setExistingSn(existing.sn);
       setBrand(existing.brand);
       setModel(existing.brandModel.replace(`${existing.brand} `, "").trim() || existing.name);
       setProtocol(existing.protocol || protocols[0]);
       setDeviceType(existing.type);
+      setCategory(existing.category ?? "");
+      setSerial(existing.sn);
       setNotes(existing.notes ?? "");
       setPreview(existing.image ?? null);
       setExtraFields(existing.extraFields ?? []);
@@ -109,33 +113,48 @@ export function AddCustomDeviceForm() {
     );
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const brandName = brand.trim() || "Custom";
     const modelName = model.trim() || "Device";
     const brandModel = modelName.toLowerCase().startsWith(brandName.toLowerCase())
       ? modelName
       : `${brandName} ${modelName}`;
+    const serialNumber = serial.trim();
+    const categoryName = category.trim();
+    if (!categoryName || !serialNumber) {
+      setError("Vui lòng chọn Category và nhập Serial.");
+      return;
+    }
+    setError("");
     const id = editingId && isEdit ? editingId : `dev-${Date.now()}`;
 
-    upsertDevice({
-      id,
-      name: isEdit && existingName ? existingName : `${modelName}`,
-      sn:
-        isEdit && existingSn
-          ? existingSn
-          : `TYPE: ${brandName.slice(0, 2).toUpperCase()}-${modelName.slice(0, 8).toUpperCase()}`,
-      brandModel,
-      brand: brandName,
-      type: typeLabelFromDeviceType(deviceType),
-      kind: kindFromDeviceType(deviceType || modelName),
-      status: "active",
-      lastSync: todaySyncLabel(),
-      protocol,
-      notes: notes.trim(),
-      image: preview ?? undefined,
-      extraFields,
-      registers: rows.filter((row) => row.address.trim() || row.name.trim()),
-    });
+    try {
+      await upsertDevice({
+        id,
+        name: isEdit && existingName ? existingName : `${modelName}`,
+        sn: serialNumber,
+        category: categoryName,
+        brandModel,
+        brand: brandName,
+        type: typeLabelFromDeviceType(deviceType),
+        kind: kindFromDeviceType(deviceType || modelName),
+        status: "active",
+        lastSync: todaySyncLabel(),
+        protocol,
+        notes: notes.trim(),
+        image: preview ?? undefined,
+        extraFields,
+        registers: rows.filter((row) => row.address.trim() || row.name.trim()),
+      });
+    } catch (submitError) {
+      const message = submitError instanceof Error ? submitError.message : "";
+      setError(
+        message.toLowerCase().includes("duplicate") || message.toLowerCase().includes("uq_devices_serial")
+          ? "Serial này đã được dùng cho loại thiết bị khác."
+          : "Không lưu được loại thiết bị. Hãy thử lại.",
+      );
+      return;
+    }
 
     router.push("/thiet-bi");
   }
@@ -182,6 +201,33 @@ export function AddCustomDeviceForm() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="1. Category">
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="input"
+              required
+            >
+              <option value="">Chọn category</option>
+              {deviceCategories.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+              {category && !deviceCategories.includes(category) ? (
+                <option value={category}>{category}</option>
+              ) : null}
+            </select>
+          </Field>
+          <Field label="2. Serial">
+            <input
+              value={serial}
+              onChange={(e) => setSerial(e.target.value)}
+              placeholder="VD: 250384934"
+              className="input"
+              required
+            />
+          </Field>
           <Field label="Thương hiệu / Nhà sản xuất">
             <input
               value={brand}
@@ -399,6 +445,7 @@ export function AddCustomDeviceForm() {
           Chỉnh sửa lần cuối: {lastEdited}
         </p>
         <div className="flex items-center gap-3">
+          {error ? <p className="text-sm font-medium text-red-500">{error}</p> : null}
           <Link
             href="/thiet-bi"
             className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"

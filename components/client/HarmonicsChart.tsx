@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { domainTicks, latestValue, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 
 const N = 160;
 const T0 = Date.parse("2026-01-27T09:40:00");
@@ -99,6 +100,30 @@ function iHarmWave(i: number, ch: Channel, order: number, agg: Agg, seed: number
   return Math.max(0.4, v);
 }
 
+function thduKey(component: ThduComponent, ch: number) {
+  if (component === "ud") return ["THDVan", "THDVbn", "THDVcn"][ch - 1] ?? "THDVan";
+  return ["THDVab", "THDVbc", "THDVca"][ch - 1] ?? "THDVab";
+}
+
+function thdiKey(ch: number) {
+  return ["THDCa", "THDCb", "THDCc"][ch - 1] ?? "THDCa";
+}
+
+function harmOrderKey(kind: "u" | "i", ch: number, order: number) {
+  if (kind === "i") return `H${order}${["Ca", "Cb", "Cc"][ch - 1] ?? "Ca"}`;
+  return `H${order}${["Vab", "Vbc", "Vca"][ch - 1] ?? "Vab"}`;
+}
+
+function peakDomainFromSamples(samples: ChartSample[] | undefined, kind: "u" | "i", fallback: [number, number]) {
+  if (!samples?.length) return fallback;
+  const nums = [3, 5, 7, 9]
+    .flatMap((order) => [1, 2, 3].map((ch) => latestValue(samples, harmOrderKey(kind, ch, order))))
+    .filter((value): value is number => value != null);
+  if (!nums.length) return fallback;
+  const max = Math.max(...nums, 0);
+  return [0, max === 0 ? 1 : max * 1.2] as [number, number];
+}
+
 function orderColor(phase: (typeof PHASES)[number], order: number) {
   return order <= 5 ? phase.color : phase.dark;
 }
@@ -115,7 +140,7 @@ function peakHarmDomain(kind: "u" | "i"): { domain: [number, number]; ticks: num
     : { domain: [0, 40], ticks: [0, 10, 20, 30, 40], unit: "[A]" };
 }
 
-export function HarmonicsChart({ seed }: { seed: number }) {
+export function HarmonicsChart({ seed, samples }: { seed: number; samples?: ChartSample[] }) {
   const [tab, setTab] = useState<"trend" | "peak">("trend");
   const [thduComponents, setThduComponents] = useState<ThduComponent[]>(["up"]);
   const [thduChannels, setThduChannels] = useState<Channel[]>([1, 2, 3]);
@@ -135,12 +160,26 @@ export function HarmonicsChart({ seed }: { seed: number }) {
           key: `thdu-sum-${agg}`,
           name: `THDu Sum ${agg}`,
           color: "#0f9f6e",
-          values: Array.from({ length: N }, (_, i) => {
-            const samples = thduChannels.flatMap((ch) =>
-              thduComponents.map((component) => thdWave(i, ch, agg, seed, component)),
-            );
-            return Math.sqrt(samples.reduce((sum, value) => sum + value ** 2, 0) / Math.max(samples.length, 1));
-          }),
+          values: (() => {
+            if (samples?.length) {
+              const live = thduChannels.flatMap((ch) =>
+                thduComponents
+                  .map((component) => valuesForKey(samples, thduKey(component, ch), N))
+                  .filter((series): series is number[] => series != null),
+              );
+              if (live.length) {
+                return Array.from({ length: N }, (_, i) =>
+                  Math.sqrt(live.reduce((sum, series) => sum + series[i] ** 2, 0) / live.length),
+                );
+              }
+            }
+            return Array.from({ length: N }, (_, i) => {
+              const wave = thduChannels.flatMap((ch) =>
+                thduComponents.map((component) => thdWave(i, ch, agg, seed, component)),
+              );
+              return Math.sqrt(wave.reduce((sum, value) => sum + value ** 2, 0) / Math.max(wave.length, 1));
+            });
+          })(),
         }));
       }
 
@@ -151,12 +190,14 @@ export function HarmonicsChart({ seed }: { seed: number }) {
             key: `thdu-${component}-${ch}-${agg}`,
             name: `${phase.u} ${component === "up" ? "Up" : "Ud"} ${agg}`,
             color: component === "up" ? phase.color : phase.dark,
-            values: Array.from({ length: N }, (_, i) => thdWave(i, ch, agg, seed, component)),
+            values:
+              valuesForKey(samples, thduKey(component, ch), N) ??
+              Array.from({ length: N }, (_, i) => thdWave(i, ch, agg, seed, component)),
           }));
         }),
       );
     },
-    [thduChannels, thduComponents, thduSum, aggs, seed],
+    [thduChannels, thduComponents, thduSum, aggs, seed, samples],
   );
 
   const thdiSeries = useMemo<Series[]>(
@@ -167,15 +208,24 @@ export function HarmonicsChart({ seed }: { seed: number }) {
           key: `thdi-${ch}-${agg}`,
           name: `${phase.i} THDi ${agg}`,
           color: phase.color,
-          values: Array.from({ length: N }, (_, i) => thdiWave(i, ch, agg, seed)),
+          values:
+            valuesForKey(samples, thdiKey(ch), N) ?? Array.from({ length: N }, (_, i) => thdiWave(i, ch, agg, seed)),
         }));
       }),
-    [thdiChannels, aggs, seed],
+    [thdiChannels, aggs, seed, samples],
   );
 
   const legend = [...thduSeries, ...thdiSeries];
-  const thduScale = harmDomain("u");
-  const thdiScale = harmDomain("i");
+  const thduBase = harmDomain("u");
+  const thdiBase = harmDomain("i");
+  const thduLiveDomain = samples?.length ? paddedDomain(thduSeries, thduBase.domain) : thduBase.domain;
+  const thdiLiveDomain = samples?.length ? paddedDomain(thdiSeries, thdiBase.domain) : thdiBase.domain;
+  const thduScale = samples?.length
+    ? { ...thduBase, domain: thduLiveDomain, ticks: domainTicks(thduLiveDomain) }
+    : thduBase;
+  const thdiScale = samples?.length
+    ? { ...thdiBase, domain: thdiLiveDomain, ticks: domainTicks(thdiLiveDomain) }
+    : thdiBase;
   const peakUScale = peakHarmDomain("u");
   const peakIScale = peakHarmDomain("i");
 
@@ -380,10 +430,11 @@ export function HarmonicsChart({ seed }: { seed: number }) {
           orders={orders}
           aggs={aggs}
           seed={seed}
+          samples={samples}
           uTitle={`U harmonic ${peakUScale.unit}`}
           iTitle={`I harmonic ${peakIScale.unit}`}
-          uDomain={peakUScale.domain}
-          iDomain={peakIScale.domain}
+          uDomain={peakDomainFromSamples(samples, "u", peakUScale.domain)}
+          iDomain={peakDomainFromSamples(samples, "i", peakIScale.domain)}
         />
       )}
 
@@ -534,6 +585,7 @@ function PeakOrderView({
   orders,
   aggs,
   seed,
+  samples,
   uTitle,
   iTitle,
   uDomain,
@@ -544,6 +596,7 @@ function PeakOrderView({
   orders: number[];
   aggs: Agg[];
   seed: number;
+  samples?: ChartSample[];
   uTitle: string;
   iTitle: string;
   uDomain: [number, number];
@@ -559,8 +612,9 @@ function PeakOrderView({
         orders={showOrders}
         highlight={orders}
         values={(ch, order) => {
-          const samples = Array.from({ length: N }, (_, i) => uHarmWave(i, ch, order, aggs[0], seed));
-          return Math.max(...samples);
+          if (samples?.length) return latestValue(samples, harmOrderKey("u", ch, order)) ?? 0;
+          const wave = Array.from({ length: N }, (_, i) => uHarmWave(i, ch, order, aggs[0], seed));
+          return Math.max(...wave);
         }}
         kind="u"
       />
@@ -572,8 +626,9 @@ function PeakOrderView({
         orders={showOrders}
         highlight={orders}
         values={(ch, order) => {
-          const samples = Array.from({ length: N }, (_, i) => iHarmWave(i, ch, order, aggs[0], seed));
-          return Math.max(...samples);
+          if (samples?.length) return latestValue(samples, harmOrderKey("i", ch, order)) ?? 0;
+          const wave = Array.from({ length: N }, (_, i) => iHarmWave(i, ch, order, aggs[0], seed));
+          return Math.max(...wave);
         }}
         kind="i"
         axis

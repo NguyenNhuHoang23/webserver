@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
-  INITIAL_DEVICES,
+  hydrateDevices,
   loadDevices,
   removeDevice as removeStoredDevice,
   type CatalogDevice,
@@ -18,11 +18,18 @@ export function DeviceList() {
   const [type, setType] = useState("all");
   const [view, setView] = useState<"list" | "grid">("list");
   const [page, setPage] = useState(1);
-  const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
+  const [devices, setDevices] = useState<CatalogDevice[]>([]);
   const [deviceToDelete, setDeviceToDelete] = useState<CatalogDevice | null>(null);
 
   useEffect(() => {
     setDevices(loadDevices());
+    let active = true;
+    void hydrateDevices().then((items) => {
+      if (active) setDevices(items);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const brands = useMemo(
@@ -213,6 +220,8 @@ export function DeviceList() {
                               </span>
                               <span className="block font-mono text-[11px] text-slate-400">
                                 {device.brandModel}
+                                {device.category ? ` · ${device.category}` : ""}
+                                {device.sn ? ` · ${device.sn}` : ""}
                               </span>
                             </div>
                           </div>

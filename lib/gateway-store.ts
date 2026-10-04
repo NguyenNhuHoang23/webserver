@@ -4,6 +4,7 @@ import { emsDb, jsonField, queryRows } from "@/lib/server-db";
 import {
   CLOCK_SKEW_MS,
   DEFAULT_TIME_UPDATE_SECONDS,
+  METER_MODEL_BY_CODE,
   alarmName,
   buildAck,
   finiteNumber,
@@ -13,6 +14,7 @@ import {
   type NormalizedPacket,
   type PacketNumber,
 } from "@/lib/gateway-protocol";
+import type { ProjectGatewaySample } from "@/lib/gateway-series";
 
 type ThresholdRow = {
   gateway_id: string;
@@ -235,6 +237,35 @@ const STATEMENTS = [
     PRIMARY KEY (id),
     UNIQUE KEY uq_gateway_threshold (gateway_id, meter_model, meter_id, parameter_name)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS gateway_samples (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    gateway_id INT UNSIGNED NOT NULL,
+    meter_type TINYINT UNSIGNED NOT NULL,
+    meter_model SMALLINT UNSIGNED NOT NULL,
+    meter_id BIGINT UNSIGNED NOT NULL,
+    packet_number INT UNSIGNED NOT NULL,
+    received_at DATETIME(3) NOT NULL,
+    sampled_unix INT UNSIGNED NULL,
+    is_replay TINYINT(1) NOT NULL,
+    error_code SMALLINT NOT NULL,
+    crc_ok TINYINT(1) NOT NULL,
+    values_json JSON NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_gateway_sample (gateway_id, meter_id, packet_number),
+    KEY idx_gateway_sample_meter (meter_model, meter_id, received_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS gateway_meter_latest (
+    meter_model SMALLINT UNSIGNED NOT NULL,
+    meter_id BIGINT UNSIGNED NOT NULL,
+    gateway_id INT UNSIGNED NOT NULL,
+    meter_type TINYINT UNSIGNED NOT NULL,
+    packet_number INT UNSIGNED NOT NULL,
+    received_at DATETIME(3) NOT NULL,
+    sampled_unix INT UNSIGNED NULL,
+    error_code SMALLINT NOT NULL,
+    values_json JSON NOT NULL,
+    PRIMARY KEY (meter_model, meter_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -253,6 +284,9 @@ async function createSchema() {
   }
   await emsDb.query(
     "INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-09-23-gateway-server-1')",
+  ).catch(() => undefined);
+  await emsDb.query(
+    "INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-10-04-gateway-samples')",
   ).catch(() => undefined);
 }
 
@@ -292,8 +326,10 @@ export async function ingestGateway(rawText: string) {
   const notes: Array<{ level: string; reason: string }> = [];
 
   if (!parsed.ok) {
-    notes.push({ level: "log", reason: parsed.reason });
-  } else {
+    if (parsed.packet?.meterModelCode == null) {
+      notes.push({ level: "log", reason: parsed.reason });
+    }
+  } else if (packet.timeSynced) {
     const duplicate = await readingExists(packet);
     if (duplicate) {
       disposition = "duplicate";
@@ -320,23 +356,24 @@ export async function ingestGateway(rawText: string) {
         });
       }
     }
+  }
 
-    if (packet.error !== 0) {
-      notes.push({
-        level: "warning",
-        reason: `Error=${packet.error} (${gatewayErrorText(packet.error)}). Bản tin bị bỏ qua.`,
-      });
-      if (disposition === "accepted") {
-        disposition = "gateway_error";
-        server = 4;
-      }
+  if (packet.error !== 0) {
+    notes.push({
+      level: "warning",
+      reason: `Error=${packet.error} (${gatewayErrorText(packet.error)}). Bản tin bị bỏ qua.`,
+    });
+    if (disposition === "accepted") {
+      disposition = "gateway_error";
+      server = 4;
     }
   }
 
   const connection = await emsDb.getConnection();
   try {
     await connection.beginTransaction();
-    if (disposition === "accepted") {
+    const sample = compactSample(packet);
+    if (disposition === "accepted" && !sample) {
       try {
         await connection.execute(
           `INSERT INTO gateway_reading_keys (meter_model, meter_id, reading_time_raw) VALUES (?, ?, ?)`,
@@ -353,6 +390,57 @@ export async function ingestGateway(rawText: string) {
       }
     }
 
+    let packetId = 0;
+    if (sample) {
+      const receivedSql = receivedAt.slice(0, 23).replace("T", " ").replace("Z", "");
+      const valuesJson = JSON.stringify(packet.values);
+      const crcOk = parsed.ok ? 1 : 0;
+      await connection.execute(
+        `INSERT INTO gateway_samples (
+          gateway_id, meter_type, meter_model, meter_id, packet_number, received_at,
+          sampled_unix, is_replay, error_code, crc_ok, values_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE id = id`,
+        [
+          sample.gatewayId,
+          sample.meterType,
+          sample.meterModel,
+          sample.meterId,
+          sample.packetNumber,
+          receivedSql,
+          packet.timeSynced ? Math.trunc(packet.readingDate.getTime() / 1000) : null,
+          packet.isReplay ? 1 : 0,
+          packet.error,
+          crcOk,
+          valuesJson,
+        ],
+      );
+      await connection.execute(
+        `INSERT INTO gateway_meter_latest (
+          meter_model, meter_id, gateway_id, meter_type, packet_number, received_at,
+          sampled_unix, error_code, values_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          gateway_id = VALUES(gateway_id),
+          meter_type = VALUES(meter_type),
+          packet_number = VALUES(packet_number),
+          received_at = VALUES(received_at),
+          sampled_unix = VALUES(sampled_unix),
+          error_code = VALUES(error_code),
+          values_json = VALUES(values_json)`,
+        [
+          sample.meterModel,
+          sample.meterId,
+          sample.gatewayId,
+          sample.meterType,
+          sample.packetNumber,
+          receivedSql,
+          packet.timeSynced ? Math.trunc(packet.readingDate.getTime() / 1000) : null,
+          packet.error,
+          valuesJson,
+        ],
+      );
+    } else {
     const [inserted] = await connection.execute<ResultSetHeader>(
       `INSERT INTO gateway_packets (
         received_at, disposition, protocol_version, internet, packet_number, gateway_id,
@@ -383,9 +471,10 @@ export async function ingestGateway(rawText: string) {
         rawText,
       ],
     );
-    const packetId = Number(inserted.insertId);
+    packetId = Number(inserted.insertId);
+    }
 
-    if (disposition === "accepted") {
+    if (!sample && disposition === "accepted") {
       await insertAcceptedAlarms(connection, packet, packetId, receivedAt);
     }
 
@@ -444,7 +533,7 @@ export async function ingestGateway(rawText: string) {
           packet.meterId,
           packet.readingTime,
           String(packet.packetNumber),
-          rawText,
+          sample ? null : rawText,
         ],
       );
     }
@@ -609,6 +698,22 @@ export async function saveGatewayThreshold(input: {
 export async function deleteGatewayThreshold(id: number) {
   await ensureGatewaySchema();
   await emsDb.execute("DELETE FROM gateway_thresholds WHERE id = ?", [id]);
+}
+
+function compactSample(packet: NormalizedPacket) {
+  if (packet.meterModelCode == null || packet.meterTypeCode == null) return null;
+  if (!/^\d+$/.test(packet.gatewayId) || !/^\d+$/.test(packet.meterId)) return null;
+  const gatewayId = Number(packet.gatewayId);
+  const meterId = Number(packet.meterId);
+  const packetNumber = Number(packet.packetNumber);
+  if (![gatewayId, meterId, packetNumber].every(Number.isSafeInteger)) return null;
+  return {
+    gatewayId,
+    meterId,
+    meterModel: packet.meterModelCode,
+    meterType: packet.meterTypeCode,
+    packetNumber,
+  };
 }
 
 async function readingExists(packet: NormalizedPacket) {
@@ -855,6 +960,96 @@ function asCount(value: unknown) {
 
 function isDuplicate(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ER_DUP_ENTRY";
+}
+
+export async function getProjectGatewaySeries(projectId: string): Promise<ProjectGatewaySample[]> {
+  const id = projectId.trim();
+  if (!id) return [];
+  await ensureGatewaySchema();
+
+  let points: Array<{
+    id: string;
+    serialNumber: string | null;
+    category: string | null;
+    deviceSerial: string | null;
+  }> = [];
+  try {
+    points = await queryRows(
+      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
+         FROM meter_points mp
+         LEFT JOIN devices d ON d.id = mp.device_id
+        WHERE mp.project_id = ?`,
+      [id],
+    );
+  } catch (error) {
+    console.error("Project gateway match failed", error);
+    return [];
+  }
+
+  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
+  for (const point of points) {
+    const model = modelCodeForCategory(point.category ?? "");
+    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
+    if (model == null || !meterId) continue;
+    const key = `${model}:${meterId}`;
+    const existing = pairs.get(key);
+    if (existing) existing.pointIds.push(String(point.id));
+    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
+  }
+
+  const samples: ProjectGatewaySample[] = [];
+  for (const pair of pairs.values()) {
+    const rows = await queryRows<RowDataPacket>(
+      `SELECT received_at, values_json
+         FROM gateway_samples
+        WHERE meter_model = ? AND meter_id = ?
+        ORDER BY received_at DESC
+        LIMIT 800`,
+      [pair.model, pair.meterId],
+    );
+    const chronological = [...rows].reverse();
+    for (const row of chronological) {
+      const values = numericValues(row.values_json);
+      const at = receivedAtText(row.received_at);
+      for (const meterPointId of pair.pointIds) {
+        samples.push({ meterPointId, at, values });
+      }
+    }
+  }
+  return samples;
+}
+
+function modelCodeForCategory(category: string) {
+  const name = category.trim().toLowerCase();
+  if (!name) return null;
+  for (const [code, label] of Object.entries(METER_MODEL_BY_CODE)) {
+    if (label.toLowerCase() === name) return Number(code);
+  }
+  return null;
+}
+
+function serialToMeterId(serial: string) {
+  const text = serial.trim().replace(/^SN:\s*/i, "");
+  return /^\d+$/.test(text) ? text : null;
+}
+
+function numericValues(raw: unknown) {
+  const source = jsonField<Record<string, unknown>>(raw, {});
+  const values: Record<string, number> = {};
+  for (const [key, value] of Object.entries(source)) {
+    const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+    if (Number.isFinite(number)) values[key] = number;
+  }
+  return values;
+}
+
+function receivedAtText(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const pad = (part: number) => String(part).padStart(2, "0");
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  }
+  const text = String(value ?? "");
+  return text.includes("T") ? text : text.replace(" ", "T");
 }
 
 export type { PacketNumber };

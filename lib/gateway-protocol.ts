@@ -14,6 +14,16 @@ export const METER_TYPE_LABEL: Record<string, string> = {
   F: "Lưu lượng (Flow)",
 };
 
+/** Mã số firmware gửi trong MT. 1 = đồng hồ điện. */
+export const METER_TYPE_BY_CODE: Record<number, "E" | "W" | "P" | "F"> = {
+  1: "E",
+};
+
+/** Mã số firmware gửi trong MM. 0 = PM2230. */
+export const METER_MODEL_BY_CODE: Record<number, string> = {
+  0: "PM2230",
+};
+
 export const DISPOSITION_LABEL: Record<string, string> = {
   accepted: "Đã lưu",
   duplicate: "Bỏ qua: trùng meterModel + meterId + readingTime",
@@ -35,10 +45,14 @@ export type NormalizedPacket = {
   gatewayTemperature: string | null;
   gatewayHumidity: string | null;
   meterType: "E" | "W" | "P" | "F";
+  meterTypeCode: number | null;
   meterModel: string;
+  meterModelCode: number | null;
   meterId: string;
   readingTime: string;
   readingDate: Date;
+  /** TIM = 0 khi gateway chưa nhận giờ server. */
+  timeSynced: boolean;
   isReplay: boolean;
   error: number;
   values: Record<string, unknown>;
@@ -180,7 +194,7 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
 
   let raw: unknown;
   try {
-    raw = JSON.parse(rawText);
+    raw = JSON.parse(sanitizeGatewayJson(rawText));
   } catch {
     return empty;
   }
@@ -197,9 +211,21 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
 
   const protocolVersion = parseVersion(readField(source, ["protocolVersion", "PV"]));
   const internet = parseInternet(readField(source, ["Internet", "IT"]));
-  const meterType = parseMeterType(readField(source, ["meterType", "MT"]));
-  const meterModel = idText(readField(source, ["meterModel", "MM"]));
-  const meterId = idText(readField(source, ["meterId", "MID"]));
+  const meterTypeField = readField(source, ["meterType", "MT"]);
+  const meterModelField = readField(source, ["meterModel", "MM"]);
+  const valuesFieldEarly = readField(source, ["values", "VAL"]);
+  const valuesRecord =
+    valuesFieldEarly && typeof valuesFieldEarly === "object" && !Array.isArray(valuesFieldEarly)
+      ? (valuesFieldEarly as Record<string, unknown>)
+      : null;
+  const meterType = parseMeterType(meterTypeField);
+  const meterTypeCode = numericCode(meterTypeField);
+  const meterModelCode = numericCode(meterModelField);
+  const meterModel =
+    (meterModelCode != null ? METER_MODEL_BY_CODE[meterModelCode] : null) ?? idText(meterModelField);
+  const meterId =
+    idText(readField(source, ["meterId", "MID"])) ??
+    (valuesRecord ? idText(readField(valuesRecord, ["MID", "meterId"])) : null);
   const reading = parseReadingTime(readField(source, ["readingTime", "TIM"]));
   const isReplay = parseReplay(readField(source, ["isReplay", "RE"]));
   const error = parseError(readField(source, ["Error", "ER"]));
@@ -227,7 +253,8 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
     };
   }
 
-  const values = valuesField as Record<string, unknown>;
+  const sourceValues = valuesField as Record<string, unknown>;
+  const values = compactMeterValues(sourceValues);
   const packet: NormalizedPacket = {
     protocolVersion,
     internet,
@@ -236,16 +263,19 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
     gatewayTemperature: asText(readField(source, ["gatewayTemperature", "GT"])),
     gatewayHumidity: asText(readField(source, ["gatewayHumidity", "GH"])),
     meterType,
+    meterTypeCode,
     meterModel,
+    meterModelCode,
     meterId,
     readingTime: reading.raw,
     readingDate: reading.date,
+    timeSynced: reading.synced,
     isReplay,
     error,
     values,
-    dateTimeAlarm: asText(readField(values, ["DateTimeAlarm", "DTA"])),
-    idAlarm: finiteInt(readField(values, ["IDAlarm", "IDA"])),
-    valueAlarm: finiteNumber(readField(values, ["ValueAlarm", "VALA"])),
+    dateTimeAlarm: asText(readField(sourceValues, ["DateTimeAlarm", "DTA"])),
+    idAlarm: finiteInt(readField(sourceValues, ["IDAlarm", "IDA"])),
+    valueAlarm: finiteNumber(readField(sourceValues, ["ValueAlarm", "VALA"])),
     checksum: String(checksumField).trim(),
     shortKeys,
   };
@@ -288,12 +318,14 @@ function parseVersion(value: unknown) {
 
 function parseInternet(value: unknown): "W" | "S" | null {
   const text = String(value ?? "").trim().toLowerCase();
-  if (text === "w" || text === "wifi") return "W";
-  if (text === "s" || text === "sim") return "S";
+  if (text === "w" || text === "wifi" || text === "1") return "W";
+  if (text === "s" || text === "sim" || text === "2") return "S";
   return null;
 }
 
 function parseMeterType(value: unknown): "E" | "W" | "P" | "F" | null {
+  const code = numericCode(value);
+  if (code != null && METER_TYPE_BY_CODE[code]) return METER_TYPE_BY_CODE[code];
   const text = String(value ?? "").trim().toLowerCase();
   if (text === "e" || text === "electric" || text === "electricity" || text === "electricity meter") return "E";
   if (text === "w" || text === "water" || text === "water meter") return "W";
@@ -304,6 +336,8 @@ function parseMeterType(value: unknown): "E" | "W" | "P" | "F" | null {
 
 function parseReplay(value: unknown) {
   if (typeof value === "boolean") return value;
+  if (value === 0 || value === "0") return false;
+  if (value === 1 || value === "1") return true;
   const text = String(value ?? "").trim().toLowerCase();
   if (text === "t" || text === "true") return true;
   if (text === "f" || text === "fail" || text === "false") return false;
@@ -319,10 +353,36 @@ function parseError(value: unknown) {
 }
 
 function parseReadingTime(value: unknown) {
+  if (value === 0 || value === "0") return { raw: "0", date: new Date(0), synced: false };
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    const date = new Date(value > 1e12 ? value : value * 1000);
+    if (Number.isNaN(date.getTime())) return null;
+    return { raw: String(Math.trunc(value)), date, synced: true };
+  }
   if (typeof value !== "string" || !value.trim()) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return { raw: value.trim(), date };
+  return { raw: value.trim(), date, synced: true };
+}
+
+function numericCode(value: unknown) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
+function sanitizeGatewayJson(rawText: string) {
+  return rawText.replace(/:\s*-?nan\b/gi, ":null").replace(/:\s*[+-]?infinity\b/gi, ":null");
+}
+
+function compactMeterValues(values: Record<string, unknown>) {
+  const compact: Record<string, number> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (key === "MID" || key === "meterId") continue;
+    const parsed = finiteNumber(value);
+    if (parsed != null) compact[key] = parsed;
+  }
+  return compact;
 }
 
 function idText(value: unknown) {

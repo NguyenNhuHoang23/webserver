@@ -121,7 +121,7 @@ async function getResource(resource: string, request: NextRequest) {
   if (resource === "devices") {
     const rows = await queryRows<Row>(
       `SELECT id, name, serial_number AS sn, brand_model AS brandModel, brand,
-              device_type AS type, kind, status, last_sync_label AS lastSync,
+              device_type AS type, category, kind, status, last_sync_label AS lastSync,
               protocol, notes, image, extra_fields AS extraFields, registers
          FROM devices ORDER BY id`,
     );
@@ -357,16 +357,17 @@ async function saveResource(resource: string, body: Row) {
     }
     await emsDb.execute(
       `INSERT INTO devices
-        (id, name, serial_number, brand_model, brand, device_type, kind, status,
+        (id, name, serial_number, brand_model, brand, device_type, category, kind, status,
          last_sync_label, protocol, notes, image, extra_fields, registers)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE name=VALUES(name), serial_number=VALUES(serial_number),
          brand_model=VALUES(brand_model), brand=VALUES(brand), device_type=VALUES(device_type),
-         kind=VALUES(kind), status=VALUES(status), last_sync_label=VALUES(last_sync_label),
-         protocol=VALUES(protocol), notes=VALUES(notes), image=VALUES(image),
-         extra_fields=VALUES(extra_fields), registers=VALUES(registers)`,
-      [body.id, body.name, body.sn, body.brandModel, body.brand, body.type, body.kind,
-        body.status, body.lastSync, body.protocol || null, body.notes || null, body.image || null,
+         category=VALUES(category), kind=VALUES(kind), status=VALUES(status),
+         last_sync_label=VALUES(last_sync_label), protocol=VALUES(protocol), notes=VALUES(notes),
+         image=VALUES(image), extra_fields=VALUES(extra_fields), registers=VALUES(registers)`,
+      [body.id, body.name, body.sn, body.brandModel, body.brand, body.type, body.category || null,
+        body.kind, body.status, body.lastSync, body.protocol || null, body.notes || null,
+        body.image || null,
         body.extraFields ? JSON.stringify(body.extraFields) : null,
         body.registers ? JSON.stringify(body.registers) : null],
     );

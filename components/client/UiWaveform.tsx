@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
 const PHASE_COLORS = ["#e53935", "#43a047", "#1e88e5"];
@@ -72,7 +73,18 @@ function timeLabel(index: number, kind: "full" | "min" | "sec" | "tooltip") {
   return ss === "30" ? "30" : ss;
 }
 
-export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
+function voltageKey(qty: string, ch: number) {
+  if (qty === "Un") return ["Van", "Vbn", "Vcn"][ch - 1] ?? "Van";
+  if (qty === "U0") return "VLNavg";
+  return ["Vab", "Vbc", "Vca"][ch - 1] ?? "Vab";
+}
+
+function currentKey(qty: string, ch: number) {
+  if (qty === "In" || qty === "I0") return "In";
+  return ["Ia", "Ib", "Ic"][ch - 1] ?? "Ia";
+}
+
+export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValue; samples?: ChartSample[] }) {
   const [uQty, setUQty] = useState("U");
   const [iQty, setIQty] = useState("I");
   const [uCh, setUCh] = useState([1, 2, 3]);
@@ -105,12 +117,14 @@ export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
                 key: `${item.name}-${agg}`,
                 name: item.name,
                 color: PHASE_COLORS[idx],
-                values: Array.from({ length: N }, (_, i) => waveAt(i, idx * 0.9, "u", "rms", agg)),
+                values:
+                  valuesForKey(samples, voltageKey(uQty, item.ch), N) ??
+                  Array.from({ length: N }, (_, i) => waveAt(i, idx * 0.9, "u", "rms", agg)),
               },
             ]
           : [],
       ),
-    [uCh, agg],
+    [uCh, agg, samples, uQty],
   );
 
   const iSeries = useMemo(
@@ -122,13 +136,18 @@ export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
                 key: `${item.name}-${agg}`,
                 name: item.name,
                 color: PHASE_COLORS[idx],
-                values: Array.from({ length: N }, (_, i) => waveAt(i, idx * 1.1, "i", "rms", agg)),
+                values:
+                  valuesForKey(samples, currentKey(iQty, item.ch), N) ??
+                  Array.from({ length: N }, (_, i) => waveAt(i, idx * 1.1, "i", "rms", agg)),
               },
             ]
           : [],
       ),
-    [iCh, agg],
+    [iCh, agg, samples, iQty],
   );
+
+  const uDomain = samples?.length ? paddedDomain(uSeries, [397, 401]) : ([397, 401] as [number, number]);
+  const iDomain = samples?.length ? paddedDomain(iSeries, [450, 650]) : ([450, 650] as [number, number]);
 
   return (
     <div className="font-sans">
@@ -163,7 +182,7 @@ export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
           window={window}
           hover={crosshair ? hover : null}
           onHover={setHover}
-          domain={[397, 401]}
+          domain={uDomain}
         />
         <div className="h-2 border-y border-slate-300 bg-slate-200" />
         <WavePane
@@ -172,7 +191,7 @@ export function UiWaveform({ timeFilter }: { timeFilter: TimeFilterValue }) {
           window={window}
           hover={crosshair ? hover : null}
           onHover={setHover}
-          domain={[450, 650]}
+          domain={iDomain}
           axis
         />
       </div>

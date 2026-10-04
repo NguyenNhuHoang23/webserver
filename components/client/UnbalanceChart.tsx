@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { domainTicks, paddedDomain, valuesForKeysAverage, type ChartSample } from "@/lib/gateway-series";
 
 const N = 160;
 const T0 = Date.parse("2026-01-27T09:40:00");
@@ -72,7 +73,13 @@ function iUnb(i: number, qty: string, agg: Agg, seed: number) {
   return Math.max(1, Math.min(5, v));
 }
 
-export function UnbalanceChart({ seed }: { seed: number }) {
+function unbalanceKeys(qty: string) {
+  if (qty.startsWith("I")) return ["IuA", "IuB", "IuC"];
+  if (qty === "Uneg" || qty === "Uzero") return ["Vuan", "Vubn", "Vucn"];
+  return ["Vuab", "Vubc", "Vuca"];
+}
+
+export function UnbalanceChart({ seed, samples }: { seed: number; samples?: ChartSample[] }) {
   const [topQty, setTopQty] = useState("Uunb");
   const [botQty, setBotQty] = useState("Iunb");
   const [aggs, setAggs] = useState<Agg[]>(["AVG"]);
@@ -86,9 +93,11 @@ export function UnbalanceChart({ seed }: { seed: number }) {
         key: `u-${agg}`,
         name: `${topQty} ${agg}`,
         color: COLORS[agg],
-        values: Array.from({ length: N }, (_, i) => uUnb(i, topQty, agg, seed)),
+        values:
+          valuesForKeysAverage(samples, unbalanceKeys(topQty), N) ??
+          Array.from({ length: N }, (_, i) => uUnb(i, topQty, agg, seed)),
       })),
-    [aggs, topQty, seed],
+    [aggs, topQty, seed, samples],
   );
 
   const iSeries = useMemo<Series[]>(
@@ -97,10 +106,17 @@ export function UnbalanceChart({ seed }: { seed: number }) {
         key: `i-${agg}`,
         name: `${botQty} ${agg}`,
         color: COLORS[agg],
-        values: Array.from({ length: N }, (_, i) => iUnb(i, botQty, agg, seed)),
+        values:
+          valuesForKeysAverage(samples, unbalanceKeys(botQty), N) ??
+          Array.from({ length: N }, (_, i) => iUnb(i, botQty, agg, seed)),
       })),
-    [aggs, botQty, seed],
+    [aggs, botQty, seed, samples],
   );
+
+  const uDomain = samples?.length ? paddedDomain(uSeries, [0, 2]) : ([0, 2] as [number, number]);
+  const iDomain = samples?.length ? paddedDomain(iSeries, [1, 5]) : ([1, 5] as [number, number]);
+  const uTicks = samples?.length ? domainTicks(uDomain) : [0, 0.5, 1, 1.5, 2];
+  const iTicks = samples?.length ? domainTicks(iDomain) : [1, 2, 3, 4, 5];
 
   const span = viewWin.end - viewWin.start;
   const zoomIn = () => {
@@ -194,8 +210,8 @@ export function UnbalanceChart({ seed }: { seed: number }) {
             viewWin={viewWin}
             hover={crosshair ? hover : null}
             onHover={setHover}
-            domain={[0, 2]}
-            ticks={[0, 0.5, 1, 1.5, 2]}
+            domain={uDomain}
+            ticks={uTicks}
             formatTick={(v) => (v === 0 ? "0" : v.toFixed(1))}
           />
           <div className="h-px bg-slate-400" />
@@ -205,8 +221,8 @@ export function UnbalanceChart({ seed }: { seed: number }) {
             viewWin={viewWin}
             hover={crosshair ? hover : null}
             onHover={setHover}
-            domain={[1, 5]}
-            ticks={[1, 2, 3, 4, 5]}
+            domain={iDomain}
+            ticks={iTicks}
             formatTick={(v) => String(v)}
             axis
           />

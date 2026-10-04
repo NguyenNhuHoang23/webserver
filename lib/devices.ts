@@ -24,6 +24,7 @@ export type CatalogDevice = {
   brandModel: string;
   brand: string;
   type: string;
+  category?: string;
   kind: DeviceKind;
   status: DeviceStatus;
   lastSync: string;
@@ -177,10 +178,13 @@ export function loadDevices(): CatalogDevice[] {
 export function saveDevices(devices: CatalogDevice[]) {
   devicesCache = devices;
   emitDbChange("devices");
-  void dbFetch("devices", {
+  return dbFetch("devices", {
     method: "POST",
     body: JSON.stringify({ items: devices }),
-  }).catch((error) => console.error("Không thể lưu thiết bị", error));
+  }).catch((error) => {
+    console.error("Không thể lưu thiết bị", error);
+    throw error;
+  });
 }
 
 export function hydrateDevices() {
@@ -198,19 +202,19 @@ export function hydrateDevices() {
   return devicesHydration;
 }
 
-export function upsertDevice(device: CatalogDevice) {
+export async function upsertDevice(device: CatalogDevice) {
   const devices = loadDevices();
   const exists = devices.some((item) => item.id === device.id);
   const next = exists
     ? devices.map((item) => (item.id === device.id ? device : item))
     : [device, ...devices];
-  saveDevices(next);
+  await saveDevices(next);
   return next;
 }
 
 export function removeDevice(id: string) {
   const next = loadDevices().filter((item) => item.id !== id);
-  saveDevices(next);
+  void saveDevices(next).catch(() => undefined);
   return next;
 }
 

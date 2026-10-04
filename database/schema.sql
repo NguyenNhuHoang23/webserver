@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS devices (
   brand_model VARCHAR(255) NOT NULL,
   brand VARCHAR(120) NOT NULL,
   device_type VARCHAR(120) NOT NULL,
+  category VARCHAR(120) NULL,
   kind VARCHAR(30) NOT NULL,
   status VARCHAR(30) NOT NULL,
   last_sync_label VARCHAR(80) NOT NULL,
@@ -97,6 +98,9 @@ CREATE TABLE IF NOT EXISTS devices (
   KEY idx_devices_status (status),
   KEY idx_devices_kind (kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE devices
+  ADD COLUMN IF NOT EXISTS category VARCHAR(120) NULL AFTER device_type;
 
 CREATE TABLE IF NOT EXISTS meter_points (
   id VARCHAR(64) NOT NULL,
@@ -532,3 +536,36 @@ CREATE TABLE IF NOT EXISTS gateway_thresholds (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-09-23-gateway-server-1');
+
+CREATE TABLE IF NOT EXISTS gateway_samples (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  gateway_id INT UNSIGNED NOT NULL,
+  meter_type TINYINT UNSIGNED NOT NULL,
+  meter_model SMALLINT UNSIGNED NOT NULL,
+  meter_id BIGINT UNSIGNED NOT NULL,
+  packet_number INT UNSIGNED NOT NULL,
+  received_at DATETIME(3) NOT NULL,
+  sampled_unix INT UNSIGNED NULL,
+  is_replay TINYINT(1) NOT NULL,
+  error_code SMALLINT NOT NULL,
+  crc_ok TINYINT(1) NOT NULL,
+  values_json JSON NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_gateway_sample (gateway_id, meter_id, packet_number),
+  KEY idx_gateway_sample_meter (meter_model, meter_id, received_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gateway_meter_latest (
+  meter_model SMALLINT UNSIGNED NOT NULL,
+  meter_id BIGINT UNSIGNED NOT NULL,
+  gateway_id INT UNSIGNED NOT NULL,
+  meter_type TINYINT UNSIGNED NOT NULL,
+  packet_number INT UNSIGNED NOT NULL,
+  received_at DATETIME(3) NOT NULL,
+  sampled_unix INT UNSIGNED NULL,
+  error_code SMALLINT NOT NULL,
+  values_json JSON NOT NULL,
+  PRIMARY KEY (meter_model, meter_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-10-04-gateway-samples');

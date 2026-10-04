@@ -16,6 +16,7 @@ import { UiWaveform } from "@/components/client/UiWaveform";
 import { UnbalanceChart } from "@/components/client/UnbalanceChart";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { hydrateProjects, loadProjects, resolveMeterTypes } from "@/lib/projects";
+import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
 import { hydrateMeterReadings, type MeterReading } from "@/lib/meter-readings";
 
 type EnergyKind = string;
@@ -133,8 +134,61 @@ function energyBarsFromReadings(
   }));
 }
 
+function periodIndex(filter: TimeFilterValue, at: string, length: number) {
+  const normalized = at.includes("T") ? at : at.replace(" ", "T");
+  const date = normalized.slice(0, 10);
+  let index = -1;
+  if (filter.mode === "month") {
+    if (date.slice(0, 7) === filter.month) index = Number(date.slice(8, 10)) - 1;
+  } else if (filter.mode === "year") {
+    if (Number(date.slice(0, 4)) === filter.year) index = Number(date.slice(5, 7)) - 1;
+  } else if (filter.mode === "day" && date === filter.date) {
+    index = Number(normalized.slice(11, 13));
+  } else if (filter.mode === "custom_date" && filter.customDateMode !== "range" && date === filter.customDate) {
+    index = Number(normalized.slice(11, 13));
+  } else if (filter.mode === "custom_date" && filter.customDateMode === "range") {
+    const start = new Date(`${filter.startDate}T00:00:00`).getTime();
+    const current = new Date(`${date}T00:00:00`).getTime();
+    index = Math.round((current - start) / (24 * 60 * 60 * 1000));
+  }
+  return index >= 0 && index < length ? index : -1;
+}
+
+function energyBarsFromGateway(filter: TimeFilterValue, samples: ProjectGatewaySample[]) {
+  const periods = getTimeFilterPeriods(filter);
+  const grouped = new Map<number, number[]>();
+  for (const sample of samples) {
+    const wh = sample.values.EPaed;
+    if (typeof wh !== "number" || !Number.isFinite(wh)) continue;
+    const index = periodIndex(filter, sample.at, periods.length);
+    if (index < 0) continue;
+    const list = grouped.get(index) ?? [];
+    list.push(wh / 1000);
+    grouped.set(index, list);
+  }
+  return periods.map((period, index) => {
+    const list = grouped.get(index);
+    const kwh = !list?.length
+      ? 0
+      : list.length > 1
+        ? Math.max(0, list[list.length - 1] - list[0])
+        : list[list.length - 1];
+    return {
+      minute: index,
+      label: period.label,
+      kwh: Number(kwh.toFixed(4)),
+    };
+  });
+}
+
 function formatNum(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+function formatKwh(n: number) {
+  if (!Number.isFinite(n)) return "0";
+  const digits = Math.abs(n) > 0 && Math.abs(n) < 10 ? 3 : 1;
+  return n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
 }
 
 function seriesFor(metric: MetricId, seed: number, count: number): number[][] {
@@ -195,13 +249,27 @@ export function EnergyCharts() {
   const [pointQuery, setPointQuery] = useState("");
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
   const [readings, setReadings] = useState<MeterReading[]>([]);
+  const [gatewaySamples, setGatewaySamples] = useState<ProjectGatewaySample[]>([]);
+  const gatewayMonthAligned = useRef(false);
+  const selectionTouched = useRef(false);
+
+  useEffect(() => {
+    gatewayMonthAligned.current = false;
+    selectionTouched.current = false;
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
     const reload = () => {
-      void Promise.all([hydrateProjects(), hydrateClientMeters(projectId), hydrateMeterReadings(projectId)]).then(([projects, meterRows, readingRows]) => {
+      void Promise.all([
+        hydrateProjects(),
+        hydrateClientMeters(projectId),
+        hydrateMeterReadings(projectId),
+        loadProjectGatewaySamples(projectId),
+      ]).then(([projects, meterRows, readingRows, gatewayRows]) => {
         if (!active) return;
         setReadings(readingRows);
+        setGatewaySamples(gatewayRows);
         const project = projects.find((item) => item.id === projectId);
         const types = resolveMeterTypes(project);
         setEnergyKinds(types);
@@ -230,6 +298,17 @@ export function EnergyCharts() {
     };
   }, [projectId]);
 
+  useEffect(() => {
+    if (gatewayMonthAligned.current || gatewaySamples.length === 0) return;
+    const latest = gatewaySamples.reduce((best, sample) => (sample.at > best.at ? sample : best));
+    const month = latest.at.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) return;
+    gatewayMonthAligned.current = true;
+    setTimeFilter((current) =>
+      current.mode === "month" && current.month === month ? current : { ...current, mode: "month", month },
+    );
+  }, [gatewaySamples]);
+
   const pointsForEnergy = useMemo(
     () => allPoints.filter((p) => p.energy === energy),
     [allPoints, energy],
@@ -250,10 +329,18 @@ export function EnergyCharts() {
   useEffect(() => {
     setSelectedIds((current) => {
       const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
+      if (selectionTouched.current) return kept;
+      const linked = pointsForEnergy.filter((point) =>
+        gatewaySamples.some((sample) => sample.meterPointId === point.id),
+      );
+      if (linked.length > 0 && !kept.some((id) => linked.some((point) => point.id === id))) {
+        return linked.slice(0, Math.min(2, linked.length)).map((point) => point.id);
+      }
       if (kept.length > 0) return kept;
-      return pointsForEnergy.slice(0, Math.min(2, pointsForEnergy.length)).map((p) => p.id);
+      const source = linked.length > 0 ? linked : pointsForEnergy;
+      return source.slice(0, Math.min(2, source.length)).map((point) => point.id);
     });
-  }, [pointsForEnergy]);
+  }, [pointsForEnergy, gatewaySamples]);
 
   const selectedPoints = useMemo(
     () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
@@ -265,14 +352,37 @@ export function EnergyCharts() {
     [metric, seed, selectedPoints.length],
   );
 
+  const gatewayByPoint = useMemo(() => {
+    const grouped = new Map<string, ProjectGatewaySample[]>();
+    for (const sample of gatewaySamples) {
+      const list = grouped.get(sample.meterPointId) ?? [];
+      list.push(sample);
+      grouped.set(sample.meterPointId, list);
+    }
+    return grouped;
+  }, [gatewaySamples]);
+
   const multiBars = useMemo(
     () =>
-      selectedPoints.map((point, i) => ({
-        point,
-        bars: energyBarsFromReadings(seed + i * 1.7, timeFilter, point.id, readings),
-      })),
-    [readings, selectedPoints, seed, timeFilter],
+      selectedPoints.map((point, i) => {
+        const samples = gatewayByPoint.get(point.id);
+        return {
+          point,
+          bars: samples?.length
+            ? energyBarsFromGateway(timeFilter, samples)
+            : energyBarsFromReadings(seed + i * 1.7, timeFilter, point.id, readings),
+        };
+      }),
+    [gatewayByPoint, readings, selectedPoints, seed, timeFilter],
   );
+
+  const liveSamples = useMemo(() => {
+    for (const point of selectedPoints) {
+      const samples = gatewayByPoint.get(point.id);
+      if (samples?.length) return samples;
+    }
+    return [];
+  }, [gatewayByPoint, selectedPoints]);
 
   const barCount = multiBars[0]?.bars.length ?? 30;
 
@@ -376,6 +486,7 @@ export function EnergyCharts() {
               : "";
 
   function togglePoint(id: string) {
+    selectionTouched.current = true;
     setSelectedIds((current) => {
       if (current.includes(id)) {
         return current.filter((item) => item !== id);
@@ -385,10 +496,12 @@ export function EnergyCharts() {
   }
 
   function selectAllVisible() {
+    selectionTouched.current = true;
     setSelectedIds(filteredPoints.map((p) => p.id));
   }
 
   function clearSelection() {
+    selectionTouched.current = true;
     setSelectedIds([]);
   }
 
@@ -537,16 +650,21 @@ export function EnergyCharts() {
         <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         {isUiChart ? (
           <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
-            <UiWaveform timeFilter={timeFilter} />
+            <UiWaveform timeFilter={timeFilter} samples={liveSamples} />
           </section>
         ) : isFreqChart ? (
-          <FrequencyChart seed={seed} timeFilter={timeFilter} onRefresh={() => setSeed((n) => n + 1)} />
+          <FrequencyChart
+            seed={seed}
+            timeFilter={timeFilter}
+            samples={liveSamples}
+            onRefresh={() => setSeed((n) => n + 1)}
+          />
         ) : isPowerChart ? (
-          <PowerChart seed={seed} timeFilter={timeFilter} />
+          <PowerChart seed={seed} timeFilter={timeFilter} samples={liveSamples} />
         ) : isHarmChart ? (
-          <HarmonicsChart seed={seed} />
+          <HarmonicsChart seed={seed} samples={liveSamples} />
         ) : isUnbChart ? (
-          <UnbalanceChart seed={seed} />
+          <UnbalanceChart seed={seed} samples={liveSamples} />
         ) : isConsumptionChart ? (
           <>
             <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
@@ -636,7 +754,7 @@ export function EnergyCharts() {
                             <td className="py-1.5 font-medium">{point.label}</td>
                             {multiBars.map((series) => (
                               <td key={series.point.id} className="py-1.5">
-                                {series.bars[range.start + rowIdx]?.kwh.toFixed(1)} {consumptionUnit}
+                                {formatKwh(series.bars[range.start + rowIdx]?.kwh ?? 0)} {consumptionUnit}
                               </td>
                             ))}
                           </tr>
@@ -877,16 +995,18 @@ function MultiConsumptionBarChart({
   const innerH = H - pad.t - pad.b;
   const base = series[0]?.bars ?? [];
   const visibleLen = Math.max(range.end - range.start + 1, 1);
-  const dataMax = Math.max(
+  const rawMax = Math.max(
+    0,
     ...series.flatMap((s) => s.bars.slice(range.start, range.end + 1).map((b) => b.kwh)),
-    1,
   );
-  const yMax = Math.max(yMaxHint, Math.ceil(dataMax / 50) * 50);
+  const yMax =
+    rawMax > 0 && rawMax < 50 ? rawMax * 1.25 : Math.max(yMaxHint, Math.ceil(Math.max(rawMax, 1) / 50) * 50);
   const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * innerH;
   const groupW = innerW / visibleLen;
   const barCount = Math.max(series.length, 1);
   const barW = groupW / (barCount + 0.6);
-  const tickStep = yMax <= 100 ? 20 : yMax <= 300 ? 50 : 100;
+  const tickStep =
+    yMax <= 0.01 ? yMax / 4 : yMax <= 1 ? 0.2 : yMax <= 10 ? 2 : yMax <= 100 ? 20 : yMax <= 300 ? 50 : 100;
   const yTicks = Array.from({ length: Math.floor(yMax / tickStep) + 1 }, (_, i) => i * tickStep);
 
   return (
@@ -899,13 +1019,14 @@ function MultiConsumptionBarChart({
         <text x={pad.l} y="16" className="fill-slate-400" fontSize="12">
           ({unit})
         </text>
-        {yTicks.map((v) => {
+        {yTicks.map((v, tickIndex) => {
           const y = yAt(v);
+          const label = yMax < 1 ? v.toFixed(3) : yMax < 10 ? v.toFixed(1) : String(Math.round(v));
           return (
-            <g key={v}>
+            <g key={tickIndex}>
               <line x1={pad.l} x2={W - pad.r} y1={y} y2={y} stroke="#eceff3" />
               <text x={pad.l - 8} y={y + 4} textAnchor="end" className="fill-slate-400" fontSize="11">
-                {v}
+                {label}
               </text>
             </g>
           );
@@ -969,7 +1090,7 @@ function MultiConsumptionBarChart({
                 fontWeight="600"
                 fill={item.point.color}
               >
-                {item.point.code}: {item.bars[hover]?.kwh.toFixed(1)} {unit}
+                {item.point.code}: {formatKwh(item.bars[hover]?.kwh ?? 0)} {unit}
               </text>
             ))}
           </g>

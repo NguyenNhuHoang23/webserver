@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { domainTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
 const N = 160;
@@ -71,7 +72,33 @@ function dpfWave(i: number, ch: Channel, agg: Agg, seed: number) {
   return Math.max(-1, Math.min(-0.99, v));
 }
 
-export function PowerChart({ seed, timeFilter }: { seed: number; timeFilter: TimeFilterValue }) {
+function phaseSuffix(ch: Channel) {
+  if (ch === "1") return "a";
+  if (ch === "2") return "b";
+  if (ch === "3") return "c";
+  return "t";
+}
+
+function powerKey(kind: PqKind, ch: Channel) {
+  const suffix = phaseSuffix(ch);
+  if (kind === "P") return `Pap${suffix}`;
+  if (kind === "Q") return `Qrp${suffix}`;
+  return `Sap${suffix}`;
+}
+
+function factorKey(qty: string, ch: Channel) {
+  return `${qty === "DPF" ? "DPF" : "PF"}${phaseSuffix(ch)}`;
+}
+
+export function PowerChart({
+  seed,
+  timeFilter,
+  samples,
+}: {
+  seed: number;
+  timeFilter: TimeFilterValue;
+  samples?: ChartSample[];
+}) {
   const [botQty, setBotQty] = useState("DPF");
   const [topCh, setTopCh] = useState<Channel[]>(["sum"]);
   const [botCh, setBotCh] = useState<Channel[]>(["sum"]);
@@ -89,11 +116,13 @@ export function PowerChart({ seed, timeFilter }: { seed: number; timeFilter: Tim
             key: `${kind}-${ch}-${agg}`,
             name: `${kind} ${ch} ${agg}`,
             color: PURPLE,
-            values: Array.from({ length: N }, (_, i) => pWave(i, ch, kind, agg, seed)),
+            values:
+              valuesForKey(samples, powerKey(kind, ch), N) ??
+              Array.from({ length: N }, (_, i) => pWave(i, ch, kind, agg, seed)),
           })),
         ),
       ),
-    [pq, topCh, aggs, seed],
+    [pq, topCh, aggs, seed, samples],
   );
 
   const dpfSeries = useMemo(
@@ -103,11 +132,16 @@ export function PowerChart({ seed, timeFilter }: { seed: number; timeFilter: Tim
           key: `dpf-${ch}-${agg}`,
           name: `${botQty} ${ch} ${agg}`,
           color: PURPLE,
-          values: Array.from({ length: N }, (_, i) => dpfWave(i, ch, agg, seed)),
+          values:
+            valuesForKey(samples, factorKey(botQty, ch), N) ??
+            Array.from({ length: N }, (_, i) => dpfWave(i, ch, agg, seed)),
         })),
       ),
-    [botCh, aggs, seed, botQty],
+    [botCh, aggs, seed, botQty, samples],
   );
+
+  const pDomain = samples?.length ? paddedDomain(pSeries, [300, 400]) : ([300, 400] as [number, number]);
+  const dpfDomain = samples?.length ? paddedDomain(dpfSeries, [-1, -0.98]) : ([-0.988, -1] as [number, number]);
 
   const span = viewWin.end - viewWin.start;
   const zoomIn = () => {
@@ -217,9 +251,9 @@ export function PowerChart({ seed, timeFilter }: { seed: number; timeFilter: Tim
           viewWin={viewWin}
           hover={crosshair ? hover : null}
           onHover={setHover}
-          domain={[300, 400]}
-          ticks={[300, 350, 400]}
-          formatTick={(v) => String(v)}
+          domain={pDomain}
+          ticks={samples?.length ? domainTicks(pDomain) : [300, 350, 400]}
+          formatTick={(v) => (Math.abs(pDomain[1] - pDomain[0]) < 20 ? v.toFixed(2) : String(Math.round(v)))}
         />
         <div className="h-px bg-slate-400" />
         <PowerPane
@@ -228,8 +262,8 @@ export function PowerChart({ seed, timeFilter }: { seed: number; timeFilter: Tim
           viewWin={viewWin}
           hover={crosshair ? hover : null}
           onHover={setHover}
-          domain={[-0.988, -1]}
-          ticks={[-0.99, -0.995, -1]}
+          domain={dpfDomain}
+          ticks={samples?.length ? domainTicks(dpfDomain) : [-0.99, -0.995, -1]}
           formatTick={(v) => (v === -1 ? "±1.000" : v.toFixed(3))}
           axis
         />

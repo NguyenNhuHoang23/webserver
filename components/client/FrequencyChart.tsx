@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
 const N = 160;
@@ -57,7 +58,16 @@ const COLORS: Record<Agg, string> = {
   MIN: "#ef9a9a",
 };
 
-export function FrequencyChart({ seed, timeFilter }: { seed: number; onRefresh?: () => void; timeFilter: TimeFilterValue }) {
+export function FrequencyChart({
+  seed,
+  timeFilter,
+  samples,
+}: {
+  seed: number;
+  onRefresh?: () => void;
+  timeFilter: TimeFilterValue;
+  samples?: ChartSample[];
+}) {
   const [qty, setQty] = useState("Freq");
   const [slotA, setSlotA] = useState("-");
   const [slotB, setSlotB] = useState("-");
@@ -72,10 +82,12 @@ export function FrequencyChart({ seed, timeFilter }: { seed: number; onRefresh?:
         key: agg,
         name: `Freq ${agg}`,
         color: COLORS[agg],
-        values: Array.from({ length: N }, (_, i) => waveAt(i, agg, seed)),
+        values: valuesForKey(samples, "F", N) ?? Array.from({ length: N }, (_, i) => waveAt(i, agg, seed)),
       })),
-    [aggs, seed],
+    [aggs, seed, samples],
   );
+
+  const freqDomain = samples?.length ? paddedDomain(series, [50.24, 50.34]) : undefined;
 
   const span = viewWin.end - viewWin.start;
   const zoomIn = () => {
@@ -170,6 +182,7 @@ export function FrequencyChart({ seed, timeFilter }: { seed: number; onRefresh?:
           viewWin={viewWin}
           hover={crosshair ? hover : null}
           onHover={setHover}
+          domain={freqDomain}
         />
       </div>
 
@@ -203,21 +216,25 @@ function FreqPane({
   viewWin,
   hover,
   onHover,
+  domain,
 }: {
   qty: string;
   series: { key: string; name: string; color: string; values: number[] }[];
   viewWin: { start: number; end: number };
   hover: number | null;
   onHover: (index: number | null) => void;
+  domain?: [number, number];
 }) {
   const W = 820;
   const H = 340;
   const pad = { l: 58, r: 12, t: 12, b: 42 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
-  const yMin = 50.24;
-  const yMax = 50.34;
-  const yTicks = [50.24, 50.26, 50.28, 50.3, 50.32, 50.34];
+  const yMin = domain?.[0] ?? 50.24;
+  const yMax = domain?.[1] ?? 50.34;
+  const yTicks = domain
+    ? Array.from({ length: 6 }, (_, index) => yMin + ((yMax - yMin) * index) / 5)
+    : [50.24, 50.26, 50.28, 50.3, 50.32, 50.34];
   const filterId = "freq-tip-shadow";
   const tipW = 168;
   const tipH = 22 + Math.max(series.length, 1) * 18;
