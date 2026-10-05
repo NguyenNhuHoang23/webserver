@@ -131,6 +131,14 @@ export function canonicalPayload(value: Record<string, unknown>) {
   return JSON.stringify(copy);
 }
 
+/** CRC firmware tính trên đúng byte đã gửi, sau khi bỏ trường CRC, kể cả `-nan` và dấu phẩy thiếu. */
+export function rawChecksumPayload(rawText: string) {
+  return rawText.replace(
+    /,?\s*"(?:checksum|CRC|crc)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|null|true|false)\s*,?/g,
+    "",
+  );
+}
+
 export function checksumMatches(provided: string, payload: string) {
   const actual = provided.trim().replace(/^0x/i, "").toUpperCase();
   const candidates = [crc16Modbus(payload), crc32(payload)];
@@ -194,7 +202,7 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
 
   let raw: unknown;
   try {
-    raw = JSON.parse(sanitizeGatewayJson(rawText));
+    raw = JSON.parse(sanitizeGatewayJson(repairFirmwareJson(rawText)));
   } catch {
     return empty;
   }
@@ -290,8 +298,8 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
     shortKeys,
   };
 
-  const payload = canonicalPayload(source);
-  if (!checksumMatches(packet.checksum, payload)) {
+  const payloads = [rawChecksumPayload(rawText), canonicalPayload(source)];
+  if (!payloads.some((payload) => checksumMatches(packet.checksum, payload))) {
     return {
       ...base,
       code: 2,
@@ -385,10 +393,19 @@ function sanitizeGatewayJson(rawText: string) {
   return rawText.replace(/:\s*-?nan\b/gi, ":null").replace(/:\s*[+-]?infinity\b/gi, ":null");
 }
 
+/** Firmware PM2230 gửi `"MT":1"MM":0` — thiếu dấu phẩy, CRC vẫn tính trên chuỗi lỗi đó. */
+function repairFirmwareJson(rawText: string) {
+  return rawText.replace(/("MT"\s*:\s*-?\d+(?:\.\d+)?)(\s*"MM"\s*:)/g, "$1,$2");
+}
+
 function compactMeterValues(values: Record<string, unknown>) {
-  const compact: Record<string, number> = {};
+  const compact: Record<string, number | null> = {};
   for (const [key, value] of Object.entries(values)) {
     if (key === "MID" || key === "meterId") continue;
+    if (value == null) {
+      compact[key] = null;
+      continue;
+    }
     const parsed = finiteNumber(value);
     if (parsed != null) compact[key] = parsed;
   }

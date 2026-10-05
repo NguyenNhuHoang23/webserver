@@ -285,7 +285,7 @@ export function GatewayConsole() {
         <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">
           Gateway bắn JSON đầy đủ hoặc dạng viết tắt (PV, IT, PN, GID, GT, GH, MT, MM, MID, TIM, RE, ER, VAL, CRC).
           Server lưu nguyên văn bản tin, toàn bộ values kể cả Null, rồi trả ACK kèm SeverTime, TimeUpdate, Wifi và PassWifi.
-          Checksum là CRC-16/MODBUS (4 ký tự hex) hoặc CRC-32 (8 ký tự hex) của JSON.stringify sau khi bỏ trường checksum.
+          Checksum là CRC-16/MODBUS (4 ký tự hex) hoặc CRC-32 (8 ký tự hex) của đúng chuỗi JSON gốc sau khi bỏ trường CRC. Firmware có thể thiếu dấu phẩy giữa MT và MM, và gửi -nan.
         </p>
       </div>
 
