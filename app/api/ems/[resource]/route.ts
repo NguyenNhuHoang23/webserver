@@ -33,6 +33,12 @@ function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
+function recipientKey(value: unknown) {
+  const id = asString(value).trim();
+  if (id && id !== "rcpt-new") return id;
+  return `rcpt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function projectDateForDb(value: unknown) {
   const input = asString(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
@@ -344,7 +350,7 @@ async function saveResource(resource: string, body: Row) {
         await connection.execute(
           `INSERT INTO alert_recipients (id, project_id, name, email, phone)
            VALUES (?, ?, ?, ?, ?)`,
-          [recipient.id, body.id, recipient.name || "", recipient.email || "", recipient.phone || ""],
+          [recipientKey(recipient.id), body.id, recipient.name || "", recipient.email || "", recipient.phone || ""],
         );
       }
     });

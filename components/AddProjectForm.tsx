@@ -71,7 +71,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
   const [recipients, setRecipients] = useState<AlertRecipient[]>(() =>
     initialProject?.recipients?.length
       ? initialProject.recipients
-      : [{ id: "rcpt-new", name: "", email: "", phone: "" }],
+      : [nextRecipient()],
   );
   const [error, setError] = useState("");
   const [meterTypeToDelete, setMeterTypeToDelete] = useState<MeterTypeDef | null>(null);
