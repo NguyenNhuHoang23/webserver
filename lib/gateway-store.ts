@@ -358,6 +358,18 @@ export async function ingestGateway(rawText: string) {
     }
   }
 
+  const registered = await meterIsRegistered(packet);
+  if (!registered) {
+    notes.push({
+      level: "log",
+      reason: `Bỏ qua: chưa có đồng hồ category "${packet.meterModel}" và serial "${packet.meterId}".`,
+    });
+    if (disposition === "accepted") {
+      disposition = "unknown_meter";
+      server = 4;
+    }
+  }
+
   if (packet.error !== 0) {
     notes.push({
       level: "warning",
@@ -391,7 +403,7 @@ export async function ingestGateway(rawText: string) {
     }
 
     let packetId = 0;
-    if (sample) {
+    if (registered && sample) {
       const receivedSql = receivedAt.slice(0, 23).replace("T", " ").replace("Z", "");
       const valuesJson = JSON.stringify(packet.values);
       const crcOk = parsed.ok ? 1 : 0;
@@ -437,10 +449,11 @@ export async function ingestGateway(rawText: string) {
           receivedSql,
           packet.timeSynced ? Math.trunc(packet.readingDate.getTime() / 1000) : null,
           packet.error,
-          valuesJson,
-        ],
-      );
-    } else {
+        valuesJson,
+      ],
+    );
+    }
+    if (registered) {
     const [inserted] = await connection.execute<ResultSetHeader>(
       `INSERT INTO gateway_packets (
         received_at, disposition, protocol_version, internet, packet_number, gateway_id,
@@ -533,7 +546,7 @@ export async function ingestGateway(rawText: string) {
           packet.meterId,
           packet.readingTime,
           String(packet.packetNumber),
-          sample ? null : rawText,
+          rawText,
         ],
       );
     }
@@ -1017,6 +1030,29 @@ export async function getProjectGatewaySeries(projectId: string): Promise<Projec
     }
   }
   return samples;
+}
+
+async function meterIsRegistered(packet: NormalizedPacket) {
+  const serial = packet.meterId.trim();
+  const category = packet.meterModel.trim();
+  if (!serial || !category) return false;
+  const rows = await queryRows<RowDataPacket>(
+    `SELECT 1 AS ok
+       FROM devices d
+      WHERE LOWER(TRIM(d.category)) = LOWER(?)
+        AND (
+          TRIM(d.serial_number) IN (?, CONCAT('SN: ', ?), CONCAT('SN:', ?))
+          OR EXISTS (
+            SELECT 1
+              FROM meter_points mp
+             WHERE mp.device_id = d.id
+               AND TRIM(mp.serial_number) IN (?, CONCAT('SN: ', ?), CONCAT('SN:', ?))
+          )
+        )
+      LIMIT 1`,
+    [category, serial, serial, serial, serial, serial, serial],
+  );
+  return rows.length > 0;
 }
 
 function modelCodeForCategory(category: string) {

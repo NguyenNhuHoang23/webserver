@@ -31,6 +31,7 @@ export const DISPOSITION_LABEL: Record<string, string> = {
   clock_replay: "Bỏ qua: bản phát lại có readingTime vượt giờ server quá 20 giây",
   gateway_error: "Bỏ qua: Error khác 0",
   checksum: "Bỏ qua: lỗi checksum",
+  unknown_meter: "Bỏ qua: chưa có đồng hồ trùng serial và category",
 };
 
 const CHECKSUM_KEYS = new Set(["checksum", "CRC", "crc"]);
