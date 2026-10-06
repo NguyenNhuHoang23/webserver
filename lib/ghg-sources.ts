@@ -15,7 +15,7 @@ export type GhgEmissionSource = {
   appliedAt: string;
   /** Điểm đo được chọn làm dữ liệu hoạt động cho nguồn phát thải */
   meterPointId?: string;
-  /** tấn CO₂e demo — dùng trang tổng quan */
+  /** tấn CO₂e đã lưu — dùng trang tổng quan */
   tons?: number;
 };
 
@@ -37,78 +37,9 @@ let ghgSourcesCache: GhgEmissionSource[] = [];
 const ghgSourcesByProject: Record<string, GhgEmissionSource[]> = {};
 const ghgHydration = new Map<string, Promise<GhgEmissionSource[]>>();
 
-export const INITIAL_GHG_SOURCES: GhgEmissionSource[] = [
-  {
-    id: "src-1",
-    scope: 1,
-    name: "Khí Gas (LPG)",
-    method: "manual",
-    factorId: "do-industry:co2",
-    factorValue: 74100,
-    formula: "{Giá trị thủ công} * {Hệ số phát thải}",
-    appliedAt: "2024-01-01",
-    tons: 850.2,
-  },
-  {
-    id: "src-2",
-    scope: 1,
-    name: "Nhiên liệu phương tiện",
-    method: "manual",
-    factorId: "do-road:co2",
-    factorValue: 74100,
-    formula: "{Giá trị thủ công} * {Hệ số phát thải}",
-    appliedAt: "2024-01-01",
-    tons: 170.0,
-  },
-  {
-    id: "src-3",
-    scope: 1,
-    name: "Phát thải rò rỉ (Gas lạnh)",
-    method: "manual",
-    factorId: "do-industry:co2",
-    factorValue: 74100,
-    formula: "{Giá trị thủ công} * {Hệ số phát thải}",
-    appliedAt: "2024-01-01",
-    tons: 42.5,
-  },
-  {
-    id: "src-4",
-    scope: 2,
-    name: "Sử dụng điện năng",
-    method: "meter",
-    factorId: "natural-gas:co2",
-    factorValue: 56100,
-    formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
-    appliedAt: "2024-03-01",
-    tons: 3188.1,
-  },
-  {
-    id: "src-5",
-    scope: 2,
-    name: "Phát thải mua hơi nước",
-    method: "meter",
-    factorId: "natural-gas:co2",
-    factorValue: 56100,
-    formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
-    appliedAt: "2024-03-01",
-    tons: 212.0,
-  },
-  {
-    id: "src-6",
-    scope: 3,
-    name: "Vận tải hàng hóa đầu vào",
-    method: "file",
-    factorId: "gasoline-road:co2",
-    factorValue: 69300,
-    formula: "{Giá trị điểm đo} * {Hệ số phát thải}",
-    appliedAt: "2024-02-15",
-    tons: 95.4,
-  },
-];
-
 export function loadGhgSources(projectId?: string): GhgEmissionSource[] {
   if (projectId && ghgSourcesByProject[projectId]) return ghgSourcesByProject[projectId]!;
-  return ghgSourcesCache.length ? ghgSourcesCache : INITIAL_GHG_SOURCES;
+  return ghgSourcesCache;
 }
 
 export function saveGhgSources(sources: GhgEmissionSource[], projectId?: string) {
@@ -142,13 +73,4 @@ export function hydrateGhgSources(projectId?: string) {
     });
   ghgHydration.set(key, request);
   return request;
-}
-
-/** Gán tấn CO₂e demo nếu nguồn cấu hình chưa có */
-export function withDemoTons(sources: GhgEmissionSource[]): GhgEmissionSource[] {
-  return sources.map((source, index) => {
-    if (typeof source.tons === "number") return source;
-    const fallback = [850.2, 170, 42.5, 3188.1, 212, 95.4];
-    return { ...source, tons: fallback[index % fallback.length] };
-  });
 }

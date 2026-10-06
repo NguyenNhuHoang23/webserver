@@ -1,5 +1,5 @@
 import "server-only";
-import { defaultClientMeters, type ClientMeter } from "@/lib/client-meters";
+import type { ClientMeter } from "@/lib/client-meters";
 import { queryRows } from "@/lib/server-db";
 
 export async function getClientMeterFromDb(projectId: string, meterId: string) {
@@ -12,9 +12,7 @@ export async function getClientMeterFromDb(projectId: string, meterId: string) {
     [projectId],
   );
   const row = rows.find((item) => String(item.id) === meterId);
-  if (!row) {
-    return rows.length ? undefined : defaultClientMeters().find((meter) => meter.id === meterId);
-  }
+  if (!row) return undefined;
 
   return {
     id: String(row.id),

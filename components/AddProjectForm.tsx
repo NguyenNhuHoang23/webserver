@@ -8,7 +8,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   formatProjectDate,
   hydrateProjects,
-  INITIAL_PROJECTS,
   nextProjectId,
   projectAccent,
   projectInitials,
@@ -50,7 +49,7 @@ function toInputDate(value?: string) {
 export function AddProjectForm({ initialProject }: { initialProject?: Project }) {
   const router = useRouter();
 
-  const [code, setCode] = useState(() => initialProject?.id ?? nextProjectId(INITIAL_PROJECTS));
+  const [code, setCode] = useState(() => initialProject?.id ?? nextProjectId());
   const [name, setName] = useState(() => initialProject?.name ?? "");
   const [customer, setCustomer] = useState(() => initialProject?.customer ?? "");
   const [contactName, setContactName] = useState(() => initialProject?.contactName ?? "");

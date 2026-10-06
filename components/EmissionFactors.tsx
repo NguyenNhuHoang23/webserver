@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   formatFactorValue,
   hydrateFactorGroups,
-  INITIAL_FACTOR_GROUPS,
   loadFactorGroups,
   removeFactorGroup,
   type FactorGroup,
@@ -21,7 +20,7 @@ const GAS_META: Record<GasKey, { label: string; className: string }> = {
 };
 
 export function EmissionFactors() {
-  const [groups, setGroups] = useState<FactorGroup[]>(INITIAL_FACTOR_GROUPS);
+  const [groups, setGroups] = useState<FactorGroup[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [groupToDelete, setGroupToDelete] = useState<FactorGroup | null>(null);

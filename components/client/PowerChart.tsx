@@ -47,31 +47,6 @@ function smoothPath(pts: [number, number][]) {
   return d;
 }
 
-function pWave(i: number, ch: Channel, kind: PqKind, agg: Agg, seed: number) {
-  const seconds = (i / (N - 1)) * 240;
-  const phase = ch === "sum" ? 0 : Number(ch) * 0.7;
-  let base = kind === "P" ? 348 : kind === "S" ? 365 : 92;
-  let v =
-    base +
-    22 * Math.sin(seconds / 42 + phase + seed * 0.15) +
-    10 * Math.sin(seconds / 28 + phase * 0.6);
-  if (agg === "MAX") v += 12;
-  if (agg === "MIN") v -= 12;
-  return v;
-}
-
-function dpfWave(i: number, ch: Channel, agg: Agg, seed: number) {
-  const seconds = (i / (N - 1)) * 240;
-  const phase = ch === "sum" ? 0 : Number(ch) * 0.5;
-  let v =
-    -0.995 +
-    0.0022 * Math.sin(seconds / 42 + phase + seed * 0.15) +
-    0.001 * Math.sin(seconds / 28 + phase * 0.5);
-  if (agg === "MAX") v += 0.0012;
-  if (agg === "MIN") v -= 0.0012;
-  return Math.max(-1, Math.min(-0.99, v));
-}
-
 function phaseSuffix(ch: Channel) {
   if (ch === "1") return "a";
   if (ch === "2") return "b";
@@ -91,11 +66,9 @@ function factorKey(qty: string, ch: Channel) {
 }
 
 export function PowerChart({
-  seed,
   timeFilter,
   samples,
 }: {
-  seed: number;
   timeFilter: TimeFilterValue;
   samples?: ChartSample[];
 }) {
@@ -117,12 +90,11 @@ export function PowerChart({
             name: `${kind} ${ch} ${agg}`,
             color: PURPLE,
             values:
-              valuesForKey(samples, powerKey(kind, ch), N) ??
-              Array.from({ length: N }, (_, i) => pWave(i, ch, kind, agg, seed)),
+              valuesForKey(samples, powerKey(kind, ch), N) ?? Array.from({ length: N }, () => 0),
           })),
         ),
       ),
-    [pq, topCh, aggs, seed, samples],
+    [pq, topCh, aggs, samples],
   );
 
   const dpfSeries = useMemo(
@@ -133,11 +105,10 @@ export function PowerChart({
           name: `${botQty} ${ch} ${agg}`,
           color: PURPLE,
           values:
-            valuesForKey(samples, factorKey(botQty, ch), N) ??
-            Array.from({ length: N }, (_, i) => dpfWave(i, ch, agg, seed)),
+            valuesForKey(samples, factorKey(botQty, ch), N) ?? Array.from({ length: N }, () => 0),
         })),
       ),
-    [botCh, aggs, seed, botQty, samples],
+    [botCh, aggs, botQty, samples],
   );
 
   const pDomain = samples?.length ? paddedDomain(pSeries, [300, 400]) : ([300, 400] as [number, number]);

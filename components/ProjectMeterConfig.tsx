@@ -36,145 +36,6 @@ type MeterPoint = {
   children?: MeterPoint[];
 };
 
-const seeds: MeterPoint[] = [
-  {
-    id: "MP-001",
-    name: "MP-001 - Trạm Biến Áp Chính",
-    sn: "SN: 98721345601",
-    type: "Industrial Smart Meter",
-    energy: "Điện",
-    kind: "meter",
-    status: "connected",
-    value: 12450.2,
-    unit: "kWh",
-    children: [
-      {
-        id: "MP-001-A",
-        name: "MP-001-A - Inverter Dãy 1",
-        sn: "SN: 98721345602",
-        type: "PV Inverter Monitoring",
-        energy: "Điện",
-        kind: "inverter",
-        status: "connected",
-        value: 450.8,
-        unit: "kW",
-      },
-      {
-        id: "MP-001-T",
-        name: "MP-001-T - Cảm biến nhiệt dàn",
-        sn: "SN: 98721345603",
-        type: "Temperature Sensor",
-        energy: "Nhiệt",
-        kind: "thermo",
-        status: "disconnected",
-        value: null,
-        unit: "°C",
-      },
-    ],
-  },
-  {
-    id: "MP-002",
-    name: "MP-002 - Hệ thống làm mát",
-    sn: "SN: 55190233410",
-    type: "Ultrasonic Flow Meter",
-    energy: "Nước",
-    kind: "water",
-    status: "connected",
-    value: 84.2,
-    unit: "m³/h",
-  },
-  {
-    id: "MP-003",
-    name: "MP-003 - Trạm quan trắc gió",
-    sn: "SN: 22019888341",
-    type: "Anemometer",
-    energy: "Điện",
-    kind: "wind",
-    status: "connected",
-    value: 5.4,
-    unit: "m/s",
-  },
-  {
-    id: "MP-004",
-    name: "MP-004 - Nồi hơi công nghệ",
-    sn: "SN: 77412009812",
-    type: "Steam Flow Computer",
-    energy: "Hơi",
-    kind: "steam",
-    status: "connected",
-    value: 12.6,
-    unit: "t/h",
-  },
-  {
-    id: "MP-005",
-    name: "MP-005 - Đồng hồ nước đầu nguồn",
-    sn: "SN: 33002119844",
-    type: "Water Smart Meter",
-    energy: "Nước",
-    kind: "water",
-    status: "connected",
-    value: 219.4,
-    unit: "m³",
-  },
-  {
-    id: "MP-006",
-    name: "MP-006 - Máy nén khí trạm 1",
-    sn: "SN: 66112004567",
-    type: "Compressed Air Flow Meter",
-    energy: "Khí nén",
-    kind: "air",
-    status: "connected",
-    value: 320.5,
-    unit: "Nm³/h",
-  },
-];
-
-const extraPoints: MeterPoint[] = Array.from({ length: 37 }, (_, i) => {
-  const n = i + 6;
-  const cycle: Array<Pick<MeterPoint, "energy" | "kind" | "type" | "unit" | "status" | "value">> = [
-    {
-      energy: "Điện",
-      kind: "meter",
-      type: "Industrial Smart Meter",
-      unit: "kWh",
-      status: i % 9 === 0 ? "disconnected" : "connected",
-      value: i % 9 === 0 ? null : 1800 + i * 37.4,
-    },
-    {
-      energy: "Nước",
-      kind: "water",
-      type: "Water Smart Meter",
-      unit: "m³/h",
-      status: "connected",
-      value: 20 + (i % 15) * 1.7,
-    },
-    {
-      energy: "Nhiệt",
-      kind: "thermo",
-      type: "Temperature Sensor",
-      unit: "°C",
-      status: i % 8 === 0 ? "disconnected" : "connected",
-      value: i % 8 === 0 ? null : 42 + (i % 12),
-    },
-    {
-      energy: "Hơi",
-      kind: "steam",
-      type: "Steam Flow Computer",
-      unit: "t/h",
-      status: "connected",
-      value: 3.2 + (i % 6) * 0.8,
-    },
-  ];
-  const item = cycle[i % cycle.length];
-  return {
-    id: `MP-${String(n).padStart(3, "0")}`,
-    name: `MP-${String(n).padStart(3, "0")} - Điểm đo khu ${n}`,
-    sn: `SN: 88${String(100000000 + n).slice(1)}`,
-    ...item,
-  };
-});
-
-const INITIAL_POINTS: MeterPoint[] = [...seeds, ...extraPoints];
 const PAGE_SIZE = 10;
 
 function flatten(points: MeterPoint[]): MeterPoint[] {
@@ -227,10 +88,10 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
   const [query, setQuery] = useState("");
   const [deviceType, setDeviceType] = useState("all");
   const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["m1", "MP-001"]));
-  const [allPoints, setAllPoints] = useState(INITIAL_POINTS);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [allPoints, setAllPoints] = useState<MeterPoint[]>([]);
   const [meterDataReady, setMeterDataReady] = useState(false);
-  const [alertCount, setAlertCount] = useState(2);
+  const [alertCount, setAlertCount] = useState(0);
 
   useEffect(() => {
     setEnergies(resolveMeterTypes(project));

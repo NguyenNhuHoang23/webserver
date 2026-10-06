@@ -11,48 +11,21 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027];
 
-const ENERGY = [
-  { day: "07-01", kwh: 198.4 },
-  { day: "07-02", kwh: 186.2 },
-  { day: "07-03", kwh: 172.8 },
-  { day: "07-04", kwh: 96.5 },
-  { day: "07-05", kwh: 210.6 },
-  { day: "07-06", kwh: 148.3 },
-  { day: "07-07", kwh: 88.1 },
-  { day: "07-08", kwh: 205.9 },
-  { day: "07-09", kwh: 168.4 },
-  { day: "07-10", kwh: 46.4 },
-  { day: "07-11", kwh: 194.7 },
-  { day: "07-12", kwh: 221.5 },
-  { day: "07-13", kwh: 158.2 },
-  { day: "07-14", kwh: 74.6 },
-  { day: "07-15", kwh: 236.8 },
-  { day: "07-16", kwh: 182.3 },
-  { day: "07-17", kwh: 129.7 },
-  { day: "07-18", kwh: 214.1 },
-  { day: "07-19", kwh: 216.9 },
-];
-
-const DEVICE_STATUS = [
-  { label: "BÌNH THƯỜNG", value: 12, color: "#43a047" },
-  { label: "CẢNH BÁO", value: 2, color: "#ef8d3a" },
-  { label: "NGOẠI TUYẾN", value: 1, color: "#9aa3af" },
-];
-
 type DashboardAlert = { time: string; point: string; param: string; value: string };
+type EnergyPoint = { day: string; kwh: number };
+type StatusSlice = { label: string; value: number; color: string };
 
-const ALERTS: DashboardAlert[] = [
-  { time: "2026-07-19 07:38:48", point: "Tủ điện văn phòng", param: "F_avg", value: "49.79" },
-  { time: "2026-07-19 07:38:38", point: "Tủ điện văn phòng", param: "F_avg", value: "50.42" },
-  { time: "2026-07-19 07:38:27", point: "Tủ điện văn phòng", param: "F_avg", value: "50.32" },
-  { time: "2026-07-19 07:38:17", point: "Tủ điện văn phòng", param: "F_avg", value: "49.99" },
+const EMPTY_STATUS: StatusSlice[] = [
+  { label: "BÌNH THƯỜNG", value: 0, color: "#43a047" },
+  { label: "CẢNH BÁO", value: 0, color: "#ef8d3a" },
+  { label: "NGOẠI TUYẾN", value: 0, color: "#9aa3af" },
 ];
 
 export function ClientDashboard({ project }: { project: Project }) {
-  const [energy, setEnergy] = useState(ENERGY);
-  const [deviceStatus, setDeviceStatus] = useState(DEVICE_STATUS);
-  const [alerts, setAlerts] = useState<DashboardAlert[]>(ALERTS);
-  const [co2, setCo2] = useState(2.21);
+  const [energy, setEnergy] = useState<EnergyPoint[]>([]);
+  const [deviceStatus, setDeviceStatus] = useState(EMPTY_STATUS);
+  const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
+  const [co2, setCo2] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -65,33 +38,28 @@ export function ClientDashboard({ project }: { project: Project }) {
       ]).then(([readings, alertEvents, devices, sources]) => {
         if (!active) return;
         const energyRows = readings.filter((row) => row.metric === "energy");
-        if (energyRows.length) {
-          setEnergy(energyRows.map((row) => ({
-            day: row.recordedAt.slice(5, 10),
-            kwh: row.value,
-          })));
-        }
-        if (devices.length) {
-          const counts = devices.reduce((result, device) => {
-            if (device.status === "offline") result.offline += 1;
-            else if (device.status === "maintenance") result.warning += 1;
-            else result.normal += 1;
-            return result;
-          }, { normal: 0, warning: 0, offline: 0 });
-          setDeviceStatus([
-            { label: "BÌNH THƯỜNG", value: counts.normal, color: "#43a047" },
-            { label: "CẢNH BÁO", value: counts.warning, color: "#ef8d3a" },
-            { label: "NGOẠI TUYẾN", value: counts.offline, color: "#9aa3af" },
-          ]);
-        }
-        if (alertEvents.length) setAlerts(alertEvents.slice(0, 8).map((event: AlertEvent) => ({
+        setEnergy(energyRows.map((row) => ({
+          day: row.recordedAt.slice(5, 10),
+          kwh: row.value,
+        })));
+        const counts = devices.reduce((result, device) => {
+          if (device.status === "offline") result.offline += 1;
+          else if (device.status === "maintenance") result.warning += 1;
+          else result.normal += 1;
+          return result;
+        }, { normal: 0, warning: 0, offline: 0 });
+        setDeviceStatus([
+          { label: "BÌNH THƯỜNG", value: counts.normal, color: "#43a047" },
+          { label: "CẢNH BÁO", value: counts.warning, color: "#ef8d3a" },
+          { label: "NGOẠI TUYẾN", value: counts.offline, color: "#9aa3af" },
+        ]);
+        setAlerts(alertEvents.slice(0, 8).map((event: AlertEvent) => ({
           time: event.occurredAt,
           point: event.pointName ?? event.meterPointId ?? "--",
           param: event.parameter,
           value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
         })));
-        const totalCo2 = sources.reduce((sum, source) => sum + (source.tons ?? 0), 0);
-        if (totalCo2 > 0) setCo2(totalCo2);
+        setCo2(sources.reduce((sum, source) => sum + (source.tons ?? 0), 0));
       }).catch(() => undefined);
     };
     reload();
@@ -299,7 +267,14 @@ function DashboardCard({
 }
 
 function EnergyChart({ data }: { data: { day: string; kwh: number }[] }) {
-  const max = Math.max(...data.map((item) => item.kwh));
+  if (!data.length) {
+    return (
+      <div className="flex h-[250px] items-center justify-center text-sm text-slate-400">
+        Chưa có dữ liệu
+      </div>
+    );
+  }
+  const max = Math.max(...data.map((item) => item.kwh), 1);
 
   return (
     <div className="flex h-[250px] items-end gap-1.5 pb-1">

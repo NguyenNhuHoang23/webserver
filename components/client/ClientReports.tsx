@@ -19,23 +19,7 @@ const REPORTS = [
   { id: "alerts", name: "Cảnh báo", title: "CẢNH BÁO" },
 ] as const;
 
-const POINTS = [
-  { id: "off1", name: "(DB-OFF1) Tủ điện văn phòng" },
-  { id: "prd1", name: "(DB-PRD1) Tủ điện sản xuất" },
-  { id: "cmp1", name: "(DB-CMP1) Máy nén khí 1" },
-  { id: "hvac", name: "(DB-HVAC) Điều hòa trung tâm" },
-  { id: "main", name: "(DB-MAIN) Tủ điện tổng" },
-];
-
 type ReportAlert = { time: string; point: string; param: string; value: string; level: string };
-
-const ALERT_ROWS: ReportAlert[] = [
-  { time: "2026-07-19 07:38:48", point: "Tủ điện văn phòng", param: "F_avg", value: "49.79", level: "Cảnh báo" },
-  { time: "2026-07-19 07:38:38", point: "Tủ điện văn phòng", param: "F_avg", value: "50.42", level: "Cảnh báo" },
-  { time: "2026-07-19 07:22:11", point: "Tủ điện sản xuất", param: "U_unb", value: "2.14", level: "Nghiêm trọng" },
-  { time: "2026-07-19 06:51:03", point: "Máy nén khí 1", param: "I_rms", value: "612.4", level: "Cảnh báo" },
-  { time: "2026-07-19 06:18:40", point: "Tủ điện tổng", param: "P_sum", value: "186.2", level: "Thông tin" },
-];
 
 export function ClientReports({ initialId = "energy" }: { initialId?: (typeof REPORTS)[number]["id"] }) {
   const params = useParams<{ id: string }>();
@@ -49,11 +33,11 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
   const [detail, setDetail] = useState<YesNo>(reportId === "alerts" ? "Có" : "Không");
   const [format, setFormat] = useState<Format>(".pdf");
   const [period, setPeriod] = useState<Period>("Ngày");
-  const [date, setDate] = useState("2026-07-19");
-  const [selected, setSelected] = useState<string[]>(["off1"]);
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selected, setSelected] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [points, setPoints] = useState(POINTS);
-  const [alertRows, setAlertRows] = useState<ReportAlert[]>(ALERT_ROWS);
+  const [points, setPoints] = useState<{ id: string; name: string }[]>([]);
+  const [alertRows, setAlertRows] = useState<ReportAlert[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -63,14 +47,13 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
         id: meter.id,
         name: `(${meter.code}) ${meter.name}`,
       }));
-      if (nextPoints.length) {
-        setPoints(nextPoints);
-        setSelected((current) => {
-          const valid = current.filter((id) => nextPoints.some((point) => point.id === id));
-          return valid.length ? valid : [nextPoints[0].id];
-        });
-      }
-      if (events.length) setAlertRows(events.map((event: AlertEvent) => ({
+      setPoints(nextPoints);
+      setSelected((current) => {
+        const valid = current.filter((id) => nextPoints.some((point) => point.id === id));
+        if (valid.length) return valid;
+        return nextPoints[0] ? [nextPoints[0].id] : [];
+      });
+      setAlertRows(events.map((event: AlertEvent) => ({
         time: event.occurredAt,
         point: event.pointName ?? event.meterPointId ?? "--",
         param: event.parameter,

@@ -6,7 +6,6 @@ import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
   getTimeFilterLabel,
-  getTimeFilterScaleFactor,
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
 import {
@@ -15,7 +14,6 @@ import {
   loadGhgSources,
   scopeColor,
   scopeLabel,
-  withDemoTons,
   type GhgEmissionSource,
   type ScopeId,
 } from "@/lib/ghg-sources";
@@ -43,22 +41,18 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
   useEffect(() => {
     let active = true;
     void hydrateGhgSources(projectId).then((sources) => {
-      if (active) setSources(withDemoTons(sources));
+      if (active) setSources(sources);
     }).catch(() => {
-      if (active) setSources(withDemoTons(loadGhgSources()));
+      if (active) setSources(loadGhgSources());
     });
     return () => {
       active = false;
     };
   }, [projectId]);
 
-  const baseScale = 1 + (timeFilter.year - 2024) * 0.035;
-  const timeScale = getTimeFilterScaleFactor(timeFilter);
-  const scale = baseScale * (timeFilter.mode === "year" ? 1 : Math.max(0.005, timeScale));
-
   const rows = useMemo(() => {
     const scaled = sources.map((source) => {
-      const rawTons = (source.tons ?? 0) * scale;
+      const rawTons = source.tons ?? 0;
       const tons = Number(rawTons < 1 ? rawTons.toFixed(2) : rawTons.toFixed(1));
       return {
         ...source,
@@ -72,7 +66,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
         share: Number(((row.tons / totalTons) * 100).toFixed(1)),
       }))
       .sort((a, b) => b.tons - a.tons);
-  }, [sources, scale]);
+  }, [sources]);
 
   const selectedRows = useMemo(() => {
     if (selection.kind === "scope") return rows.filter((row) => row.scope === selection.scope);
@@ -89,8 +83,6 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
       })),
     [selectedRows, total],
   );
-  const goal = Math.max(62, Math.min(96, 85 - (timeFilter.year - 2024) * 4));
-
   const scopeShares = useMemo(() => {
     return GHG_SCOPES.map((scope) => {
       const tons = visibleRows
@@ -209,23 +201,21 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
           label="TỔNG LƯỢNG PHÁT THẢI"
           value={`${fmt(total, total < 10 ? 2 : 1)}`}
           hint="tấn CO₂e"
-          trend={-2.4}
         />
         <KpiCard
           label="CƯỜNG ĐỘ PHÁT THẢI"
-          value={`${(0.12 * (timeFilter.mode === "year" ? 1 : 0.95)).toFixed(2)}`}
+          value="—"
           hint="tấn/sản phẩm"
-          trend={0.8}
         />
         <article className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <p className="text-[11px] font-semibold tracking-[0.08em] text-slate-400">
             MỤC TIÊU GIẢM THẢI · {timeFilter.year}
           </p>
           <p className="mt-2 text-[28px] font-bold leading-none text-slate-800">
-            {goal}% <span className="text-[15px] font-medium text-slate-500">hoàn thành</span>
+            — <span className="text-[15px] font-medium text-slate-500">chưa thiết lập</span>
           </p>
           <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-emerald-600 transition-all duration-500" style={{ width: `${goal}%` }} />
+            <div className="h-full rounded-full bg-emerald-600 transition-all duration-500" style={{ width: "0%" }} />
           </div>
         </article>
       </div>
@@ -401,9 +391,9 @@ function KpiCard({
   label: string;
   value: string;
   hint: string;
-  trend: number;
+  trend?: number;
 }) {
-  const down = trend < 0;
+  const down = (trend ?? 0) < 0;
   return (
     <article className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <p className="text-[11px] font-semibold tracking-[0.08em] text-slate-400">{label}</p>
@@ -411,15 +401,17 @@ function KpiCard({
         {value}
         <span className="ml-1.5 text-[13px] font-medium text-slate-400">{hint}</span>
       </p>
-      <p
-        className={`mt-3 inline-flex items-center gap-1 text-[12px] font-medium ${
-          down ? "text-emerald-600" : "text-red-500"
-        }`}
-      >
-        <TrendArrow down={down} />
-        {down ? "" : "+"}
-        {trend}% so với kỳ trước
-      </p>
+      {trend == null ? null : (
+        <p
+          className={`mt-3 inline-flex items-center gap-1 text-[12px] font-medium ${
+            down ? "text-emerald-600" : "text-red-500"
+          }`}
+        >
+          <TrendArrow down={down} />
+          {down ? "" : "+"}
+          {trend}% so với kỳ trước
+        </p>
+      )}
     </article>
   );
 }

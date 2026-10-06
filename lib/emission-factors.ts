@@ -16,74 +16,8 @@ export type FactorGroup = {
   gases: GasValue[];
 };
 
-export const SOURCE_2626 =
-  "Quyết định số 2626/QĐ-BTNMT ngày 10/10/2022, Phụ lục I";
-
 let factorGroupsCache: FactorGroup[] = [];
 let factorsHydration: Promise<FactorGroup[]> | null = null;
-
-export const INITIAL_FACTOR_GROUPS: FactorGroup[] = [
-  {
-    id: "do-industry",
-    name: "Hệ số phát thải của DO trong công nghiệp sản xuất và xây dựng*",
-    source: SOURCE_2626,
-    gases: [
-      { key: "co2", label: "CO₂", value: 74100, unit: "kg CO₂/TJ" },
-      { key: "ch4", label: "CH₄", value: 3, unit: "kg CH₄/TJ" },
-      { key: "n2o", label: "N₂O", value: 0.6, unit: "kg N₂O/TJ" },
-    ],
-  },
-  {
-    id: "do-road",
-    name: "Hệ số phát thải của dầu DO trong phương tiện vận chuyển đường bộ*",
-    source: SOURCE_2626,
-    gases: [
-      { key: "co2", label: "CO₂", value: 74100, unit: "kg CO₂/TJ" },
-      { key: "ch4", label: "CH₄", value: 3.9, unit: "kg CH₄/TJ" },
-      { key: "n2o", label: "N₂O", value: 3.9, unit: "kg N₂O/TJ" },
-    ],
-  },
-  {
-    id: "gasoline-road",
-    name: "Hệ số phát thải của xăng trong phương tiện vận chuyển đường bộ*",
-    source: SOURCE_2626,
-    gases: [
-      { key: "co2", label: "CO₂", value: 69300, unit: "kg CO₂/TJ" },
-      { key: "ch4", label: "CH₄", value: 33, unit: "kg CH₄/TJ" },
-      { key: "n2o", label: "N₂O", value: 3.2, unit: "kg N₂O/TJ" },
-    ],
-  },
-  {
-    id: "lpg-industry",
-    name: "Hệ số phát thải của LPG trong công nghiệp*",
-    source: SOURCE_2626,
-    gases: [
-      { key: "co2", label: "CO₂", value: 63100, unit: "kg CO₂/TJ" },
-      { key: "ch4", label: "CH₄", value: 1, unit: "kg CH₄/TJ" },
-      { key: "n2o", label: "N₂O", value: 0.1, unit: "kg N₂O/TJ" },
-    ],
-  },
-  {
-    id: "natural-gas",
-    name: "Hệ số phát thải của khí tự nhiên*",
-    source: SOURCE_2626,
-    gases: [
-      { key: "co2", label: "CO₂", value: 56100, unit: "kg CO₂/TJ" },
-      { key: "ch4", label: "CH₄", value: 1, unit: "kg CH₄/TJ" },
-      { key: "n2o", label: "N₂O", value: 0.1, unit: "kg N₂O/TJ" },
-    ],
-  },
-  {
-    id: "anthracite",
-    name: "Hệ số phát thải của than antraxit*",
-    source: SOURCE_2626,
-    gases: [
-      { key: "co2", label: "CO₂", value: 98300, unit: "kg CO₂/TJ" },
-      { key: "ch4", label: "CH₄", value: 1, unit: "kg CH₄/TJ" },
-      { key: "n2o", label: "N₂O", value: 1.5, unit: "kg N₂O/TJ" },
-    ],
-  },
-];
 
 export function parseFactorNumber(value: string) {
   const trimmed = value.trim().replace(/\s/g, "");
@@ -103,7 +37,7 @@ export function formatFactorValue(value: number) {
 }
 
 export function loadFactorGroups(): FactorGroup[] {
-  return factorGroupsCache.length ? factorGroupsCache : INITIAL_FACTOR_GROUPS;
+  return factorGroupsCache;
 }
 
 export function saveFactorGroups(groups: FactorGroup[]) {
@@ -122,7 +56,7 @@ export function hydrateFactorGroups() {
   if (factorsHydration) return factorsHydration;
   factorsHydration = dbFetch<FactorGroup[]>("emission-factors")
     .then((groups) => {
-      factorGroupsCache = groups.length ? groups : INITIAL_FACTOR_GROUPS;
+      factorGroupsCache = groups;
       emitDbChange("emission-factors");
       return factorGroupsCache;
     })

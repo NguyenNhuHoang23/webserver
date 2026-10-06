@@ -33,19 +33,6 @@ type MeterPoint = {
 
 const POINT_COLORS = ["#059669", "#22c55e", "#a16207", "#ef4444", "#8b5cf6", "#06b6d4", "#f59e0b"];
 
-const FALLBACK_POINTS: MeterPoint[] = [
-  { id: "p1", code: "DB-OFF1", name: "Tủ điện văn phòng", energy: "Điện", color: POINT_COLORS[0] },
-  { id: "p2", code: "DB-PROD", name: "Dây chuyền sản xuất A", energy: "Điện", color: POINT_COLORS[1] },
-  { id: "p3", code: "DB-HVAC", name: "Hệ thống HVAC", energy: "Điện", color: POINT_COLORS[2] },
-  { id: "p4", code: "DB-MAIN", name: "Nguồn tổng nhà máy", energy: "Điện", color: POINT_COLORS[3] },
-  { id: "p5", code: "AIR-01", name: "Máy nén khí trạm 1", energy: "Khí nén", color: POINT_COLORS[0] },
-  { id: "p6", code: "AIR-02", name: "Máy nén khí trạm 2", energy: "Khí nén", color: POINT_COLORS[1] },
-  { id: "p7", code: "WTR-01", name: "Đồng hồ nước đầu nguồn", energy: "Nước", color: POINT_COLORS[0] },
-  { id: "p8", code: "WTR-02", name: "Hệ thống làm mát", energy: "Nước", color: POINT_COLORS[1] },
-  { id: "p9", code: "HT-01", name: "Cảm biến nhiệt dàn", energy: "Nhiệt", color: POINT_COLORS[0] },
-  { id: "p10", code: "STM-01", name: "Nồi hơi công nghệ", energy: "Hơi", color: POINT_COLORS[0] },
-];
-
 const ENERGY_KIND_META: Record<string, "bolt" | "heat" | "air" | "water" | "steam"> = {
   Điện: "bolt",
   Nhiệt: "heat",
@@ -66,42 +53,21 @@ const METRICS: { id: MetricId; label: string }[] = [
 
 type BarPoint = { minute: number; label: string; kwh: number };
 
-function energyBarsForFilter(seed: number, filter: TimeFilterValue): BarPoint[] {
-  const periods = getTimeFilterPeriods(filter);
-  const count = Math.max(periods.length, 1);
-  return periods.map((p, i) => {
-    const isHourly =
-      filter.mode === "day" ||
-      (filter.mode === "custom_date" && filter.customDateMode !== "range");
-    let baseKwh = 95;
-    if (isHourly) {
-      const hour = Number(p.key);
-      const isWorkHour = hour >= 7 && hour <= 18;
-      baseKwh = isWorkHour ? 150 + 40 * Math.sin(hour * 0.4) : 40 + 15 * Math.sin(hour);
-    } else if (filter.mode === "year") {
-      baseKwh = 2400 + 450 * Math.sin(i * 0.55 + seed);
-    } else {
-      const weekend = (i + Math.floor(seed)) % 7 >= 5;
-      baseKwh = 95 + 50 * Math.sin(i * 0.45 + seed) + (weekend ? -25 : 18);
-    }
-    const noise = Math.sin(i * 0.9 + seed * 0.7) * (isHourly ? 8 : 20);
-    const kwh = Math.max(10, baseKwh + noise);
-    return {
-      minute: i,
-      label: p.label,
-      kwh: Number(kwh.toFixed(1)),
-    };
-  });
+function emptyEnergyBars(filter: TimeFilterValue): BarPoint[] {
+  return getTimeFilterPeriods(filter).map((period, index) => ({
+    minute: index,
+    label: period.label,
+    kwh: 0,
+  }));
 }
 
 function energyBarsFromReadings(
-  seed: number,
   filter: TimeFilterValue,
   pointId: string | undefined,
   readings: MeterReading[],
 ) {
   const rows = readings.filter((row) => row.meterPointId === pointId && row.metric === "energy");
-  if (!rows.length) return energyBarsForFilter(seed, filter);
+  if (!rows.length) return emptyEnergyBars(filter);
   const periods = getTimeFilterPeriods(filter);
   const values = new Map<number, number>();
   for (const row of rows) {
@@ -126,7 +92,7 @@ function energyBarsFromReadings(
     }
     if (index >= 0 && index < periods.length) values.set(index, (values.get(index) ?? 0) + row.value);
   }
-  if (!values.size) return energyBarsForFilter(seed, filter);
+  if (!values.size) return emptyEnergyBars(filter);
   return periods.map((period, index) => ({
     minute: index,
     label: period.label,
@@ -191,26 +157,8 @@ function formatKwh(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
 }
 
-function seriesFor(metric: MetricId, seed: number, count: number): number[][] {
-  const wave = (base: number, amp: number, shift: number, n: number) =>
-    Array.from({ length: 25 }, (_, h) => {
-      const t = (h + shift) / 24;
-      return (
-        base +
-        amp * Math.sin(t * Math.PI * 2) +
-        amp * 0.35 * Math.sin(t * Math.PI * 4 + n) +
-        (h > 8 && h < 15 ? amp * 0.25 : 0) -
-        (h < 5 ? amp * 0.2 : 0)
-      );
-    });
-
-  return Array.from({ length: Math.max(count, 1) }, (_, i) => {
-    const n = seed + i;
-    if (metric === "freq") return wave(50.02 - i * 0.01, 0.08, i, n);
-    if (metric === "ui") return wave(398 + i * 2, 12 - i, i * 0.8, n);
-    if (metric === "power") return wave(180 - i * 20, 55 - i * 5, i, n);
-    return wave(165 - i * 15, 52, i * 1.1, n);
-  });
+function seriesFor(count: number): number[][] {
+  return Array.from({ length: Math.max(count, 0) }, () => Array.from({ length: 25 }, () => 0));
 }
 
 function metricMeta(energy: EnergyKind, metric: MetricId) {
@@ -239,12 +187,11 @@ export function EnergyCharts() {
   const [energy, setEnergy] = useState<EnergyKind>("Điện");
   const [metric, setMetric] = useState<MetricId>("energy");
   const [view, setView] = useState<ViewMode>("chart");
-  const [seed, setSeed] = useState(1);
   const [zoom, setZoom] = useState(1);
   const [hover, setHover] = useState<number | null>(null);
   const [showSum, setShowSum] = useState(false);
   const [range, setRange] = useState({ start: 0, end: 30 });
-  const [allPoints, setAllPoints] = useState<MeterPoint[]>(FALLBACK_POINTS);
+  const [allPoints, setAllPoints] = useState<MeterPoint[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pointQuery, setPointQuery] = useState("");
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
@@ -276,7 +223,7 @@ export function EnergyCharts() {
         setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
         const meters = orderMetersByTree(meterRows.length ? meterRows : loadClientMeters(projectId));
         if (!meters.length) {
-          setAllPoints(FALLBACK_POINTS);
+          setAllPoints([]);
           return;
         }
         setAllPoints(
@@ -348,8 +295,8 @@ export function EnergyCharts() {
   );
 
   const values = useMemo(
-    () => seriesFor(metric, seed, Math.max(selectedPoints.length, 1)),
-    [metric, seed, selectedPoints.length],
+    () => seriesFor(selectedPoints.length),
+    [selectedPoints.length],
   );
 
   const gatewayByPoint = useMemo(() => {
@@ -370,10 +317,10 @@ export function EnergyCharts() {
           point,
           bars: samples?.length
             ? energyBarsFromGateway(timeFilter, samples)
-            : energyBarsFromReadings(seed + i * 1.7, timeFilter, point.id, readings),
+            : energyBarsFromReadings(timeFilter, point.id, readings),
         };
       }),
-    [gatewayByPoint, readings, selectedPoints, seed, timeFilter],
+    [gatewayByPoint, readings, selectedPoints, timeFilter],
   );
 
   const liveSamples = useMemo(() => {
@@ -421,7 +368,7 @@ export function EnergyCharts() {
             ? "kWh"
             : "kWh";
 
-  const primaryBars = multiBars[0]?.bars ?? energyBarsFromReadings(seed, timeFilter, selectedPoints[0]?.id, readings);
+  const primaryBars = multiBars[0]?.bars ?? energyBarsFromReadings(timeFilter, selectedPoints[0]?.id, readings);
   const visibleBars = primaryBars.slice(range.start, range.end + 1);
   const barSum = multiBars.reduce(
     (sum, series) =>
@@ -654,17 +601,15 @@ export function EnergyCharts() {
           </section>
         ) : isFreqChart ? (
           <FrequencyChart
-            seed={seed}
             timeFilter={timeFilter}
             samples={liveSamples}
-            onRefresh={() => setSeed((n) => n + 1)}
           />
         ) : isPowerChart ? (
-          <PowerChart seed={seed} timeFilter={timeFilter} samples={liveSamples} />
+          <PowerChart timeFilter={timeFilter} samples={liveSamples} />
         ) : isHarmChart ? (
-          <HarmonicsChart seed={seed} samples={liveSamples} />
+          <HarmonicsChart samples={liveSamples} />
         ) : isUnbChart ? (
-          <UnbalanceChart seed={seed} samples={liveSamples} />
+          <UnbalanceChart samples={liveSamples} />
         ) : isConsumptionChart ? (
           <>
             <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
@@ -715,7 +660,7 @@ export function EnergyCharts() {
                     >
                       <TableIcon className="h-4 w-4" />
                     </IconBtn>
-                    <IconBtn label="Làm mới" onClick={() => setSeed((n) => n + 1)}>
+                    <IconBtn label="Làm mới" onClick={() => undefined}>
                       <RefreshIcon className="h-4 w-4" />
                     </IconBtn>
                   </div>
@@ -823,10 +768,10 @@ export function EnergyCharts() {
               </div>
               <div className="flex flex-wrap items-center gap-3 text-[12px] text-slate-500">
                 <p className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  Hệ thống đang hoạt động bình thường
+                  <span className={`h-2.5 w-2.5 rounded-full ${liveSamples.length ? "bg-emerald-500" : "bg-slate-300"}`} />
+                  {liveSamples.length ? "Đang có số liệu đo" : "Chưa có số liệu đo"}
                 </p>
-                <p>Cập nhật: 2026-07-19 10:04:46</p>
+                <p>{liveSamples.length ? `Cập nhật: ${liveSamples[liveSamples.length - 1].at.replace("T", " ").slice(0, 19)}` : "Chưa có số liệu"}</p>
               </div>
             </div>
           </>
@@ -846,7 +791,7 @@ export function EnergyCharts() {
                 <IconBtn label="Bảng dữ liệu" active={view === "table"} onClick={() => setView("table")}>
                   <TableIcon className="h-4 w-4" />
                 </IconBtn>
-                <IconBtn label="Làm mới" onClick={() => setSeed((n) => n + 1)}>
+                <IconBtn label="Làm mới" onClick={() => undefined}>
                   <RefreshIcon className="h-4 w-4" />
                 </IconBtn>
               </div>
@@ -954,10 +899,10 @@ export function EnergyCharts() {
         !isConsumptionChart ? null : isConsumptionChart ? null : (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[12px] text-slate-500">
             <p className="flex items-center gap-3">
-              <span className="rounded bg-emerald-50 px-2 py-1 text-[11px] font-bold tracking-wide text-emerald-700">
-                HỆ THỐNG: BÌNH THƯỜNG
+              <span className={`rounded px-2 py-1 text-[11px] font-bold tracking-wide ${liveSamples.length ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                {liveSamples.length ? "ĐANG CÓ SỐ LIỆU" : "CHƯA CÓ SỐ LIỆU"}
               </span>
-              <span>Cập nhật: 2026-07-19 10:04:46</span>
+              <span>{liveSamples.length ? `Cập nhật: ${liveSamples[liveSamples.length - 1].at.replace("T", " ").slice(0, 19)}` : "Chưa có số liệu"}</span>
             </p>
             <p className="inline-flex items-center gap-1.5 font-medium text-slate-400">
               <ShieldIcon className="h-4 w-4" />

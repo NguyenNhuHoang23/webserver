@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { customerPassword, ensureCustomerAccount } from "@/lib/customer-accounts";
-import { hydrateProjects, INITIAL_PROJECTS, loadProjects, type Project, type ProjectStatus } from "@/lib/projects";
+import { hydrateProjects, loadProjects, type Project, type ProjectStatus } from "@/lib/projects";
 
 const statusMeta: Record<
   ProjectStatus,
@@ -40,7 +40,7 @@ const PROJECT_TELEMETRY: Record<string, { loadKw: number; meterCount: number; co
 const PAGE_SIZE = 10;
 
 export function ProjectList() {
-  const [items, setItems] = useState<Project[]>(INITIAL_PROJECTS);
+  const [items, setItems] = useState<Project[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [customer, setCustomer] = useState("all");
   const [status, setStatus] = useState<"all" | ProjectStatus>("all");

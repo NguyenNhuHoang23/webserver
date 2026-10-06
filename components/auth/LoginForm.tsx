@@ -4,7 +4,6 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import {
-  DEFAULT_PASSWORD,
   homePathFor,
   isAuthPath,
   isClientPath,
@@ -42,12 +41,6 @@ export function LoginForm({
       active = false;
     };
   }, [projectId]);
-
-  function handleQuickFill(user: string) {
-    setIdentifier(user);
-    setPassword(DEFAULT_PASSWORD);
-    setError("");
-  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -333,29 +326,6 @@ export function LoginForm({
               </span>
             </button>
           </form>
-
-          {/* Quick Demo Credentials Bar */}
-          <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-slate-800/80 bg-slate-900/40 p-2.5 text-xs">
-            <span className="text-slate-400 text-[11px]">Tài khoản thử nghiệm:</span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickFill("admin_system")}
-                className="rounded-lg bg-slate-800/90 hover:bg-slate-700 px-2 py-1 text-[11px] font-mono text-emerald-300 transition-colors cursor-pointer"
-                title="Điền tài khoản Quản trị viên"
-              >
-                admin_system
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickFill("khachhang")}
-                className="rounded-lg bg-slate-800/90 hover:bg-slate-700 px-2 py-1 text-[11px] font-mono text-cyan-300 transition-colors cursor-pointer"
-                title="Điền tài khoản Khách hàng"
-              >
-                khachhang
-              </button>
-            </div>
-          </div>
 
           {/* Bottom Security Footer */}
           <div className="mt-6 flex items-center justify-center gap-2 text-[11px] text-slate-500">

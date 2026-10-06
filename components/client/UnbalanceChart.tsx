@@ -47,39 +47,13 @@ function smoothPath(pts: [number, number][]) {
   return d;
 }
 
-function uUnb(i: number, qty: string, agg: Agg, seed: number) {
-  const t = (i / (N - 1)) * 240;
-  const shift = qty === "Uneg" ? 0.4 : qty === "Uzero" ? 0.9 : 0;
-  let v =
-    0.48 +
-    0.07 * Math.sin(t / 42 + seed * 0.2 + shift) +
-    0.03 * Math.sin(t / 14 + shift);
-  if (agg === "MAX") v += 0.16;
-  if (agg === "MIN") v -= 0.12;
-  return Math.max(0, Math.min(2, v));
-}
-
-function iUnb(i: number, qty: string, agg: Agg, seed: number) {
-  const t = (i / (N - 1)) * 240;
-  const shift = qty === "Ineg" ? 0.5 : qty === "Izero" ? 1.1 : 0;
-  const trend = 1.45 + (t / 240) * 2.85;
-  let v =
-    trend +
-    0.38 * Math.sin(t / 18 + seed * 0.18 + shift) +
-    0.22 * Math.sin(t / 8 + shift) +
-    0.45 * Math.max(0, Math.sin(t / 28 + shift) ** 3);
-  if (agg === "MAX") v += 0.35;
-  if (agg === "MIN") v -= 0.35;
-  return Math.max(1, Math.min(5, v));
-}
-
 function unbalanceKeys(qty: string) {
   if (qty.startsWith("I")) return ["IuA", "IuB", "IuC"];
   if (qty === "Uneg" || qty === "Uzero") return ["Vuan", "Vubn", "Vucn"];
   return ["Vuab", "Vubc", "Vuca"];
 }
 
-export function UnbalanceChart({ seed, samples }: { seed: number; samples?: ChartSample[] }) {
+export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
   const [topQty, setTopQty] = useState("Uunb");
   const [botQty, setBotQty] = useState("Iunb");
   const [aggs, setAggs] = useState<Agg[]>(["AVG"]);
@@ -94,10 +68,9 @@ export function UnbalanceChart({ seed, samples }: { seed: number; samples?: Char
         name: `${topQty} ${agg}`,
         color: COLORS[agg],
         values:
-          valuesForKeysAverage(samples, unbalanceKeys(topQty), N) ??
-          Array.from({ length: N }, (_, i) => uUnb(i, topQty, agg, seed)),
+          valuesForKeysAverage(samples, unbalanceKeys(topQty), N) ?? Array.from({ length: N }, () => 0),
       })),
-    [aggs, topQty, seed, samples],
+    [aggs, topQty, samples],
   );
 
   const iSeries = useMemo<Series[]>(
@@ -107,10 +80,9 @@ export function UnbalanceChart({ seed, samples }: { seed: number; samples?: Char
         name: `${botQty} ${agg}`,
         color: COLORS[agg],
         values:
-          valuesForKeysAverage(samples, unbalanceKeys(botQty), N) ??
-          Array.from({ length: N }, (_, i) => iUnb(i, botQty, agg, seed)),
+          valuesForKeysAverage(samples, unbalanceKeys(botQty), N) ?? Array.from({ length: N }, () => 0),
       })),
-    [aggs, botQty, seed, samples],
+    [aggs, botQty, samples],
   );
 
   const uDomain = samples?.length ? paddedDomain(uSeries, [0, 2]) : ([0, 2] as [number, number]);

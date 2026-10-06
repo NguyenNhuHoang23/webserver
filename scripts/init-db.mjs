@@ -44,4 +44,4 @@ if (result.error) {
 
 if (result.status !== 0) process.exit(result.status ?? 1);
 
-console.log("Đã khởi tạo database ems_local và seed dữ liệu demo.");
+console.log("Đã khởi tạo schema database. Không seed dữ liệu demo.");

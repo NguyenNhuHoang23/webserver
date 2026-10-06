@@ -17,42 +17,8 @@ const I_CHANNELS = [
 ];
 const AGGS = ["MAX", "AVG", "MIN"] as const;
 type Agg = (typeof AGGS)[number];
-type Meas = "rms" | "pk+" | "pk-" | "dc" | "cf";
-
 const N = 500;
 const T0 = Date.parse("2026-01-27T09:40:00");
-
-function waveAt(i: number, phase: number, kind: "u" | "i", meas: Meas = "rms", agg: Agg = "AVG") {
-  const seconds = (i / (N - 1)) * 240;
-  if (kind === "u") {
-    let v =
-      399.05 +
-      0.32 * Math.sin(seconds / 38 + phase) +
-      0.2 * Math.sin(seconds / 11 + phase * 1.6) +
-      0.1 * Math.sin(seconds * 1.8 + phase) +
-      0.06 * Math.sin(seconds * 4.4 + phase * 0.7);
-    if (meas === "pk+") v += 0.55;
-    if (meas === "pk-") v -= 0.55;
-    if (meas === "dc") v = 398.8 + 0.12 * Math.sin(seconds / 50 + phase);
-    if (meas === "cf") v = 1.41 + 0.03 * Math.sin(seconds / 20 + phase);
-    if (agg === "MAX") v += meas === "cf" ? 0.04 : 0.35;
-    if (agg === "MIN") v -= meas === "cf" ? 0.04 : 0.35;
-    return v;
-  }
-  let v =
-    535 +
-    42 * Math.sin(seconds / 18 + phase) +
-    68 * Math.max(0, Math.sin(seconds / 26 + phase) ** 7) +
-    22 * Math.sin(seconds / 5 + phase * 1.8) +
-    10 * Math.sin(seconds * 2.1 + phase);
-  if (meas === "pk+") v *= 1.12;
-  if (meas === "pk-") v *= 0.82;
-  if (meas === "dc") v = 28 + 6 * Math.sin(seconds / 40 + phase);
-  if (meas === "cf") v = 1.55 + 0.08 * Math.sin(seconds / 16 + phase);
-  if (agg === "MAX") v *= meas === "cf" ? 1.05 : 1.08;
-  if (agg === "MIN") v *= meas === "cf" ? 0.95 : 0.9;
-  return v;
-}
 
 function toggleIn<T>(list: T[], value: T) {
   if (list.includes(value)) return list.length === 1 ? list : list.filter((item) => item !== value);
@@ -119,7 +85,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
                 color: PHASE_COLORS[idx],
                 values:
                   valuesForKey(samples, voltageKey(uQty, item.ch), N) ??
-                  Array.from({ length: N }, (_, i) => waveAt(i, idx * 0.9, "u", "rms", agg)),
+                  Array.from({ length: N }, () => 0),
               },
             ]
           : [],
@@ -138,7 +104,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
                 color: PHASE_COLORS[idx],
                 values:
                   valuesForKey(samples, currentKey(iQty, item.ch), N) ??
-                  Array.from({ length: N }, (_, i) => waveAt(i, idx * 1.1, "i", "rms", agg)),
+                  Array.from({ length: N }, () => 0),
               },
             ]
           : [],

@@ -4,7 +4,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import {
   buildMeterDepthMap,
-  defaultClientMeters,
   hydrateClientMeters,
   isMeterDescendant,
   loadClientMeters,
@@ -49,39 +48,6 @@ type AccountRow = {
   status: "Đang hoạt động" | "Ngoại tuyến";
 };
 
-const INITIAL_SLOTS: Slot[] = [
-  { id: "s1", name: "Giờ cao điểm", color: "#ef4444", from: "09:30", to: "11:30", price: "4,581" },
-  { id: "s2", name: "Giờ bình thường", color: "#f59e0b", from: "11:30", to: "17:00", price: "2,666" },
-  { id: "s3", name: "Giờ thấp điểm", color: "#22c55e", from: "22:00", to: "04:00", price: "1,828" },
-];
-
-const INITIAL_ACCOUNTS: AccountRow[] = [
-  {
-    id: "a1",
-    username: "nguyen.van.a",
-    fullName: "Nguyễn Văn A",
-    role: "Quản trị viên",
-    email: "vana.nguyen@fujikin.vn",
-    status: "Đang hoạt động",
-  },
-  {
-    id: "a2",
-    username: "tran.thi.b",
-    fullName: "Trần Thị B",
-    role: "Kỹ thuật viên",
-    email: "thib.tran@fujikin.vn",
-    status: "Đang hoạt động",
-  },
-  {
-    id: "a3",
-    username: "le.van.c",
-    fullName: "Lê Văn C",
-    role: "Người xem",
-    email: "vanc.le@fujikin.vn",
-    status: "Ngoại tuyến",
-  },
-];
-
 export function ClientConfig() {
   const params = useParams<{ id: string }>();
   const projectId = params?.id ?? "default";
@@ -91,28 +57,28 @@ export function ClientConfig() {
   const [saveError, setSaveError] = useState("");
   const [utilities, setUtilities] = useState<string[]>(FALLBACK_UTILITIES);
   const [utility, setUtility] = useState<Utility>("Điện");
-  const [meters, setMeters] = useState<ClientMeter[]>(() => defaultClientMeters());
+  const [meters, setMeters] = useState<ClientMeter[]>([]);
   const [devices, setDevices] = useState<CatalogDevice[]>([]);
-  const [slots, setSlots] = useState(INITIAL_SLOTS);
-  const [applyDate, setApplyDate] = useState("2025-10-01");
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [applyDate, setApplyDate] = useState("");
   const [flatPrices, setFlatPrices] = useState<Record<string, string>>({});
-  const [accounts, setAccounts] = useState(INITIAL_ACCOUNTS);
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [adding, setAdding] = useState(false);
 
   const [classify, setClassify] = useState("Thông tin chung (Info)");
-  const [startTime, setStartTime] = useState("2025-09-29");
+  const [startTime, setStartTime] = useState("");
   const [warnCount, setWarnCount] = useState("");
   const [warnTimeout, setWarnTimeout] = useState(1);
   const [onlineTimeout, setOnlineTimeout] = useState(10);
   const [gmail, setGmail] = useState("");
-  const [password, setPassword] = useState("********");
+  const [password, setPassword] = useState("");
   const [language, setLanguage] = useState("Tiếng Việt");
   const [theme, setTheme] = useState<"Sáng" | "Tối" | "Hệ thống">("Sáng");
 
   const [tags, setTags] = useState(ALERT_TAGS);
   const [activeTag, setActiveTag] = useState("Energy");
-  const [threshold, setThreshold] = useState("5000");
-  const [dailyLimit, setDailyLimit] = useState(150);
+  const [threshold, setThreshold] = useState("");
+  const [dailyLimit, setDailyLimit] = useState(0);
   const [peakWarn, setPeakWarn] = useState(true);
 
   useEffect(() => {
@@ -320,11 +286,14 @@ export function ClientConfig() {
               <button
                 type="button"
                 onClick={() => {
-                  setMeters(defaultClientMeters());
-                  setSlots(INITIAL_SLOTS);
-                  setApplyDate("2025-10-01");
-                  setFlatPrices({});
-                  setAccounts(INITIAL_ACCOUNTS);
+                  setMeters(loadClientMeters(projectId));
+                  void hydrateProjectSettings(projectId).then((settings) => {
+                    const saved = settings.costConfig as SavedCostConfig | undefined;
+                    setSlots(saved?.slots?.map((slot) => ({ ...slot })) ?? []);
+                    setApplyDate(saved?.applyDate ?? "");
+                    setFlatPrices(saved?.flatPrices ? { ...saved.flatPrices } : {});
+                  });
+                  setAccounts([]);
                 }}
                 className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >

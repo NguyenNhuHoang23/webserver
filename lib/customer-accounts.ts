@@ -14,25 +14,6 @@ export type CustomerAccount = {
 let customerAccountsCache: CustomerAccount[] = [];
 let customerAccountsHydration: Promise<CustomerAccount[]> | null = null;
 
-export const INITIAL_CUSTOMER_ACCOUNTS: CustomerAccount[] = [
-  {
-    id: "cus-1",
-    username: "khachhang",
-    email: "khachhang@sunrise.com",
-    displayName: "Sunrise Group",
-    projectId: "PRJ-2401",
-    password: DEFAULT_PASSWORD,
-  },
-  {
-    id: "cus-2",
-    username: "vinamilk",
-    email: "ems@vinamilk.com.vn",
-    displayName: "Vinamilk",
-    projectId: "PRJ-2402",
-    password: DEFAULT_PASSWORD,
-  },
-];
-
 export function defaultCustomerAccount(project: {
   id: string;
   customer: string;
@@ -49,7 +30,7 @@ export function defaultCustomerAccount(project: {
 }
 
 export function loadCustomerAccounts(): CustomerAccount[] {
-  return customerAccountsCache.length ? customerAccountsCache : INITIAL_CUSTOMER_ACCOUNTS;
+  return customerAccountsCache;
 }
 
 export function saveCustomerAccounts(accounts: CustomerAccount[]) {
@@ -70,7 +51,7 @@ export function hydrateCustomerAccounts(projectId?: string) {
     query: { projectId },
   })
     .then((accounts) => {
-      customerAccountsCache = accounts.length ? accounts : INITIAL_CUSTOMER_ACCOUNTS;
+      customerAccountsCache = accounts;
       emitDbChange("customer-accounts");
       return customerAccountsCache;
     })

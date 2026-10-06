@@ -1,5 +1,5 @@
 import "server-only";
-import { getProject as getStaticProject, type Project } from "@/lib/projects";
+import type { Project } from "@/lib/projects";
 import { queryRows } from "@/lib/server-db";
 
 export async function getProjectFromDb(id: string): Promise<Project | undefined> {
@@ -11,7 +11,7 @@ export async function getProjectFromDb(id: string): Promise<Project | undefined>
     [id],
   );
   const row = rows[0];
-  if (!row) return getStaticProject(id);
+  if (!row) return undefined;
   const meterTypes = await queryRows<Record<string, unknown>>(
     `SELECT meter_type_name AS name FROM project_meter_types
       WHERE project_id = ? ORDER BY meter_type_name`,

@@ -5,7 +5,6 @@ import {
   flattenFactorGroups,
   formatFactorValue,
   hydrateFactorGroups,
-  INITIAL_FACTOR_GROUPS,
   loadFactorGroups,
   type GasKey,
   type LibraryFactor,
@@ -13,7 +12,6 @@ import {
 import {
   GHG_SCOPES,
   hydrateGhgSources,
-  INITIAL_GHG_SOURCES,
   loadGhgSources,
   saveGhgSources,
   type GhgEmissionSource,
@@ -59,16 +57,12 @@ type FactorHistoryRow = {
   validTo: string;
 };
 
-const initialSources: EmissionSource[] = INITIAL_GHG_SOURCES;
-
 export function GhgConfig({ projectId }: { projectId: string }) {
   const [activeScope, setActiveScope] = useState<ScopeId>(1);
   const [tableFilter, setTableFilter] = useState<ScopeId>(1);
   const [query, setQuery] = useState("");
-  const [factors, setFactors] = useState<LibraryFactor[]>(() =>
-    flattenFactorGroups(INITIAL_FACTOR_GROUPS),
-  );
-  const [sources, setSources] = useState<EmissionSource[]>(initialSources);
+  const [factors, setFactors] = useState<LibraryFactor[]>([]);
+  const [sources, setSources] = useState<EmissionSource[]>([]);
   const [sourcesProjectId, setSourcesProjectId] = useState<string | null>(null);
   const [meters, setMeters] = useState<ClientMeter[]>([]);
   const [metersProjectId, setMetersProjectId] = useState<string | null>(null);
@@ -83,7 +77,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const [meterPointId, setMeterPointId] = useState("");
   const [factorId, setFactorId] = useState("");
   const [formula, setFormula] = useState("{Giá trị điểm đo} * {Hệ số phát thải}");
-  const [appliedAt, setAppliedAt] = useState("2024-01-01");
+  const [appliedAt, setAppliedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [formError, setFormError] = useState("");
 
   const selectedMeter = useMemo(
@@ -180,7 +174,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setMeterPointId("");
       setFactorId("");
       setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-      setAppliedAt("2024-01-01");
+      setAppliedAt(new Date().toISOString().slice(0, 10));
       setFormError("");
       setTableFilter((current) => {
         setActiveScope(current);
@@ -231,7 +225,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setMeterPointId("");
     setFactorId("");
     setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-    setAppliedAt("2024-01-01");
+    setAppliedAt(new Date().toISOString().slice(0, 10));
     setFormError("");
     setFormOpen(false);
   }

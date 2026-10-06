@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
-  INITIAL_ACCOUNTS,
   loadAccounts,
   removeAccount,
   type Account,
@@ -21,7 +20,7 @@ const ROLE_STYLE: Record<AccountRole, string> = {
 };
 
 export function AccountList() {
-  const [accounts, setAccounts] = useState<Account[]>(INITIAL_ACCOUNTS);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);

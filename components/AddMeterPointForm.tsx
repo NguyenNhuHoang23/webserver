@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   deviceSpec,
-  INITIAL_DEVICES,
   hydrateDevices,
   loadDevices,
   type CatalogDevice,
@@ -42,7 +41,7 @@ export function AddMeterPointForm({
   );
   const [parentId, setParentId] = useState(initialMeter?.parentId ?? "");
   const [query, setQuery] = useState("");
-  const [devices, setDevices] = useState<CatalogDevice[]>(INITIAL_DEVICES);
+  const [devices, setDevices] = useState<CatalogDevice[]>([]);
   const [existingMeters, setExistingMeters] = useState<ClientMeter[]>([]);
   const [droppedDevice, setDroppedDevice] = useState<CatalogDevice | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(initialMeter?.deviceId ?? null);

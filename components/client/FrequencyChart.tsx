@@ -14,17 +14,6 @@ function toggleIn<T>(list: T[], value: T) {
   return [...list, value];
 }
 
-function waveAt(i: number, agg: Agg, seed: number) {
-  const seconds = (i / (N - 1)) * 240;
-  let v =
-    50.29 +
-    0.028 * Math.sin(seconds / 48 + seed * 0.2) +
-    0.012 * Math.sin(seconds / 22 + 0.8);
-  if (agg === "MAX") v += 0.018;
-  if (agg === "MIN") v -= 0.018;
-  return Number(Math.max(50.242, Math.min(50.338, v)).toFixed(4));
-}
-
 function timeLabel(index: number, kind: "full" | "min" | "sec" | "tooltip") {
   const d = new Date(T0 + (index / (N - 1)) * 240000);
   const yyyy = d.getFullYear();
@@ -59,11 +48,9 @@ const COLORS: Record<Agg, string> = {
 };
 
 export function FrequencyChart({
-  seed,
   timeFilter,
   samples,
 }: {
-  seed: number;
   onRefresh?: () => void;
   timeFilter: TimeFilterValue;
   samples?: ChartSample[];
@@ -82,9 +69,9 @@ export function FrequencyChart({
         key: agg,
         name: `Freq ${agg}`,
         color: COLORS[agg],
-        values: valuesForKey(samples, "F", N) ?? Array.from({ length: N }, (_, i) => waveAt(i, agg, seed)),
+        values: valuesForKey(samples, "F", N) ?? Array.from({ length: N }, () => 0),
       })),
-    [aggs, seed, samples],
+    [aggs, samples],
   );
 
   const freqDomain = samples?.length ? paddedDomain(series, [50.24, 50.34]) : undefined;

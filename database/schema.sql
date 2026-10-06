@@ -1,5 +1,5 @@
 -- EMS local database for XAMPP / MariaDB 10.4+
--- Safe to run repeatedly: objects use IF NOT EXISTS and seeds use INSERT IGNORE.
+-- Safe to run repeatedly: objects use IF NOT EXISTS and reference rows use INSERT IGNORE.
 
 CREATE DATABASE IF NOT EXISTS ems_local
   CHARACTER SET utf8mb4
@@ -280,33 +280,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   KEY idx_auth_sessions_user (portal, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Seed data mirrors the prototype's current demo data.
-
-INSERT IGNORE INTO accounts (id, username, email, role, password_hash, created_at) VALUES
-  ('acc-1', 'admin_system', 'admin@ems-precision.com', 'Quản trị viên', SHA2('123456', 256), '2024-01-01'),
-  ('acc-2', 'kisu_vanhanh', 'operator01@sunergy.com', 'Kỹ sư vận hành', SHA2('123456', 256), '2023-06-15'),
-  ('acc-3', 'quanly_duan', 'manager.pro@fujikin.vn', 'Quản lý dự án', SHA2('123456', 256), '2023-10-01'),
-  ('acc-4', 'nhanvien_kythuat', 'tech.support@ems.com', 'Nhân viên kỹ thuật', SHA2('123456', 256), '2023-12-20'),
-  ('acc-5', 'admin_chinhanh', 'admin.hn@ems.com', 'Quản trị viên', SHA2('123456', 256), '2024-02-05'),
-  ('acc-6', 'kisu_baotri', 'maintenance@sunergy.com', 'Kỹ sư vận hành', SHA2('123456', 256), '2024-03-12'),
-  ('acc-7', 'quanly_nangluong', 'energy.lead@fujikin.vn', 'Quản lý dự án', SHA2('123456', 256), '2023-11-08'),
-  ('acc-8', 'kythuat_hotro', 'helpdesk@ems.com', 'Nhân viên kỹ thuật', SHA2('123456', 256), '2024-01-22'),
-  ('acc-9', 'operator_shift2', 'operator02@sunergy.com', 'Kỹ sư vận hành', SHA2('123456', 256), '2023-07-18'),
-  ('acc-10', 'pm_thainguyen', 'pm.tn@fujikin.vn', 'Quản lý dự án', SHA2('123456', 256), '2024-04-04'),
-  ('acc-11', 'tech_field', 'field.tech@ems.com', 'Nhân viên kỹ thuật', SHA2('123456', 256), '2023-09-29'),
-  ('acc-12', 'auditor_ghg', 'auditor@ems-precision.com', 'Quản trị viên', SHA2('123456', 256), '2024-05-11');
-
-INSERT IGNORE INTO projects (id, initials, accent, name, customer, status, start_date) VALUES
-  ('PRJ-2401', 'SN', '#1a73e8', 'Sunrise Bắc Ninh Factory', 'Sunrise Group', 'active', '2023-03-12'),
-  ('PRJ-2402', 'VM', '#0f9d58', 'Vinamilk Bình Dương Plant', 'Vinamilk', 'active', '2024-01-08'),
-  ('PRJ-2403', 'SS', '#7c3aed', 'Samsung Thái Nguyên Campus', 'Samsung Vietnam', 'maintenance', '2022-11-21'),
-  ('PRJ-2404', 'TH', '#ea580c', 'TH True Milk Nghệ An', 'TH Group', 'active', '2023-06-03'),
-  ('PRJ-2405', 'FT', '#0284c7', 'Formosa Hà Tĩnh Steel', 'Formosa', 'paused', '2021-09-15'),
-  ('PRJ-2406', 'HV', '#1a73e8', 'Hòa Phát Dung Quất', 'Hòa Phát', 'active', '2023-04-19'),
-  ('PRJ-2407', 'UN', '#0d9488', 'Unilever Củ Chi Factory', 'Unilever', 'active', '2024-02-02'),
-  ('PRJ-2408', 'PN', '#dc2626', 'PouYuen Đồng Nai', 'PouYuen', 'maintenance', '2022-08-11'),
-  ('PRJ-2409', 'NS', '#2563eb', 'Nestlé Trị An Plant', 'Nestlé', 'active', '2023-07-27'),
-  ('PRJ-2410', 'LG', '#a21caf', 'LG Display Hải Phòng', 'LG Vietnam', 'active', '2023-05-14');
+-- Reference rows only. Demo projects, devices, accounts, and telemetry are not seeded.
 
 INSERT IGNORE INTO meter_types (name, description, icon, builtin) VALUES
   ('Điện', 'Điện năng, công suất, chất lượng điện', 'bolt', 1),
@@ -314,43 +288,6 @@ INSERT IGNORE INTO meter_types (name, description, icon, builtin) VALUES
   ('Nhiệt', 'Nhiệt độ và năng lượng nhiệt', 'thermo', 1),
   ('Hơi', 'Áp suất và lưu lượng hơi', 'steam', 1),
   ('Khí nén', 'Lưu lượng và áp suất khí nén', 'air', 0);
-
-INSERT IGNORE INTO project_meter_types (project_id, meter_type_name) VALUES
-  ('PRJ-2401', 'Điện'), ('PRJ-2401', 'Nước'), ('PRJ-2401', 'Nhiệt'), ('PRJ-2401', 'Hơi'), ('PRJ-2401', 'Khí nén'),
-  ('PRJ-2402', 'Điện'), ('PRJ-2402', 'Nước'), ('PRJ-2402', 'Nhiệt'), ('PRJ-2402', 'Hơi'),
-  ('PRJ-2403', 'Điện'), ('PRJ-2403', 'Nước'), ('PRJ-2403', 'Nhiệt'), ('PRJ-2403', 'Hơi'),
-  ('PRJ-2404', 'Điện'), ('PRJ-2404', 'Nước'), ('PRJ-2404', 'Nhiệt'), ('PRJ-2404', 'Hơi'),
-  ('PRJ-2405', 'Điện'), ('PRJ-2405', 'Nước'), ('PRJ-2405', 'Nhiệt'), ('PRJ-2405', 'Hơi'),
-  ('PRJ-2406', 'Điện'), ('PRJ-2406', 'Nước'), ('PRJ-2406', 'Nhiệt'), ('PRJ-2406', 'Hơi'),
-  ('PRJ-2407', 'Điện'), ('PRJ-2407', 'Nước'), ('PRJ-2407', 'Nhiệt'), ('PRJ-2407', 'Hơi'),
-  ('PRJ-2408', 'Điện'), ('PRJ-2408', 'Nước'), ('PRJ-2408', 'Nhiệt'), ('PRJ-2408', 'Hơi'),
-  ('PRJ-2409', 'Điện'), ('PRJ-2409', 'Nước'), ('PRJ-2409', 'Nhiệt'), ('PRJ-2409', 'Hơi'),
-  ('PRJ-2410', 'Điện'), ('PRJ-2410', 'Nước'), ('PRJ-2410', 'Nhiệt'), ('PRJ-2410', 'Hơi');
-
-INSERT IGNORE INTO customer_accounts (id, username, email, display_name, project_id, password_hash) VALUES
-  ('cus-1', 'khachhang', 'khachhang@sunrise.com', 'Sunrise Group', 'PRJ-2401', SHA2('123456', 256)),
-  ('cus-2', 'vinamilk', 'ems@vinamilk.com.vn', 'Vinamilk', 'PRJ-2402', SHA2('123456', 256));
-
-INSERT IGNORE INTO devices
-  (id, name, serial_number, brand_model, brand, device_type, kind, status, last_sync_label, protocol)
-VALUES
-  ('dev-1', 'Power Meter Main-01', 'SN: EM-992834-A', 'Schneider iEM3000', 'Schneider', 'Power Meter', 'power', 'active', '10:45:22 24/05/2024', 'Modbus RTU'),
-  ('dev-2', 'Water Flow Sensor-B2', 'SN: WF-112093-X', 'Siemens SITRANS F', 'Siemens', 'Flow Meter', 'flow', 'active', '10:42:15 24/05/2024', 'Modbus TCP'),
-  ('dev-3', 'Temp Probe Line-C', 'SN: TP-445021-Z', 'ABB SensyTemp', 'ABB', 'Temperature', 'temp', 'maintenance', '09:12:01 24/05/2024', 'M-Bus'),
-  ('dev-4', 'Steam Gauge High-P', 'SN: SG-778120-K', 'Yokogawa EJX', 'Yokogawa', 'Steam Meter', 'steam', 'active', 'Vừa xong', 'Modbus TCP'),
-  ('dev-5', 'Power Meter Sub-02', 'SN: EM-883401-B', 'Schneider PM5100', 'Schneider', 'Power Meter', 'power', 'offline', '18:20:44 23/05/2024', 'Modbus TCP'),
-  ('dev-6', 'Cooling Water Meter-01', 'SN: WF-220184-Y', 'Siemens MAG 5100', 'Siemens', 'Flow Meter', 'flow', 'active', '10:44:02 24/05/2024', 'Modbus TCP');
-
-INSERT IGNORE INTO meter_points
-  (id, project_id, name, code, device_type, parent_id, utility, device_id)
-VALUES
-  ('m1', 'PRJ-2401', 'Main Panel Tổng tầng 1', 'MP-001', 'Đồng hồ tổng 3 pha', NULL, 'Điện', 'dev-1'),
-  ('m2', 'PRJ-2401', 'Phòng Server', 'PS-001', 'Smart Meter V3', 'm1', 'Điện', 'dev-5'),
-  ('m3', 'PRJ-2401', 'Chiller Unit 1', 'CHU-01', 'Sub-meter Modbus', 'm1', 'Điện', NULL),
-  ('m4', 'PRJ-2401', 'HVAC System', 'HVAC-01', 'Power Analyzer', 'm1', 'Điện', NULL),
-  ('m5', 'PRJ-2401', 'Đồng hồ nước đầu nguồn', 'WTR-01', 'Đồng hồ lưu lượng', NULL, 'Nước', 'dev-2'),
-  ('m6', 'PRJ-2401', 'Lò hơi trung tâm', 'STM-01', 'Cảm biến hơi', NULL, 'Hơi', 'dev-4'),
-  ('m7', 'PRJ-2401', 'Cảm biến nhiệt dàn', 'HT-01', 'Nhiệt kế IoT', NULL, 'Nhiệt', 'dev-3');
 
 INSERT IGNORE INTO emission_factor_groups (id, name, source) VALUES
   ('do-industry', 'Hệ số phát thải của DO trong công nghiệp sản xuất và xây dựng*', 'Quyết định số 2626/QĐ-BTNMT ngày 10/10/2022, Phụ lục I'),
@@ -367,64 +304,6 @@ INSERT IGNORE INTO emission_factor_gases (group_id, gas_key, gas_label, factor_v
   ('lpg-industry', 'co2', 'CO₂', 63100, 'kg CO₂/TJ'), ('lpg-industry', 'ch4', 'CH₄', 1, 'kg CH₄/TJ'), ('lpg-industry', 'n2o', 'N₂O', 0.1, 'kg N₂O/TJ'),
   ('natural-gas', 'co2', 'CO₂', 56100, 'kg CO₂/TJ'), ('natural-gas', 'ch4', 'CH₄', 1, 'kg CH₄/TJ'), ('natural-gas', 'n2o', 'N₂O', 0.1, 'kg N₂O/TJ'),
   ('anthracite', 'co2', 'CO₂', 98300, 'kg CO₂/TJ'), ('anthracite', 'ch4', 'CH₄', 1, 'kg CH₄/TJ'), ('anthracite', 'n2o', 'N₂O', 1.5, 'kg N₂O/TJ');
-
-INSERT IGNORE INTO ghg_emission_sources
-  (id, project_id, scope_id, name, input_method, factor_group_id, gas_key, factor_value, formula, applied_at, tons_co2e)
-VALUES
-  ('src-1', 'PRJ-2401', 1, 'Khí Gas (LPG)', 'manual', 'do-industry', 'co2', 74100, '{Giá trị thủ công} * {Hệ số phát thải}', '2024-01-01', 850.2),
-  ('src-2', 'PRJ-2401', 1, 'Nhiên liệu phương tiện', 'manual', 'do-road', 'co2', 74100, '{Giá trị thủ công} * {Hệ số phát thải}', '2024-01-01', 170.0),
-  ('src-3', 'PRJ-2401', 1, 'Phát thải rò rỉ (Gas lạnh)', 'manual', 'do-industry', 'co2', 74100, '{Giá trị thủ công} * {Hệ số phát thải}', '2024-01-01', 42.5),
-  ('src-4', 'PRJ-2401', 2, 'Sử dụng điện năng', 'meter', 'natural-gas', 'co2', 56100, '{Giá trị điểm đo} * {Hệ số phát thải}', '2024-03-01', 3188.1),
-  ('src-5', 'PRJ-2401', 2, 'Phát thải mua hơi nước', 'meter', 'natural-gas', 'co2', 56100, '{Giá trị điểm đo} * {Hệ số phát thải}', '2024-03-01', 212.0),
-  ('src-6', 'PRJ-2401', 3, 'Vận tải hàng hóa đầu vào', 'file', 'gasoline-road', 'co2', 69300, '{Giá trị điểm đo} * {Hệ số phát thải}', '2024-02-15', 95.4);
-
-INSERT IGNORE INTO alert_events
-  (id, project_id, meter_point_id, occurred_at, parameter_name, value, unit, severity, status,
-   category, message, threshold_value)
-VALUES
-  ('alert-1', 'PRJ-2401', 'm1', '2026-07-19 07:38:48', 'F_avg', 49.79, 'Hz', 'warning', 'open', 'frequency', 'Tần số lưới thấp hơn ngưỡng vận hành', 49.5),
-  ('alert-2', 'PRJ-2401', 'm1', '2026-07-19 07:38:38', 'F_avg', 50.42, 'Hz', 'warning', 'open', 'frequency', 'Tần số lưới vượt ngưỡng vận hành', 50.5),
-  ('alert-3', 'PRJ-2401', 'm3', '2026-07-19 07:22:11', 'U_unb', 2.14, '%', 'critical', 'open', 'unbalance', 'Mất cân bằng điện áp giữa các pha', 2),
-  ('alert-4', 'PRJ-2401', 'm3', '2026-07-19 06:51:03', 'I_rms', 612.4, 'A', 'warning', 'open', 'current', 'Dòng điện RMS vượt ngưỡng thiết bị', 600),
-  ('alert-5', 'PRJ-2401', 'm1', '2026-07-19 06:18:40', 'P_sum', 186.2, 'kW', 'info', 'open', 'power', 'Công suất hữu công tăng cao trong giờ vận hành', 180);
-
-UPDATE alert_events SET category = 'frequency', message = 'Tần số lưới thấp hơn ngưỡng vận hành', threshold_value = 49.5
- WHERE id = 'alert-1' AND category IS NULL;
-UPDATE alert_events SET category = 'frequency', message = 'Tần số lưới vượt ngưỡng vận hành', threshold_value = 50.5
- WHERE id = 'alert-2' AND category IS NULL;
-UPDATE alert_events SET category = 'unbalance', message = 'Mất cân bằng điện áp giữa các pha', threshold_value = 2
- WHERE id = 'alert-3' AND category IS NULL;
-UPDATE alert_events SET category = 'current', message = 'Dòng điện RMS vượt ngưỡng thiết bị', threshold_value = 600
- WHERE id = 'alert-4' AND category IS NULL;
-UPDATE alert_events SET category = 'power', message = 'Công suất hữu công tăng cao trong giờ vận hành', threshold_value = 180
- WHERE id = 'alert-5' AND category IS NULL;
-
-INSERT IGNORE INTO meter_readings (meter_point_id, recorded_at, metric, value, unit, quality) VALUES
-  ('m1', '2026-07-01 12:00:00', 'energy', 198.4, 'kWh', 'good'),
-  ('m1', '2026-07-02 12:00:00', 'energy', 186.2, 'kWh', 'good'),
-  ('m1', '2026-07-03 12:00:00', 'energy', 172.8, 'kWh', 'good'),
-  ('m1', '2026-07-04 12:00:00', 'energy', 96.5, 'kWh', 'good'),
-  ('m1', '2026-07-05 12:00:00', 'energy', 210.6, 'kWh', 'good'),
-  ('m1', '2026-07-06 12:00:00', 'energy', 148.3, 'kWh', 'good'),
-  ('m1', '2026-07-07 12:00:00', 'energy', 88.1, 'kWh', 'good'),
-  ('m1', '2026-07-08 12:00:00', 'energy', 205.9, 'kWh', 'good'),
-  ('m1', '2026-07-09 12:00:00', 'energy', 168.4, 'kWh', 'good'),
-  ('m1', '2026-07-10 12:00:00', 'energy', 46.4, 'kWh', 'good'),
-  ('m1', '2026-07-11 12:00:00', 'energy', 194.7, 'kWh', 'good'),
-  ('m1', '2026-07-12 12:00:00', 'energy', 221.5, 'kWh', 'good'),
-  ('m1', '2026-07-13 12:00:00', 'energy', 158.2, 'kWh', 'good'),
-  ('m1', '2026-07-14 12:00:00', 'energy', 74.6, 'kWh', 'good'),
-  ('m1', '2026-07-15 12:00:00', 'energy', 236.8, 'kWh', 'good'),
-  ('m1', '2026-07-16 12:00:00', 'energy', 182.3, 'kWh', 'good'),
-  ('m1', '2026-07-17 12:00:00', 'energy', 129.7, 'kWh', 'good'),
-  ('m1', '2026-07-18 12:00:00', 'energy', 214.1, 'kWh', 'good'),
-  ('m1', '2026-07-19 12:00:00', 'energy', 216.9, 'kWh', 'good'),
-  ('m1', '2026-07-19 07:38:48', 'frequency', 49.79, 'Hz', 'good'),
-  ('m1', '2026-07-19 07:38:48', 'power', 186.2, 'kW', 'good'),
-  ('m1', '2026-07-19 07:38:48', 'voltage', 400.2, 'V', 'good'),
-  ('m1', '2026-07-19 07:38:48', 'current', 42.1, 'A', 'good'),
-  ('m3', '2026-07-19 07:22:11', 'unbalance', 2.14, '%', 'good'),
-  ('m3', '2026-07-19 06:51:03', 'current', 612.4, 'A', 'good');
 
 INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-09-14-ems-initial-schema');
 

@@ -22,19 +22,6 @@ type CostPoint = {
 
 const POINT_COLORS = ["#059669", "#10b981", "#e67e22", "#8b5cf6", "#06b6d4", "#ef4444", "#a16207"];
 
-const FALLBACK_POINTS: CostPoint[] = [
-  { id: "c1", code: "DB-OFF1", name: "Tủ điện văn phòng", energy: "Điện", color: POINT_COLORS[0] },
-  { id: "c2", code: "DB-PRD1", name: "Tủ điện sản xuất", energy: "Điện", color: POINT_COLORS[1] },
-  { id: "c3", code: "DB-HVAC", name: "Điều hòa trung tâm", energy: "Điện", color: POINT_COLORS[2] },
-  { id: "c4", code: "DB-MAIN", name: "Tủ điện tổng", energy: "Điện", color: POINT_COLORS[3] },
-  { id: "c5", code: "AIR-01", name: "Máy nén khí trạm 1", energy: "Khí nén", color: POINT_COLORS[0] },
-  { id: "c6", code: "AIR-02", name: "Máy nén khí trạm 2", energy: "Khí nén", color: POINT_COLORS[1] },
-  { id: "c7", code: "WTR-01", name: "Đồng hồ nước đầu nguồn", energy: "Nước", color: POINT_COLORS[0] },
-  { id: "c8", code: "WTR-02", name: "Hệ thống làm mát", energy: "Nước", color: POINT_COLORS[1] },
-  { id: "c9", code: "HT-01", name: "Cảm biến nhiệt dàn", energy: "Nhiệt", color: POINT_COLORS[0] },
-  { id: "c10", code: "STM-01", name: "Nồi hơi công nghệ", energy: "Hơi", color: POINT_COLORS[0] },
-];
-
 const ENERGY_KIND_META: Record<string, "bolt" | "heat" | "air" | "steam" | "water"> = {
   Điện: "bolt",
   Nhiệt: "heat",
@@ -62,33 +49,12 @@ function costLabel(energy: string) {
   return "Chi phí điện năng";
 }
 
-function costSeriesForFilter(seed: number, pointIndex: number, filter: TimeFilterValue) {
-  const periods = getTimeFilterPeriods(filter);
-  const count = Math.max(periods.length, 1);
-  const targets = [68719, 54210, 81340, 42180, 95880, 33400, 28900];
-  const scaleByFilter =
-    filter.mode === "day" ||
-    (filter.mode === "custom_date" && filter.customDateMode !== "range")
-      ? 0.04
-      : filter.mode === "month"
-      ? 1.0
-      : filter.mode === "year"
-      ? 12.0
-      : Math.max(0.1, count / 30);
-  const target = targets[pointIndex % targets.length] * scaleByFilter * (1 + (seed - 1) * 0.015);
-  const raw = periods.map((p, i) => {
-    const ramp = (i + 1) / count;
-    const dark = 6200 + 3600 * ramp + 260 * Math.sin(i * 1.15 + seed + pointIndex);
-    const light = dark * (0.55 + 0.07 * Math.sin(i + pointIndex));
-    return { dark, light, period: p };
-  });
-  const sumDark = raw.reduce((s, b) => s + b.dark, 0) || 1;
-  const scale = target / sumDark;
-  return raw.map((bar) => ({
-    key: bar.period.key,
-    label: bar.period.label,
-    light: Math.round(bar.light * scale),
-    dark: Math.round(bar.dark * scale),
+function costSeriesForFilter(filter: TimeFilterValue) {
+  return getTimeFilterPeriods(filter).map((period) => ({
+    key: period.key,
+    label: period.label,
+    light: 0,
+    dark: 0,
   }));
 }
 
@@ -98,9 +64,8 @@ export function CostCharts() {
   const [energyKinds, setEnergyKinds] = useState<MeterType[]>(() => resolveMeterTypes(null));
   const [energy, setEnergy] = useState<string>("Điện");
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
-  const [allPoints, setAllPoints] = useState<CostPoint[]>(FALLBACK_POINTS);
+  const [allPoints, setAllPoints] = useState<CostPoint[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [seed, setSeed] = useState(1);
   const [showSum, setShowSum] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [query, setQuery] = useState("");
@@ -116,7 +81,7 @@ export function CostCharts() {
         setEnergy((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
         const meters = orderMetersByTree(meterRows.length ? meterRows : loadClientMeters(projectId));
         if (!meters.length) {
-          setAllPoints(FALLBACK_POINTS);
+          setAllPoints([]);
           return;
         }
         setAllPoints(
@@ -169,14 +134,14 @@ export function CostCharts() {
 
   const series = useMemo(
     () =>
-      selectedPoints.map((point, index) => ({
+      selectedPoints.map((point) => ({
         point,
-        bars: costSeriesForFilter(seed, index + point.id.charCodeAt(1), timeFilter),
+        bars: costSeriesForFilter(timeFilter),
       })),
-    [selectedPoints, seed, timeFilter],
+    [selectedPoints, timeFilter],
   );
 
-  const primaryBars = series[0]?.bars ?? costSeriesForFilter(seed, 0, timeFilter);
+  const primaryBars = series[0]?.bars ?? costSeriesForFilter(timeFilter);
   const grandTotal = series.reduce(
     (sum, item) => sum + item.bars.reduce((s, b) => s + b.dark, 0),
     0,
@@ -339,7 +304,7 @@ export function CostCharts() {
         <div className="p-4">
           <button
             type="button"
-            onClick={() => setSeed((n) => n + 1)}
+            onClick={() => undefined}
             className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-50 text-[13px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors shadow-xs"
           >
             <RefreshIcon className="h-4 w-4" />
@@ -407,7 +372,7 @@ export function CostCharts() {
                 <IconBtn label="Xuất dữ liệu" onClick={exportCsv}>
                   <SaveIcon className="h-4 w-4" />
                 </IconBtn>
-                <IconBtn label="Làm mới" onClick={() => setSeed((n) => n + 1)}>
+                <IconBtn label="Làm mới" onClick={() => undefined}>
                   <RefreshIcon className="h-4 w-4" />
                 </IconBtn>
               </div>
@@ -467,10 +432,9 @@ export function CostCharts() {
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[12px] text-slate-500">
           <p className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-            Hệ thống đang hoạt động bình thường
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+            Chưa có số liệu chi phí
           </p>
-          <p>Cập nhật lúc: 2026-07-19 12:26:38</p>
         </div>
       </div>
     </div>

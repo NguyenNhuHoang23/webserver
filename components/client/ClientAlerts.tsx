@@ -37,143 +37,6 @@ export interface AlertItem {
   notes?: string;
 }
 
-const INITIAL_ALERTS: AlertItem[] = [
-  {
-    id: "ALT-2026-0891",
-    code: "F_OVER_MAX",
-    timestamp: "2026-09-12 16:28:44",
-    pointCode: "DB-OFF1",
-    pointName: "Tủ điện văn phòng",
-    location: "Tầng 2 - Tòa nhà điều hành",
-    parameter: "F_avg",
-    paramName: "Tần số trung bình",
-    actualValue: "50.48",
-    thresholdValue: "50.20",
-    unit: "Hz",
-    severity: "warning",
-    category: "frequency",
-    status: "active",
-    message: "Tần số lưới vượt ngưỡng cảnh báo trên (+0.48 Hz so với chuẩn 50 Hz)",
-  },
-  {
-    id: "ALT-2026-0890",
-    code: "U_UNB_CRITICAL",
-    timestamp: "2026-09-12 16:15:10",
-    pointCode: "DB-PROD",
-    pointName: "Dây chuyền sản xuất A",
-    location: "Xưởng gia công cơ khí 1",
-    parameter: "U_unb",
-    paramName: "Độ mất cân bằng điện áp",
-    actualValue: "3.42",
-    thresholdValue: "2.00",
-    unit: "%",
-    severity: "critical",
-    category: "unbalance",
-    status: "active",
-    message: "Lệch pha điện áp 3 pha vượt mức nguy hiểm >3%, nguy cơ làm nóng động cơ",
-  },
-  {
-    id: "ALT-2026-0889",
-    code: "I_OVERLOAD_WARN",
-    timestamp: "2026-09-12 15:42:01",
-    pointCode: "AIR-01",
-    pointName: "Máy nén khí trạm 1",
-    location: "Khu vực phụ trợ trung tâm",
-    parameter: "I_rms_max",
-    paramName: "Dòng điện hiệu dụng pha A",
-    actualValue: "348.5",
-    thresholdValue: "320.0",
-    unit: "A",
-    severity: "warning",
-    category: "current",
-    status: "acknowledged",
-    acknowledgedBy: "Trần Kỹ Thuật",
-    acknowledgedAt: "2026-09-12 15:50:22",
-    notes: "Đang kiểm tra van xả áp suất máy nén",
-    message: "Dòng điện định mức vượt quá 108% liên tục trong 5 phút",
-  },
-  {
-    id: "ALT-2026-0888",
-    code: "THD_VOLT_WARN",
-    timestamp: "2026-09-12 14:10:35",
-    pointCode: "DB-MAIN",
-    pointName: "Nguồn tổng nhà máy",
-    location: "Trạm biến áp 110kV / 22kV",
-    parameter: "THD_U",
-    paramName: "Độ méo sóng hài điện áp",
-    actualValue: "5.8",
-    thresholdValue: "5.0",
-    unit: "%",
-    severity: "warning",
-    category: "harmonics",
-    status: "resolved",
-    acknowledgedBy: "Lê Vận Hành",
-    acknowledgedAt: "2026-09-12 14:25:00",
-    notes: "Đã bật dàn tụ bù chủ động AHF lọc sóng hài bậc 5",
-    message: "Sóng hài điện áp tổng THD_u vượt quy chuẩn kỹ thuật điện lực",
-  },
-  {
-    id: "ALT-2026-0887",
-    code: "COMM_GATEWAY_TIMEOUT",
-    timestamp: "2026-09-12 13:05:18",
-    pointCode: "DB-HVAC",
-    pointName: "Hệ thống HVAC",
-    location: "Phòng kỹ thuật Chiller",
-    parameter: "Ping_RTU",
-    paramName: "Độ trễ Modbus RTU",
-    actualValue: "Offline",
-    thresholdValue: "3000 ms",
-    unit: "ms",
-    severity: "critical",
-    category: "connectivity",
-    status: "resolved",
-    acknowledgedBy: "Nguyễn SCADA",
-    acknowledgedAt: "2026-09-12 13:12:00",
-    notes: "Đứt cáp RS485 converter tầng 3, đã bấm lại giắc",
-    message: "Mất tín hiệu kết nối thiết bị đo quá 10 chu kỳ đo liên tiếp",
-  },
-  {
-    id: "ALT-2026-0886",
-    code: "PEAK_CONSUMPTION",
-    timestamp: "2026-09-12 11:30:00",
-    pointCode: "DB-MAIN",
-    pointName: "Nguồn tổng nhà máy",
-    location: "Trạm biến áp 110kV / 22kV",
-    parameter: "P_active",
-    paramName: "Công suất tác dụng",
-    actualValue: "2420",
-    thresholdValue: "2200",
-    unit: "kW",
-    severity: "info",
-    category: "power",
-    status: "resolved",
-    acknowledgedBy: "Hệ thống tự động",
-    acknowledgedAt: "2026-09-12 11:31:00",
-    notes: "Tự động phân bổ chuyển tải lò hơi sang máy phát dầu dự phòng",
-    message: "Vượt công suất cam kết vào khung giờ cao điểm EVN",
-  },
-  {
-    id: "ALT-2026-0885",
-    code: "VOLT_SAG_DETECTED",
-    timestamp: "2026-09-12 09:14:02",
-    pointCode: "DB-PROD",
-    pointName: "Dây chuyền sản xuất A",
-    location: "Xưởng gia công cơ khí 1",
-    parameter: "U_sag",
-    paramName: "Sụt áp tức thời pha B",
-    actualValue: "182",
-    thresholdValue: "200",
-    unit: "V",
-    severity: "critical",
-    category: "voltage",
-    status: "resolved",
-    acknowledgedBy: "Nguyễn SCADA",
-    acknowledgedAt: "2026-09-12 09:20:15",
-    notes: "Sụt áp thoáng qua 120ms do khởi động động cơ công suất lớn trạm bơm",
-    message: "Sụt áp tức thời < 85% Un kéo dài 14 chu kỳ",
-  },
-];
-
 function dbAlertToItem(event: AlertEvent): AlertItem {
   const parameterNames: Record<string, string> = {
     F_avg: "Tần số trung bình",
@@ -204,7 +67,7 @@ function dbAlertToItem(event: AlertEvent): AlertItem {
 }
 
 export function ClientAlerts({ project }: { project: Project }) {
-  const [alerts, setAlerts] = useState<AlertItem[]>(INITIAL_ALERTS);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [search, setSearch] = useState("");
   const [selectedSeverity, setSelectedSeverity] = useState<string>("all");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
@@ -222,10 +85,10 @@ export function ClientAlerts({ project }: { project: Project }) {
       .then((events) => {
         if (!active) return;
         const rows = events.length ? events.map(dbAlertToItem) : loadAlertEvents(project.id).map(dbAlertToItem);
-        setAlerts(rows.length ? rows : INITIAL_ALERTS);
+        setAlerts(rows);
       })
       .catch(() => {
-        if (active) setAlerts(INITIAL_ALERTS);
+        if (active) setAlerts([]);
       });
     return () => {
       active = false;

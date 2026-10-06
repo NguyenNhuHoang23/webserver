@@ -109,53 +109,22 @@ function iconForUtility(utility: string): MeterIcon {
   return "meter";
 }
 
-function demoMetrics(meter: ClientMeter, status: MeterStatus): MeterNodeData["metrics"] {
-  if (!meter.deviceId) {
+function meterMetrics(meter: ClientMeter, status: MeterStatus): MeterNodeData["metrics"] {
+  if (!meter.deviceId || status === "offline") {
     return [
       { label: "Dữ liệu", value: "Chưa có dữ liệu" },
-      { label: "Trạng thái", value: "Chưa gán đồng hồ" },
-    ];
-  }
-  if (meter.utility !== "Điện") {
-    if (status === "offline") {
-      return [
-        { label: "Giá trị", value: "--" },
-        { label: "Trạng thái", value: "Mất kết nối" },
-      ];
-    }
-    return [
-      { label: "Giá trị", value: "—" },
-      { label: "Mã", value: meter.code },
-    ];
-  }
-  if (status === "offline") {
-    return [
-      { label: "Điện áp (U)", value: "0.0 V" },
-      { label: "Hệ số tải", value: "0 %" },
-      { label: "Dòng điện (I)", value: "0.0 A" },
-      { label: "Tần số (f)", value: "-- Hz" },
-    ];
-  }
-  if (meter.parentId === null) {
-    return [
-      { label: "U (V)", value: "400.2" },
-      { label: "P (kW)", value: "8.2" },
+      { label: "Trạng thái", value: meter.deviceId ? "Mất kết nối" : "Chưa gán đồng hồ" },
     ];
   }
   return [
-    { label: "Điện áp (U)", value: "398.5 V" },
-    { label: "Hệ số tải", value: "15 %" },
-    { label: "Dòng điện (I)", value: "4.2 A" },
-    { label: "Tần số (f)", value: "50.0 Hz" },
+    { label: "Mã", value: meter.code },
+    { label: "Trạng thái", value: "Đã gán đồng hồ" },
   ];
 }
 
 function statusForMeter(meter: ClientMeter): { status: MeterStatus; statusLabel?: string } {
   if (!meter.deviceId) {
     return { status: "offline", statusLabel: "MẤT KẾT NỐI" };
-  }
-  if (meter.name.toLowerCase().includes("văn phòng") || meter.code.includes("OFF")) {
-    return { status: "warning", statusLabel: "CẢNH BÁO" };
   }
   return { status: "normal" };
 }
@@ -194,7 +163,7 @@ function buildFlowFromMeters(meters: ClientMeter[]): {
         icon: meter.parentId === null && meter.utility === "Điện" ? "plant" : iconForUtility(meter.utility),
         energy: meter.utility,
         listed: true,
-        metrics: demoMetrics(meter, status),
+        metrics: meterMetrics(meter, status),
       },
     });
 

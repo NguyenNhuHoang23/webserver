@@ -31,13 +31,6 @@ type Category = {
   icon: (props: { className?: string }) => ReactNode;
 };
 
-type HistoryItem = {
-  id: string;
-  title: string;
-  detail: string;
-  values: string;
-};
-
 const presetCategories: Category[] = [
   { id: "energy", label: "Energy", icon: BoltIcon },
   { id: "ui", label: "U/I", icon: GaugeIcon },
@@ -101,299 +94,21 @@ function buildCategoryMap(utilities: string[]) {
   return Object.fromEntries(utilities.map((utility) => [utility, categoriesForUtility(utility)])) as Record<string, Category[]>;
 }
 
-const initialAlarms: Record<string, Alarm[]> = {
-  energy: [
-    {
-      id: "e1",
-      alarmId: "1",
-      name: "Quá áp (Over-voltage)",
-      description: "Cảnh báo khi điện áp vượt ngưỡng an toàn vận hành",
-      threshold: "240",
-      unit: "V",
-      current: "250.1 V",
-    },
-    {
-      id: "e2",
-      alarmId: "2",
-      name: "Thấp áp (Under-voltage)",
-      description: "Cảnh báo khi điện áp giảm dưới mức cho phép",
-      threshold: "200",
-      unit: "V",
-      current: "215.4 V",
-    },
-    {
-      id: "e3",
-      alarmId: "3",
-      name: "Quá dòng (Over-current)",
-      description: "Cảnh báo khi dòng điện vượt định mức thiết bị",
-      threshold: "100",
-      unit: "A",
-      current: "45.2 A",
-    },
-    {
-      id: "e4",
-      alarmId: "4",
-      name: "Hệ số công suất (Power Factor)",
-      description: "Cảnh báo khi cosφ thấp hơn hệ số yêu cầu",
-      threshold: "0.85",
-      unit: "φ",
-      current: "0.92 φ",
-    },
-  ],
-  ui: [
-    {
-      id: "u1",
-      alarmId: "1",
-      name: "Quá áp pha",
-      description: "Cảnh báo khi điện áp pha vượt ngưỡng an toàn",
-      threshold: "240",
-      unit: "V",
-      current: "228.6 V",
-    },
-    {
-      id: "u2",
-      alarmId: "2",
-      name: "Thấp áp pha",
-      description: "Cảnh báo khi điện áp pha giảm dưới mức cho phép",
-      threshold: "200",
-      unit: "V",
-      current: "228.6 V",
-    },
-    {
-      id: "u3",
-      alarmId: "3",
-      name: "Dòng điện pha A",
-      description: "Ngưỡng theo dõi dòng pha L1",
-      threshold: "80",
-      unit: "A",
-      current: "41.8 A",
-    },
-    {
-      id: "u4",
-      alarmId: "4",
-      name: "Dòng điện pha B",
-      description: "Ngưỡng theo dõi dòng pha L2",
-      threshold: "80",
-      unit: "A",
-      current: "39.6 A",
-    },
-    {
-      id: "u5",
-      alarmId: "5",
-      name: "Dòng điện pha C",
-      description: "Ngưỡng theo dõi dòng pha L3",
-      threshold: "80",
-      unit: "A",
-      current: "42.1 A",
-    },
-  ],
-  frequency: [
-    {
-      id: "f1",
-      alarmId: "1",
-      name: "Tần số cao",
-      description: "Cảnh báo khi tần số lưới vượt ngưỡng",
-      threshold: "50.5",
-      unit: "Hz",
-      current: "50.02 Hz",
-    },
-    {
-      id: "f2",
-      alarmId: "2",
-      name: "Tần số thấp",
-      description: "Cảnh báo khi tần số lưới tụt dưới ngưỡng",
-      threshold: "49.5",
-      unit: "Hz",
-      current: "50.02 Hz",
-    },
-  ],
-  power: [
-    {
-      id: "p1",
-      alarmId: "1",
-      name: "Công suất đỉnh",
-      description: "Cảnh báo khi công suất hữu công vượt định mức",
-      threshold: "250",
-      unit: "kW",
-      current: "184.7 kW",
-    },
-    {
-      id: "p2",
-      alarmId: "2",
-      name: "Công suất phản kháng",
-      description: "Cảnh báo khi Q vượt ngưỡng bù",
-      threshold: "40",
-      unit: "kVAr",
-      current: "18.4 kVAr",
-    },
-  ],
-  harmonics: [
-    {
-      id: "h1",
-      alarmId: "1",
-      name: "THD điện áp",
-      description: "Tổng méo hài điện áp vượt tiêu chuẩn",
-      threshold: "8",
-      unit: "%",
-      current: "3.2 %",
-    },
-    {
-      id: "h2",
-      alarmId: "2",
-      name: "THD dòng điện",
-      description: "Tổng méo hài dòng điện vượt tiêu chuẩn",
-      threshold: "15",
-      unit: "%",
-      current: "6.8 %",
-    },
-  ],
-  imbalance: [
-    {
-      id: "i1",
-      alarmId: "1",
-      name: "Mất cân bằng điện áp",
-      description: "Độ lệch điện áp giữa các pha vượt ngưỡng",
-      threshold: "2",
-      unit: "%",
-      current: "0.8 %",
-    },
-    {
-      id: "i2",
-      alarmId: "2",
-      name: "Mất cân bằng dòng",
-      description: "Độ lệch dòng giữa các pha vượt ngưỡng",
-      threshold: "10",
-      unit: "%",
-      current: "4.1 %",
-    },
-  ],
-  temperature: [
-    {
-      id: "t1",
-      alarmId: "1",
-      name: "Nhiệt độ cao",
-      description: "Cảnh báo khi nhiệt độ thiết bị/môi trường vượt ngưỡng",
-      threshold: "80",
-      unit: "°C",
-      current: "46.2 °C",
-    },
-    {
-      id: "t2",
-      alarmId: "2",
-      name: "Nhiệt độ thấp",
-      description: "Cảnh báo khi nhiệt độ giảm dưới mức vận hành",
-      threshold: "5",
-      unit: "°C",
-      current: "46.2 °C",
-    },
-  ],
-  quality: [
-    {
-      id: "q1",
-      alarmId: "1",
-      name: "Sụt áp (Voltage sag)",
-      description: "Cảnh báo khi điện áp sụt đột ngột dưới ngưỡng",
-      threshold: "10",
-      unit: "%",
-      current: "2.4 %",
-    },
-    {
-      id: "q2",
-      alarmId: "2",
-      name: "Tăng áp (Voltage swell)",
-      description: "Cảnh báo khi điện áp tăng đột ngột vượt ngưỡng",
-      threshold: "10",
-      unit: "%",
-      current: "1.1 %",
-    },
-    {
-      id: "q3",
-      alarmId: "3",
-      name: "Flicker",
-      description: "Cảnh báo khi độ nhấp nháy điện áp vượt tiêu chuẩn",
-      threshold: "1",
-      unit: "Pst",
-      current: "0.32 Pst",
-    },
-  ],
-  water: [
-    {
-      id: "w1",
-      alarmId: "1",
-      name: "Áp lực thấp",
-      description: "Cảnh báo khi áp lực nước giảm dưới mức cấp",
-      threshold: "2.0",
-      unit: "bar",
-      current: "3.1 bar",
-    },
-    {
-      id: "w2",
-      alarmId: "2",
-      name: "Lưu lượng vượt ngưỡng",
-      description: "Cảnh báo khi lưu lượng nước vượt định mức",
-      threshold: "50",
-      unit: "m³/h",
-      current: "18.4 m³/h",
-    },
-  ],
-  steam: [
-    {
-      id: "s1",
-      alarmId: "1",
-      name: "Áp suất hơi cao",
-      description: "Cảnh báo khi áp suất hơi vượt ngưỡng an toàn",
-      threshold: "10",
-      unit: "bar",
-      current: "6.8 bar",
-    },
-    {
-      id: "s2",
-      alarmId: "2",
-      name: "Nhiệt độ hơi thấp",
-      description: "Cảnh báo khi nhiệt độ hơi giảm dưới mức công nghệ",
-      threshold: "160",
-      unit: "°C",
-      current: "178 °C",
-    },
-  ],
-};
+const initialAlarms: Record<string, Alarm[]> = {};
 
 function defaultAlarmsFor(categoryId: string, label?: string): Alarm[] {
-  return (
-    initialAlarms[categoryId] ?? [
-      {
-        id: `${categoryId}-1`,
-        alarmId: "1",
-        name: label ? `Cảnh báo ${label}` : "",
-        description: "Mô tả điều kiện kích hoạt cảnh báo",
-        threshold: "0",
-        unit: "V",
-        current: "--.-",
-      },
-    ]
-  );
+  return [
+    {
+      id: `${categoryId}-1`,
+      alarmId: "1",
+      name: label ? `Cảnh báo ${label}` : "",
+      description: "",
+      threshold: "",
+      unit: "",
+      current: "",
+    },
+  ];
 }
-
-const allHistory: HistoryItem[] = [
-  {
-    id: "h-1",
-    title: "Cập nhật ngưỡng Quá áp & Thấp áp",
-    detail: "Áp dụng từ 24/10/2023 • Bởi Admin",
-    values: "240V / 200V",
-  },
-  {
-    id: "h-2",
-    title: "Điều chỉnh ngưỡng Quá dòng",
-    detail: "Áp dụng từ 12/09/2023 • Bởi Admin",
-    values: "100A",
-  },
-  {
-    id: "h-3",
-    title: "Thêm cảnh báo hệ số công suất",
-    detail: "Áp dụng từ 03/08/2023 • Bởi Kỹ sư vận hành",
-    values: "0.85 φ",
-  },
-];
 
 export function AlertConfig({
   projectId,
@@ -413,7 +128,6 @@ export function AlertConfig({
   );
   const [alarmsByCategory, setAlarmsByCategory] = useState(initialAlarms);
   const [settingsReady, setSettingsReady] = useState(false);
-  const [showAllHistory, setShowAllHistory] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<{ id: CategoryId; label: string } | null>(null);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -487,7 +201,6 @@ export function AlertConfig({
   const categories = categoriesByUtility[activeUtility] ?? categoriesForUtility(activeUtility);
   const active = categories.find((item) => item.id === activeId) ?? categories[0];
   const alarms = alarmsByCategory[active?.id ?? "energy"] ?? [];
-  const history = showAllHistory ? allHistory : allHistory.slice(0, 1);
   const unusedCatalog = useMemo(
     () => catalogCategories.filter((item) => !categories.some((cat) => cat.id === item.id)),
     [categories],
@@ -793,36 +506,10 @@ export function AlertConfig({
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-[12px] font-semibold tracking-wide text-slate-500 uppercase">
-            Lịch sử cấu hình cảnh báo
-          </h2>
-          <button
-            type="button"
-            onClick={() => setShowAllHistory((open) => !open)}
-            className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
-          >
-            {showAllHistory ? "Thu gọn" : "Xem tất cả"}
-          </button>
-        </div>
-
-        <ul className="space-y-2">
-          {history.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-wrap items-center gap-3 rounded-xl bg-[#f6f8fb] px-4 py-3"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 ring-1 ring-slate-200">
-                <ClockIcon className="h-4 w-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-slate-800">{item.title}</span>
-                <span className="block text-xs text-slate-400">{item.detail}</span>
-              </span>
-              <span className="text-sm font-semibold text-emerald-600">{item.values}</span>
-            </li>
-          ))}
-        </ul>
+        <h2 className="text-[12px] font-semibold tracking-wide text-slate-500 uppercase">
+          Lịch sử cấu hình cảnh báo
+        </h2>
+        <p className="mt-3 text-sm text-slate-400">Chưa có lịch sử thay đổi.</p>
       </section>
         </>
       )}
@@ -982,15 +669,6 @@ function CurrentIcon({ className }: { className?: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  );
-}
-
-function ClockIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M12 8v4.5l3 1.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

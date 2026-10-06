@@ -22,81 +22,10 @@ export type ClientMeter = {
 const meterCache: Store = {};
 const meterHydration = new Map<string, Promise<ClientMeter[]>>();
 
-const DEFAULT_METERS: ClientMeter[] = [
-  {
-    id: "m1",
-    name: "Main Panel Tổng tầng 1",
-    code: "MP-001",
-    type: "Đồng hồ tổng 3 pha",
-    parentId: null,
-    utility: "Điện",
-    deviceId: "dev-1",
-    serialNumber: "SN: EM-992834-A",
-  },
-  {
-    id: "m2",
-    name: "Phòng Server",
-    code: "PS-001",
-    type: "Smart Meter V3",
-    parentId: "m1",
-    utility: "Điện",
-    deviceId: "dev-5",
-    serialNumber: "SN: EM-883401-B",
-  },
-  {
-    id: "m3",
-    name: "Chiller Unit 1",
-    code: "CHU-01",
-    type: "Sub-meter Modbus",
-    parentId: "m1",
-    utility: "Điện",
-    deviceId: null,
-  },
-  {
-    id: "m4",
-    name: "HVAC System",
-    code: "HVAC-01",
-    type: "Power Analyzer",
-    parentId: "m1",
-    utility: "Điện",
-    deviceId: null,
-  },
-  {
-    id: "m5",
-    name: "Đồng hồ nước đầu nguồn",
-    code: "WTR-01",
-    type: "Đồng hồ lưu lượng",
-    parentId: null,
-    utility: "Nước",
-    deviceId: "dev-2",
-    serialNumber: "SN: WF-112093-X",
-  },
-  {
-    id: "m6",
-    name: "Lò hơi trung tâm",
-    code: "STM-01",
-    type: "Cảm biến hơi",
-    parentId: null,
-    utility: "Hơi",
-    deviceId: "dev-4",
-    serialNumber: "SN: SG-778120-K",
-  },
-  {
-    id: "m7",
-    name: "Cảm biến nhiệt dàn",
-    code: "HT-01",
-    type: "Nhiệt kế IoT",
-    parentId: null,
-    utility: "Nhiệt",
-    deviceId: "dev-3",
-    serialNumber: "SN: TP-445021-Z",
-  },
-];
-
 type Store = Record<string, ClientMeter[]>;
 
 export function defaultClientMeters(): ClientMeter[] {
-  return DEFAULT_METERS.map((meter) => ({ ...meter }));
+  return [];
 }
 
 export function loadClientMeters(projectId: string): ClientMeter[] {
@@ -127,8 +56,6 @@ export function hydrateClientMeters(projectId: string) {
   if (active) return active;
   const request = dbFetch<ClientMeter[]>("client-meters", { query: { projectId } })
     .then((meters) => {
-      // An empty response is a valid project with no configured points.
-      // Do not inject demo meters into a real project after a successful DB read.
       meterCache[projectId] = meters;
       emitDbChange("client-meters");
       return meterCache[projectId];
