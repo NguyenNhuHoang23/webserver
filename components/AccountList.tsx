@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
+  hydrateAccounts,
   loadAccounts,
   removeAccount,
   type Account,
@@ -27,6 +28,13 @@ export function AccountList() {
 
   useEffect(() => {
     setAccounts(loadAccounts());
+    let active = true;
+    void hydrateAccounts().then((items) => {
+      if (active) setAccounts(items);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const filtered = useMemo(() => {

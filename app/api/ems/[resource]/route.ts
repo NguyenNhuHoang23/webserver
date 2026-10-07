@@ -545,6 +545,13 @@ async function deleteResource(resource: string, request: NextRequest) {
     await emsDb.execute("DELETE FROM diagram_states WHERE project_id = ? AND utility = ?", [projectId, utility]);
     return { ok: true };
   }
+  if (resource === "projects") {
+    await transaction(async (connection) => {
+      await connection.execute("UPDATE meter_points SET parent_id = NULL WHERE project_id = ?", [id]);
+      await connection.execute("DELETE FROM projects WHERE id = ?", [id]);
+    });
+    return { ok: true };
+  }
   const table = tables[resource];
   if (!table) throw new Error(`Delete is not supported for ${resource}`);
   const key = resource === "emission-factors" ? "id" : resource === "meter-types" ? "name" : "id";

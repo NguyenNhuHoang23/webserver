@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  formatProjectDate,
   hydrateProjects,
   nextProjectId,
   projectAccent,
@@ -206,7 +205,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         accent: initialProject?.accent ?? projectAccent(projectCode),
         logoUrl: logoUrl || undefined,
         status,
-        startDate: formatProjectDate(startDate),
+        startDate,
         contactName: contactName.trim(),
         phone: phone.trim(),
         email: email.trim(),

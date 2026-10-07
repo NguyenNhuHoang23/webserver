@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { customerPassword, ensureCustomerAccount } from "@/lib/customer-accounts";
-import { hydrateProjects, loadProjects, type Project, type ProjectStatus } from "@/lib/projects";
+import { hydrateProjects, loadProjects, removeProject, type Project, type ProjectStatus } from "@/lib/projects";
 
 const statusMeta: Record<
   ProjectStatus,
@@ -46,6 +47,8 @@ export function ProjectList() {
   const [status, setStatus] = useState<"all" | ProjectStatus>("all");
   const [page, setPage] = useState(1);
   const [copiedId, setCopiedId] = useState("");
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -83,6 +86,17 @@ export function ProjectList() {
   const currentPage = Math.min(page, totalPages);
   const start = (currentPage - 1) * PAGE_SIZE;
   const rows = filtered.slice(start, start + PAGE_SIZE);
+
+  async function confirmDelete() {
+    if (!projectToDelete) return;
+    setDeleteError("");
+    try {
+      setItems(await removeProject(projectToDelete.id));
+      setProjectToDelete(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Không xóa được dự án.");
+    }
+  }
 
   return (
     <div className="relative mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8 font-sans space-y-6 sm:space-y-8">
@@ -297,6 +311,17 @@ export function ProjectList() {
                           >
                             <EditIcon className="h-3.5 w-3.5" />
                           </Link>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteError("");
+                              setProjectToDelete(project);
+                            }}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                            title="Xóa dự án"
+                          >
+                            <TrashIcon className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -320,6 +345,21 @@ export function ProjectList() {
           />
         </div>
       </section>
+
+      <ConfirmDialog
+        open={Boolean(projectToDelete)}
+        title="Xác nhận xóa dự án"
+        description={
+          deleteError ||
+          `Bạn có chắc chắn muốn xóa dự án "${projectToDelete?.name}" (${projectToDelete?.id}) không? Điểm đo và cấu hình của dự án này cũng sẽ bị xóa.`
+        }
+        confirmText="Xác nhận xóa"
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => {
+          setProjectToDelete(null);
+          setDeleteError("");
+        }}
+      />
 
       {/* Copy Alert Toast */}
       {copiedId && (
@@ -508,6 +548,14 @@ function LinkIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
     </svg>
   );
 }

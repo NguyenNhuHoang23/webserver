@@ -78,12 +78,20 @@ export function hydrateProjects() {
 }
 
 export async function upsertProject(project: Project) {
-  const list = loadProjects();
-  const exists = list.some((item) => item.id === project.id);
-  const next = exists
-    ? list.map((item) => (item.id === project.id ? project : item))
-    : [project, ...list];
-  await saveProjects(next);
+  const saved = await dbFetch<Project[]>("projects", {
+    method: "POST",
+    body: JSON.stringify(project),
+  });
+  projectsCache = saved;
+  emitDbChange("projects");
+  return saved;
+}
+
+export async function removeProject(id: string) {
+  await dbFetch("projects", { method: "DELETE", query: { id } });
+  const next = loadProjects().filter((item) => item.id !== id);
+  projectsCache = next;
+  emitDbChange("projects");
   return next;
 }
 
