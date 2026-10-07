@@ -11,6 +11,7 @@ import {
   updateAlertEvent,
   type AlertEvent,
 } from "@/lib/alert-events";
+import { formatStoredVietnam } from "@/lib/vietnam-time";
 
 export type AlertSeverity = "critical" | "warning" | "info";
 export type AlertStatus = "active" | "acknowledged" | "resolved";
@@ -47,7 +48,7 @@ function dbAlertToItem(event: AlertEvent): AlertItem {
   return {
     id: event.id,
     code: event.parameter,
-    timestamp: event.occurredAt,
+    timestamp: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
     pointCode: event.pointCode ?? event.meterPointId ?? "--",
     pointName: event.pointName ?? "Điểm đo chưa gán",
     location: event.utility ?? "EMS",
@@ -61,7 +62,7 @@ function dbAlertToItem(event: AlertEvent): AlertItem {
     status: alertStatus(event.status),
     message: event.message ?? `Sự kiện ${event.parameter} tại ${event.pointName ?? "điểm đo"}`,
     acknowledgedBy: event.acknowledgedBy,
-    acknowledgedAt: event.acknowledgedAt,
+    acknowledgedAt: formatStoredVietnam(event.acknowledgedAt) ?? event.acknowledgedAt,
     notes: event.note,
   };
 }

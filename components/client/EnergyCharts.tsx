@@ -7,6 +7,7 @@ import {
   TimeFilterBar,
   getTimeFilterLabel,
   getTimeFilterPeriods,
+  periodIndexForInstant,
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
 import { FrequencyChart } from "@/components/client/FrequencyChart";
@@ -17,6 +18,7 @@ import { UnbalanceChart } from "@/components/client/UnbalanceChart";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { hydrateProjects, loadProjects, resolveMeterTypes } from "@/lib/projects";
 import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import { formatStoredVietnam, vietnamFromStored } from "@/lib/vietnam-time";
 import { hydrateMeterReadings, type MeterReading } from "@/lib/meter-readings";
 
 type EnergyKind = string;
@@ -126,7 +128,7 @@ function energyBarsFromGateway(filter: TimeFilterValue, samples: ProjectGatewayS
   for (const sample of samples) {
     const wh = sample.values.EPaed;
     if (typeof wh !== "number" || !Number.isFinite(wh)) continue;
-    const index = periodIndex(filter, sample.at, periods.length);
+    const index = periodIndexForInstant(filter, sample.at, periods.length);
     if (index < 0) continue;
     const list = grouped.get(index) ?? [];
     list.push(wh / 1000);
@@ -248,11 +250,13 @@ export function EnergyCharts() {
   useEffect(() => {
     if (gatewayMonthAligned.current || gatewaySamples.length === 0) return;
     const latest = gatewaySamples.reduce((best, sample) => (sample.at > best.at ? sample : best));
-    const month = latest.at.slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(month)) return;
+    const parts = vietnamFromStored(latest.at);
+    if (!parts) return;
     gatewayMonthAligned.current = true;
     setTimeFilter((current) =>
-      current.mode === "month" && current.month === month ? current : { ...current, mode: "month", month },
+      current.mode === "month" && current.month === parts.monthKey
+        ? current
+        : { ...current, mode: "month", month: parts.monthKey, year: parts.year },
     );
   }, [gatewaySamples]);
 
@@ -771,7 +775,7 @@ export function EnergyCharts() {
                   <span className={`h-2.5 w-2.5 rounded-full ${liveSamples.length ? "bg-emerald-500" : "bg-slate-300"}`} />
                   {liveSamples.length ? "Đang có số liệu đo" : "Chưa có số liệu đo"}
                 </p>
-                <p>{liveSamples.length ? `Cập nhật: ${liveSamples[liveSamples.length - 1].at.replace("T", " ").slice(0, 19)}` : "Chưa có số liệu"}</p>
+                <p>{liveSamples.length ? `Cập nhật: ${formatStoredVietnam(liveSamples[liveSamples.length - 1].at) ?? liveSamples[liveSamples.length - 1].at}` : "Chưa có số liệu"}</p>
               </div>
             </div>
           </>
@@ -902,7 +906,7 @@ export function EnergyCharts() {
               <span className={`rounded px-2 py-1 text-[11px] font-bold tracking-wide ${liveSamples.length ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
                 {liveSamples.length ? "ĐANG CÓ SỐ LIỆU" : "CHƯA CÓ SỐ LIỆU"}
               </span>
-              <span>{liveSamples.length ? `Cập nhật: ${liveSamples[liveSamples.length - 1].at.replace("T", " ").slice(0, 19)}` : "Chưa có số liệu"}</span>
+              <span>{liveSamples.length ? `Cập nhật: ${formatStoredVietnam(liveSamples[liveSamples.length - 1].at) ?? liveSamples[liveSamples.length - 1].at}` : "Chưa có số liệu"}</span>
             </p>
             <p className="inline-flex items-center gap-1.5 font-medium text-slate-400">
               <ShieldIcon className="h-4 w-4" />

@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
 import { hydrateClientMeters } from "@/lib/client-meters";
+import { formatCivilDate, formatStoredVietnam, vietnamNow } from "@/lib/vietnam-time";
 
 type YesNo = "Có" | "Không";
 type Format = ".pdf" | ".xlsx" | ".csv";
@@ -33,7 +34,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
   const [detail, setDetail] = useState<YesNo>(reportId === "alerts" ? "Có" : "Không");
   const [format, setFormat] = useState<Format>(".pdf");
   const [period, setPeriod] = useState<Period>("Ngày");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => vietnamNow().date);
   const [selected, setSelected] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [points, setPoints] = useState<{ id: string; name: string }[]>([]);
@@ -54,7 +55,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
         return nextPoints[0] ? [nextPoints[0].id] : [];
       });
       setAlertRows(events.map((event: AlertEvent) => ({
-        time: event.occurredAt,
+        time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
         point: event.pointName ?? event.meterPointId ?? "--",
         param: event.parameter,
         value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
@@ -66,10 +67,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
     };
   }, [projectId]);
 
-  const dateLabel = useMemo(() => {
-    const [y, m, d] = date.split("-");
-    return `${m}/${d}/${y}`;
-  }, [date]);
+  const dateLabel = useMemo(() => formatCivilDate(date), [date]);
 
   const pickReport = (id: (typeof REPORTS)[number]["id"]) => {
     const next = REPORTS.find((item) => item.id === id) ?? REPORTS[0];

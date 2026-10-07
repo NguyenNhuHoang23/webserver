@@ -18,6 +18,7 @@ import {
   type GhgInputMethod,
   type ScopeId,
 } from "@/lib/ghg-sources";
+import { vietnamNow } from "@/lib/vietnam-time";
 import {
   hydrateClientMeters,
   loadClientMeters,
@@ -77,7 +78,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const [meterPointId, setMeterPointId] = useState("");
   const [factorId, setFactorId] = useState("");
   const [formula, setFormula] = useState("{Giá trị điểm đo} * {Hệ số phát thải}");
-  const [appliedAt, setAppliedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const [appliedAt, setAppliedAt] = useState(() => vietnamNow().date);
   const [formError, setFormError] = useState("");
 
   const selectedMeter = useMemo(
@@ -174,7 +175,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setMeterPointId("");
       setFactorId("");
       setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-      setAppliedAt(new Date().toISOString().slice(0, 10));
+      setAppliedAt(vietnamNow().date);
       setFormError("");
       setTableFilter((current) => {
         setActiveScope(current);
@@ -225,7 +226,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setMeterPointId("");
     setFactorId("");
     setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-    setAppliedAt(new Date().toISOString().slice(0, 10));
+    setAppliedAt(vietnamNow().date);
     setFormError("");
     setFormOpen(false);
   }

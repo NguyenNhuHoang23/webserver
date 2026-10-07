@@ -1,4 +1,5 @@
 import { dbFetch, emitDbChange } from "@/lib/db-client";
+import { vietnamTodayLabel } from "@/lib/vietnam-time";
 
 export type AccountRole =
   | "Quản trị viên"
@@ -70,5 +71,5 @@ export function removeAccount(id: string) {
 }
 
 export function todayLabel() {
-  return new Date().toLocaleDateString("vi-VN");
+  return vietnamTodayLabel();
 }

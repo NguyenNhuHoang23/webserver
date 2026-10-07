@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { formatCivilDate, vietnamFromStored, vietnamNow } from "@/lib/vietnam-time";
 
 export type TimeFilterMode = "day" | "month" | "year" | "custom_date";
 export type CustomDateMode = "single" | "range";
@@ -16,25 +17,49 @@ export type TimeFilterValue = {
   endDate: string;    // YYYY-MM-DD
 };
 
-export const DEFAULT_TIME_FILTER: TimeFilterValue = {
-  mode: "month",
-  date: "2026-09-12",
-  month: "2026-09",
-  year: 2026,
-  customDateMode: "single",
-  customDate: "2026-09-12",
-  startDate: "2026-09-01",
-  endDate: "2026-09-12",
-};
+export function createTimeFilter(now = vietnamNow()): TimeFilterValue {
+  return {
+    mode: "month",
+    date: now.date,
+    month: now.monthKey,
+    year: now.year,
+    customDateMode: "single",
+    customDate: now.date,
+    startDate: `${now.monthKey}-01`,
+    endDate: now.date,
+  };
+}
+
+export const DEFAULT_TIME_FILTER: TimeFilterValue = createTimeFilter();
+
+export function periodIndexForInstant(value: TimeFilterValue, at: string, length: number) {
+  const parts = vietnamFromStored(at);
+  if (!parts) return -1;
+  let index = -1;
+  if (value.mode === "month") {
+    if (parts.monthKey === value.month) index = parts.day - 1;
+  } else if (value.mode === "year") {
+    if (parts.year === value.year) index = parts.month - 1;
+  } else if (value.mode === "day" && parts.date === value.date) {
+    index = parts.hour;
+  } else if (value.mode === "custom_date" && value.customDateMode !== "range" && parts.date === value.customDate) {
+    index = parts.hour;
+  } else if (value.mode === "custom_date" && value.customDateMode === "range") {
+    const start = Date.parse(`${value.startDate}T00:00:00Z`);
+    const current = Date.parse(`${parts.date}T00:00:00Z`);
+    index = Math.round((current - start) / (24 * 60 * 60 * 1000));
+  }
+  return index >= 0 && index < length ? index : -1;
+}
 
 export function getTimeFilterLabel(value: TimeFilterValue): string {
   switch (value.mode) {
     case "day":
-      return `Hôm nay (${value.date})`;
+      return `Hôm nay (${formatCivilDate(value.date)})`;
     case "custom_date":
       return value.customDateMode === "range"
-        ? `${value.startDate} đến ${value.endDate}`
-        : `Ngày ${value.customDate}`;
+        ? `${formatCivilDate(value.startDate)} đến ${formatCivilDate(value.endDate)}`
+        : `Ngày ${formatCivilDate(value.customDate)}`;
     case "month": {
       const [y, m] = value.month.split("-");
       return `Tháng ${m}/${y}`;
@@ -139,7 +164,14 @@ export function TimeFilterBar({
             <button
               key={item.id}
               type="button"
-              onClick={() => onChange({ ...value, mode: item.id })}
+              onClick={() => {
+                if (item.id === "day") {
+                  const now = vietnamNow();
+                  onChange({ ...value, mode: "day", date: now.date });
+                  return;
+                }
+                onChange({ ...value, mode: item.id });
+              }}
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
                 active
                   ? "bg-slate-900 text-white shadow-xs"
@@ -157,19 +189,20 @@ export function TimeFilterBar({
         {value.mode === "day" && (
           <div className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs">
             <CalendarSmallIcon className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Hôm nay: <strong className="font-mono text-slate-900">{value.date}</strong></span>
+            <span>Hôm nay: <strong className="font-mono text-slate-900">{formatCivilDate(value.date)}</strong></span>
           </div>
         )}
 
         {value.mode === "month" && (
-          <label className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs hover:border-slate-300 transition-colors cursor-pointer">
+          <label className="relative inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs hover:border-slate-300 transition-colors cursor-pointer">
             <CalendarSmallIcon className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-            <span className="text-slate-500">Tháng:</span>
+            <span className="font-semibold text-slate-900">Tháng {value.month.slice(5, 7)}/{value.month.slice(0, 4)}</span>
             <input
               type="month"
               value={value.month}
               onChange={(e) => onChange({ ...value, month: e.target.value })}
-              className="border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none cursor-pointer [color-scheme:light]"
+              aria-label="Tháng"
+              className="absolute inset-0 cursor-pointer opacity-0"
             />
           </label>
         )}
@@ -252,34 +285,45 @@ export function DateSelectionControl({
       </select>
 
       {mode === "single" ? (
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => onDateChange(e.target.value)}
-          className={inputClass}
-        />
+        <VietnamDateInput value={date} onChange={onDateChange} className={inputClass} />
       ) : (
         <>
           <span className="text-slate-400">Từ</span>
-          <input
-            type="date"
-            value={startDate}
-            max={endDate || undefined}
-            onChange={(e) => onStartDateChange(e.target.value)}
-            className={inputClass}
-          />
+          <VietnamDateInput value={startDate} max={endDate || undefined} onChange={onStartDateChange} className={inputClass} />
           <span className="text-slate-400">→</span>
           <span className="text-slate-400">Đến</span>
-          <input
-            type="date"
-            value={endDate}
-            min={startDate || undefined}
-            onChange={(e) => onEndDateChange(e.target.value)}
-            className={inputClass}
-          />
+          <VietnamDateInput value={endDate} min={startDate || undefined} onChange={onEndDateChange} className={inputClass} />
         </>
       )}
     </div>
+  );
+}
+
+function VietnamDateInput({
+  value,
+  onChange,
+  min,
+  max,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  min?: string;
+  max?: string;
+  className?: string;
+}) {
+  return (
+    <label className="relative inline-flex items-center">
+      <span className={className}>{formatCivilDate(value)}</span>
+      <input
+        type="date"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 cursor-pointer opacity-0"
+      />
+    </label>
   );
 }
 

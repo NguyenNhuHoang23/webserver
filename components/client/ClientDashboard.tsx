@@ -7,6 +7,7 @@ import { hydrateGhgSources } from "@/lib/ghg-sources";
 import { hydrateMeterReadings } from "@/lib/meter-readings";
 import { hydrateDevices } from "@/lib/devices";
 import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import { formatStoredVietnam, vietnamFromStored } from "@/lib/vietnam-time";
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
 
@@ -23,8 +24,7 @@ const EMPTY_STATUS: StatusSlice[] = [
 ];
 
 function sampleStamp(at: string) {
-  const match = at.match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
-  return match ? `${match[1]}T${match[2]}` : null;
+  return vietnamFromStored(at)?.stamp ?? null;
 }
 
 function formatKwh(value: number) {
@@ -111,7 +111,7 @@ export function ClientDashboard({ project }: { project: Project }) {
           { label: "NGOẠI TUYẾN", value: counts.offline, color: "#9aa3af" },
         ]);
         setAlerts(alertEvents.slice(0, 8).map((event: AlertEvent) => ({
-          time: event.occurredAt,
+          time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
           point: event.pointName ?? event.meterPointId ?? "--",
           param: event.parameter,
           value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
@@ -364,7 +364,7 @@ function LatestReading({ sample }: { sample: ProjectGatewaySample }) {
     <p className="mb-3 text-xs text-slate-500">
       {items.map(([label, text]) => `${label} ${text}`).join(" · ")}
       {" · "}
-      Cập nhật {sampleStamp(sample.at)?.replace("T", " ") ?? sample.at}
+      Cập nhật {formatStoredVietnam(sample.at) ?? sample.at}
     </p>
   );
 }

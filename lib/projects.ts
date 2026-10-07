@@ -1,4 +1,5 @@
 import { dbFetch, emitDbChange } from "@/lib/db-client";
+import { vietnamTodayLabel } from "@/lib/vietnam-time";
 
 export type ProjectStatus = "active" | "maintenance" | "paused";
 /** Loại năng lượng / điểm đo — có thể mở rộng (vd: Khí nén) từ cấu hình dự án */
@@ -121,5 +122,5 @@ export function projectAccent(id: string) {
 export function formatProjectDate(iso: string) {
   const [year, month, day] = iso.split("-");
   if (year && month && day) return `${day}/${month}/${year}`;
-  return new Date().toLocaleDateString("vi-VN");
+  return vietnamTodayLabel();
 }

@@ -1175,7 +1175,7 @@ function Field({
 
 function DateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [y, m, d] = value.split("-");
-  const label = y && m && d ? `${m}/${d}/${y}` : value;
+  const label = y && m && d ? `${d}/${m}/${y}` : value;
   return (
     <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700">
       {label}

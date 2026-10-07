@@ -1,16 +1,20 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
   getTimeFilterLabel,
   getTimeFilterPeriods,
+  periodIndexForInstant,
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
-import { hydrateProjects, loadProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
+import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import { hydrateProjectSettings } from "@/lib/project-settings";
+import { hydrateProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
+import { vietnamFromStored } from "@/lib/vietnam-time";
 
 type CostPoint = {
   id: string;
@@ -37,8 +41,97 @@ const TOU = [
   { id: "none", label: "Không", color: "#9aa3af" },
 ] as const;
 
+const FALLBACK_VND_PER_KWH = 1912;
+
+type Band = "peak" | "normal" | "off" | "none";
+type PriceSlot = { from: string; to: string; price: number; band: Band };
+type CostBar = { key: string | number; label: string; light: number; dark: number };
+
 function formatVnd(n: number) {
-  return Math.round(n).toLocaleString("en-US");
+  return Math.round(n).toLocaleString("vi-VN");
+}
+
+function parsePrice(value: unknown) {
+  const text = String(value ?? "").trim().replace(/\s/g, "");
+  if (!text) return 0;
+  if (/^\d{1,3}(\.\d{3})+$/.test(text)) return Number(text.replace(/\./g, ""));
+  if (/^\d{1,3}(,\d{3})+$/.test(text)) return Number(text.replace(/,/g, ""));
+  const number = Number(text.replace(/,/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function bandForName(name: string): Band {
+  const text = name.toLowerCase();
+  if (text.includes("cao")) return "peak";
+  if (text.includes("thấp") || text.includes("thap")) return "off";
+  if (text.includes("không") || text.includes("khong")) return "none";
+  return "normal";
+}
+
+function minutesOf(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return 0;
+  return hour * 60 + minute;
+}
+
+function inSlot(hour: number, minute: number, from: string, to: string) {
+  const start = minutesOf(from);
+  const end = minutesOf(to);
+  const current = hour * 60 + minute;
+  if (start === end) return true;
+  if (start < end) return current >= start && current < end;
+  return current >= start || current < end;
+}
+
+function rateFor(hour: number, minute: number, slots: PriceSlot[]) {
+  const priced = slots.filter((slot) => slot.price > 0);
+  for (const slot of priced) {
+    if (inSlot(hour, minute, slot.from, slot.to)) return slot;
+  }
+  if (priced.length) return { price: 0, band: "none" as Band };
+  return { price: FALLBACK_VND_PER_KWH, band: "normal" as Band };
+}
+
+function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample[], slots: PriceSlot[]) {
+  const bars: CostBar[] = getTimeFilterPeriods(filter).map((period) => ({
+    key: period.key,
+    label: period.label,
+    light: 0,
+    dark: 0,
+  }));
+  const tou = { peak: 0, normal: 0, off: 0, none: 0 };
+  const ordered = samples
+    .filter((sample) => typeof sample.values.EPaed === "number" && Number.isFinite(sample.values.EPaed))
+    .slice()
+    .sort((left, right) => left.at.localeCompare(right.at));
+  let consumed = 0;
+  for (let index = 1; index < ordered.length; index += 1) {
+    const next = ordered[index];
+    const delta = Math.max(0, (next.values.EPaed - ordered[index - 1].values.EPaed) / 1000);
+    if (delta <= 0) continue;
+    const parts = vietnamFromStored(next.at);
+    const bucket = periodIndexForInstant(filter, next.at, bars.length);
+    if (!parts || bucket < 0) continue;
+    const rate = rateFor(parts.hour, parts.minute, slots);
+    const cost = delta * rate.price;
+    bars[bucket].dark += cost;
+    tou[rate.band] += cost;
+    consumed += delta;
+  }
+  let indexMode = false;
+  if (consumed === 0 && ordered.length) {
+    const last = ordered[ordered.length - 1];
+    const parts = vietnamFromStored(last.at);
+    const bucket = periodIndexForInstant(filter, last.at, bars.length);
+    if (parts && bucket >= 0) {
+      const rate = rateFor(parts.hour, parts.minute, slots);
+      const cost = (last.values.EPaed / 1000) * rate.price;
+      bars[bucket].dark += cost;
+      tou[rate.band] += cost;
+      indexMode = true;
+    }
+  }
+  return { bars, tou, indexMode };
 }
 
 function costLabel(energy: string) {
@@ -69,12 +162,40 @@ export function CostCharts() {
   const [showSum, setShowSum] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [query, setQuery] = useState("");
+  const [samples, setSamples] = useState<ProjectGatewaySample[]>([]);
+  const [slots, setSlots] = useState<PriceSlot[]>([]);
+  const [flatPrice, setFlatPrice] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
+  const monthAligned = useRef(false);
+  const selectionTouched = useRef(false);
+
+  useEffect(() => {
+    monthAligned.current = false;
+    selectionTouched.current = false;
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
     const reload = () => {
-      void Promise.all([hydrateProjects(), hydrateClientMeters(projectId)]).then(([projects, meterRows]) => {
+      void Promise.all([
+        hydrateProjects(),
+        hydrateClientMeters(projectId),
+        loadProjectGatewaySamples(projectId),
+        hydrateProjectSettings(projectId),
+      ]).then(([projects, meterRows, gatewayRows, settings]) => {
         if (!active) return;
+        setSamples(gatewayRows);
+        const saved = settings.costConfig as {
+          slots?: Array<{ name?: string; from?: string; to?: string; price?: string }>;
+          flatPrices?: Record<string, string>;
+        } | undefined;
+        setSlots((saved?.slots ?? []).map((slot) => ({
+          from: slot.from ?? "00:00",
+          to: slot.to ?? "24:00",
+          price: parsePrice(slot.price),
+          band: bandForName(slot.name ?? ""),
+        })));
+        setFlatPrice(parsePrice(saved?.flatPrices?.["Điện"]));
         const project = projects.find((item) => item.id === projectId);
         const types = resolveMeterTypes(project);
         setEnergyKinds(types);
@@ -101,7 +222,20 @@ export function CostCharts() {
       active = false;
       window.removeEventListener("ems-client-meters-changed", reload);
     };
-  }, [projectId]);
+  }, [projectId, reloadKey]);
+
+  useEffect(() => {
+    if (monthAligned.current || !samples.length) return;
+    const latest = samples.reduce((best, sample) => (sample.at > best.at ? sample : best));
+    const parts = vietnamFromStored(latest.at);
+    if (!parts) return;
+    monthAligned.current = true;
+    setTimeFilter((current) =>
+      current.mode === "month" && current.month === parts.monthKey
+        ? current
+        : { ...current, mode: "month", month: parts.monthKey, year: parts.year },
+    );
+  }, [samples]);
 
   const pointsForEnergy = useMemo(
     () => allPoints.filter((p) => p.energy === energy),
@@ -121,24 +255,43 @@ export function CostCharts() {
   useEffect(() => {
     setSelectedIds((current) => {
       const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
+      if (selectionTouched.current) return kept;
+      const linked = pointsForEnergy.filter((point) => samples.some((sample) => sample.meterPointId === point.id));
+      if (linked.length > 0 && !kept.some((id) => linked.some((point) => point.id === id))) {
+        return linked.slice(0, 1).map((point) => point.id);
+      }
       if (kept.length > 0) return kept;
-      // Mặc định tick 2 điểm đầu để so sánh tham số trên biểu đồ
-      return pointsForEnergy.slice(0, Math.min(2, pointsForEnergy.length)).map((p) => p.id);
+      const source = linked.length > 0 ? linked : pointsForEnergy;
+      return source.slice(0, 1).map((point) => point.id);
     });
-  }, [pointsForEnergy]);
+  }, [pointsForEnergy, samples]);
 
   const selectedPoints = useMemo(
     () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
     [pointsForEnergy, selectedIds],
   );
 
+  const pricedSlots = useMemo(() => {
+    if (slots.some((slot) => slot.price > 0)) return slots;
+    if (flatPrice > 0) {
+      return [{ from: "00:00", to: "24:00", price: flatPrice, band: "normal" as Band }];
+    }
+    return slots;
+  }, [flatPrice, slots]);
+
+  const unitPrice = pricedSlots.find((slot) => slot.price > 0)?.price ?? FALLBACK_VND_PER_KWH;
+
   const series = useMemo(
     () =>
-      selectedPoints.map((point) => ({
-        point,
-        bars: costSeriesForFilter(timeFilter),
-      })),
-    [selectedPoints, timeFilter],
+      selectedPoints.map((point) => {
+        const result = costBarsForPoint(
+          timeFilter,
+          samples.filter((sample) => sample.meterPointId === point.id),
+          pricedSlots,
+        );
+        return { point, bars: result.bars, tou: result.tou, indexMode: result.indexMode };
+      }),
+    [pricedSlots, samples, selectedPoints, timeFilter],
   );
 
   const primaryBars = series[0]?.bars ?? costSeriesForFilter(timeFilter);
@@ -146,6 +299,7 @@ export function CostCharts() {
     (sum, item) => sum + item.bars.reduce((s, b) => s + b.dark, 0),
     0,
   );
+  const indexMode = series.length > 0 && series.every((item) => item.indexMode || item.bars.every((bar) => bar.dark === 0));
 
   const pointTotals = useMemo(
     () =>
@@ -156,13 +310,21 @@ export function CostCharts() {
     [series],
   );
 
-  const tou = useMemo(() => {
-    const normal = Math.round(grandTotal * 0.56);
-    const off = Math.max(0, grandTotal - normal);
-    return { peak: 0, normal, off, none: 0 };
-  }, [grandTotal]);
+  const tou = useMemo(
+    () => series.reduce(
+      (sum, item) => ({
+        peak: sum.peak + item.tou.peak,
+        normal: sum.normal + item.tou.normal,
+        off: sum.off + item.tou.off,
+        none: sum.none + item.tou.none,
+      }),
+      { peak: 0, normal: 0, off: 0, none: 0 },
+    ),
+    [series],
+  );
 
   function togglePoint(id: string) {
+    selectionTouched.current = true;
     setSelectedIds((current) => {
       if (current.includes(id)) {
         return current.filter((item) => item !== id);
@@ -172,10 +334,12 @@ export function CostCharts() {
   }
 
   function selectAllVisible() {
+    selectionTouched.current = true;
     setSelectedIds(filteredPoints.map((p) => p.id));
   }
 
   function clearSelection() {
+    selectionTouched.current = true;
     setSelectedIds([]);
   }
 
@@ -304,7 +468,7 @@ export function CostCharts() {
         <div className="p-4">
           <button
             type="button"
-            onClick={() => undefined}
+            onClick={() => setReloadKey((value) => value + 1)}
             className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-50 text-[13px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors shadow-xs"
           >
             <RefreshIcon className="h-4 w-4" />
@@ -372,7 +536,7 @@ export function CostCharts() {
                 <IconBtn label="Xuất dữ liệu" onClick={exportCsv}>
                   <SaveIcon className="h-4 w-4" />
                 </IconBtn>
-                <IconBtn label="Làm mới" onClick={() => undefined}>
+                <IconBtn label="Làm mới" onClick={() => setReloadKey((value) => value + 1)}>
                   <RefreshIcon className="h-4 w-4" />
                 </IconBtn>
               </div>
@@ -432,8 +596,12 @@ export function CostCharts() {
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[12px] text-slate-500">
           <p className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-            Chưa có số liệu chi phí
+            <span className={`h-2.5 w-2.5 rounded-full ${grandTotal > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
+            {grandTotal > 0
+              ? indexMode
+                ? `Chỉ số điện chưa tăng. Đang hiện chỉ số hiện tại × ${formatVnd(unitPrice)} VNĐ/kWh.`
+                : `Chi phí = điện năng tiêu thụ × ${formatVnd(unitPrice)} VNĐ/kWh.`
+              : "Chưa có số liệu chi phí trong kỳ này"}
           </p>
         </div>
       </div>
@@ -456,8 +624,12 @@ function MultiCostBarChart({
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
   const base = series[0]?.bars ?? [];
-  const maxValue = Math.max(...series.flatMap((s) => s.bars.map((b) => b.dark)), 1);
-  const yMax = Math.max(1000, Math.ceil(maxValue / 2000) * 2000);
+  const maxValue = Math.max(...series.flatMap((s) => s.bars.map((b) => b.dark)), 0);
+  const yMax = maxValue <= 0
+    ? 1000
+    : maxValue < 1000
+      ? Math.ceil(maxValue / 100) * 100
+      : Math.ceil(maxValue / 2000) * 2000;
   const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * innerH;
   const groupW = innerW / Math.max(base.length, 1);
   const barCount = Math.max(series.length, 1);
@@ -481,7 +653,7 @@ function MultiCostBarChart({
           <g key={v}>
             <line x1={pad.l} x2={W - pad.r} y1={y} y2={y} stroke="#eceff3" />
             <text x={pad.l - 8} y={y + 4} textAnchor="end" className="fill-slate-400" fontSize="11">
-              {v === 0 ? "0" : v.toLocaleString("en-US")}
+              {v === 0 ? "0" : v.toLocaleString("vi-VN")}
             </text>
           </g>
         );
@@ -599,7 +771,7 @@ function TouChart({ values }: { values: { peak: number; normal: number; off: num
   const H = 180;
   const pad = { l: 18, r: 18, t: 28, b: 28 };
   const innerW = W - pad.l - pad.r;
-  const yMax = Math.max(values.normal, values.off, 1);
+  const yMax = Math.max(values.peak, values.normal, values.off, values.none, 1);
   const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * (H - pad.t - pad.b);
   const items = [
     { label: "Cao", color: TOU[0].color, value: values.peak },

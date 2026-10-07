@@ -9,6 +9,7 @@ import {
   gatewayErrorText,
   replayLabel,
 } from "@/lib/gateway-protocol";
+import { formatStoredVietnam, vietnamInputToUtcIso, vietnamInputValue } from "@/lib/vietnam-time";
 
 type GatewayDeviceView = {
   gatewayId: string;
@@ -155,10 +156,11 @@ export function GatewayConsole() {
     setState((current) => ({ ...current, loading: true, error: "" }));
     try {
       const params = new URLSearchParams();
-      const fromDate = new Date(fromValue);
-      const toDate = new Date(toValue);
-      if (!Number.isNaN(fromDate.getTime())) params.set("from", fromDate.toISOString());
-      if (!Number.isNaN(toDate.getTime())) {
+      const fromIso = vietnamInputToUtcIso(fromValue);
+      const toIso = vietnamInputToUtcIso(toValue);
+      if (fromIso) params.set("from", fromIso);
+      if (toIso) {
+        const toDate = new Date(toIso);
         toDate.setSeconds(59, 999);
         params.set("to", toDate.toISOString());
       }
@@ -637,7 +639,7 @@ function AlarmColumn({
               <Field label="gatewayId" value={item.gatewayId} />
               <Field label="meterModel" value={item.meterModel} />
               <Field label="meterId" value={item.meterId} />
-              <Field label="occurredAt" value={item.occurredAt} />
+              <Field label="occurredAt" value={formatStoredVietnam(item.occurredAt) ?? item.occurredAt} />
               <Field label="createdAt" value={formatStamp(item.createdAt)} />
               {kind === "gateway" ? (
                 <>
@@ -792,14 +794,11 @@ function formatValue(value: unknown) {
 
 function formatStamp(value: string | null) {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return `${date.toLocaleString("vi-VN")} (${value})`;
+  return formatStoredVietnam(value) ?? value;
 }
 
 function localInput(date: Date) {
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return vietnamInputValue(date);
 }
 
 async function postConsole(body: Record<string, unknown>) {

@@ -1,3 +1,5 @@
+import { vietnamFromDate } from "@/lib/vietnam-time";
+
 export type ProjectGatewaySample = {
   meterPointId: string;
   at: string;
@@ -84,15 +86,15 @@ export function chartTimeLabel(
 ) {
   const time = timeAtIndex(sampleTimes(samples), index, length);
   if (time == null) return "";
-  const date = new Date(time);
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const hour = String(date.getUTCHours()).padStart(2, "0");
-  const minute = String(date.getUTCMinutes()).padStart(2, "0");
-  const second = String(date.getUTCSeconds()).padStart(2, "0");
-  if (kind === "tooltip") return `${date.getUTCFullYear()}-${month}-${day} ${hour}:${minute}:${second}`;
+  const parts = vietnamFromDate(new Date(time));
+  const month = String(parts.month).padStart(2, "0");
+  const day = String(parts.day).padStart(2, "0");
+  const hour = String(parts.hour).padStart(2, "0");
+  const minute = String(parts.minute).padStart(2, "0");
+  const second = String(parts.second).padStart(2, "0");
+  if (kind === "tooltip") return `${day}/${month}/${parts.year} ${hour}:${minute}:${second}`;
   if (kind === "sec") return `${hour}:${minute}:${second}`;
-  return `${month}-${day} ${hour}:${minute}`;
+  return `${day}/${month} ${hour}:${minute}`;
 }
 
 export function chartTimeTicks(start: number, end: number, count = 6) {

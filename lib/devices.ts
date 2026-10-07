@@ -1,4 +1,5 @@
 import { dbFetch, emitDbChange } from "@/lib/db-client";
+import { vietnamNowLabel } from "@/lib/vietnam-time";
 
 export type DeviceKind = "power" | "flow" | "temp" | "steam";
 export type DeviceStatus = "active" | "maintenance" | "offline";
@@ -93,7 +94,7 @@ export async function removeDevice(id: string) {
 }
 
 export function todaySyncLabel() {
-  return new Date().toLocaleString("vi-VN");
+  return vietnamNowLabel();
 }
 
 export function kindFromDeviceType(deviceType: string): DeviceKind {
