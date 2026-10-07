@@ -5,8 +5,11 @@ export type ProjectGatewaySample = {
 };
 
 export type ChartSample = {
+  at?: string;
   values: Record<string, number>;
 };
+
+export type ChartTimeKind = "full" | "min" | "sec" | "tooltip";
 
 export async function loadProjectGatewaySamples(projectId: string): Promise<ProjectGatewaySample[]> {
   try {
@@ -51,6 +54,59 @@ export function valuesForKeysAverage(
     const nums = series.map((item) => item[index]);
     return nums.reduce((sum, value) => sum + value, 0) / nums.length;
   });
+}
+
+function sampleTimes(samples: ChartSample[] | undefined) {
+  const times: number[] = [];
+  for (const sample of samples ?? []) {
+    const match = sample.at?.match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+    if (!match) continue;
+    times.push(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6])));
+  }
+  return times;
+}
+
+function timeAtIndex(times: number[], index: number, length: number) {
+  if (!times.length || length < 1) return null;
+  if (times.length === 1) return times[0];
+  const pos = (index / Math.max(length - 1, 1)) * (times.length - 1);
+  const low = Math.floor(pos);
+  const high = Math.min(times.length - 1, low + 1);
+  const blend = pos - low;
+  return times[low] * (1 - blend) + times[high] * blend;
+}
+
+export function chartTimeLabel(
+  samples: ChartSample[] | undefined,
+  index: number,
+  length: number,
+  kind: ChartTimeKind,
+) {
+  const time = timeAtIndex(sampleTimes(samples), index, length);
+  if (time == null) return "";
+  const date = new Date(time);
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  const second = String(date.getUTCSeconds()).padStart(2, "0");
+  if (kind === "tooltip") return `${date.getUTCFullYear()}-${month}-${day} ${hour}:${minute}:${second}`;
+  if (kind === "sec") return `${hour}:${minute}:${second}`;
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
+export function chartTimeTicks(start: number, end: number, count = 6) {
+  const span = Math.max(0, end - start);
+  const steps = Math.min(count, span + 1);
+  if (steps <= 1) return [{ i: start, kind: "full" as const }];
+  const ticks: { i: number; kind: "full" | "min" }[] = [];
+  for (let step = 0; step < steps; step += 1) {
+    ticks.push({
+      i: Math.round(start + (span * step) / (steps - 1)),
+      kind: step === 0 ? "full" : "min",
+    });
+  }
+  return ticks;
 }
 
 export function latestValue(samples: ChartSample[] | undefined, key: string): number | null {

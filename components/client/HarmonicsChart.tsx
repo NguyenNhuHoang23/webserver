@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { domainTicks, latestValue, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
+import { chartTimeLabel, chartTimeTicks, domainTicks, latestValue, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 
 const N = 160;
-const T0 = Date.parse("2026-01-27T09:40:00");
 const CHANNELS = [1, 2, 3] as const;
 const AGGS = ["MAX", "AVG", "MIN"] as const;
 const ORDERS = [3, 5, 7, 9, 11, 13] as const;
@@ -22,15 +21,6 @@ type Series = { key: string; name: string; color: string; values: number[] };
 function toggleIn<T>(list: T[], value: T) {
   if (list.includes(value)) return list.length === 1 ? list : list.filter((item) => item !== value);
   return [...list, value];
-}
-
-function timeLabel(index: number, kind: "full" | "min" | "sec") {
-  const d = new Date(T0 + (index / (N - 1)) * 240000);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  if (kind === "full") return `1-27(Tue) ${hh}:${mm}`;
-  if (kind === "min") return `${hh}:${mm}`;
-  return "30";
 }
 
 function smoothPath(pts: [number, number][]) {
@@ -327,6 +317,7 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
             <HarmPane
               title={`THDu ${thduScale.unit}`}
               series={thduSeries}
+              samples={samples}
               viewWin={viewWin}
               hover={crosshair ? hover : null}
               onHover={setHover}
@@ -338,6 +329,7 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
             <HarmPane
               title={`THDi ${thdiScale.unit}`}
               series={thdiSeries}
+              samples={samples}
               viewWin={viewWin}
               hover={crosshair ? hover : null}
               onHover={setHover}
@@ -414,6 +406,7 @@ function Check({
 function HarmPane({
   title,
   series,
+  samples,
   viewWin,
   hover,
   onHover,
@@ -424,6 +417,7 @@ function HarmPane({
 }: {
   title: string;
   series: Series[];
+  samples?: ChartSample[];
   viewWin: { start: number; end: number };
   hover: number | null;
   onHover: (index: number | null) => void;
@@ -442,14 +436,9 @@ function HarmPane({
     pad.l + ((i - viewWin.start) / Math.max(1, viewWin.end - viewWin.start)) * innerW;
   const yAt = (v: number) => pad.t + ((yMax - v) / (yMax - yMin || 1)) * innerH;
 
-  const timeTicks: { i: number; kind: "full" | "min" | "sec" }[] = [];
-  if (axis) {
-    for (let i = viewWin.start; i <= viewWin.end; i++) {
-      const sec = Math.round((i / (N - 1)) * 240);
-      if (sec % 60 === 0) timeTicks.push({ i, kind: i === viewWin.start ? "full" : "min" });
-      else if (sec % 30 === 0) timeTicks.push({ i, kind: "sec" });
-    }
-  }
+  const timeTicks = axis ? chartTimeTicks(viewWin.start, viewWin.end) : [];
+  const timeLabel = (index: number, kind: "full" | "min" | "sec") =>
+    chartTimeLabel(samples, index, N, kind);
 
   return (
     <svg
@@ -505,10 +494,10 @@ function HarmPane({
         <text
           key={`${tick.i}-${tick.kind}`}
           x={xAt(tick.i)}
-          y={tick.kind === "sec" ? H - 26 : H - 10}
+          y={H - 10}
           textAnchor="middle"
-          className={tick.kind === "sec" ? "fill-slate-400" : "fill-slate-600"}
-          fontSize={tick.kind === "sec" ? 9 : 10}
+          className="fill-slate-600"
+          fontSize="10"
         >
           {timeLabel(tick.i, tick.kind)}
         </text>

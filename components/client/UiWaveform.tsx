@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
+import { chartTimeLabel, chartTimeTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
 const PHASE_COLORS = ["#e53935", "#43a047", "#1e88e5"];
@@ -18,25 +18,10 @@ const I_CHANNELS = [
 const AGGS = ["MAX", "AVG", "MIN"] as const;
 type Agg = (typeof AGGS)[number];
 const N = 500;
-const T0 = Date.parse("2026-01-27T09:40:00");
 
 function toggleIn<T>(list: T[], value: T) {
   if (list.includes(value)) return list.length === 1 ? list : list.filter((item) => item !== value);
   return [...list, value];
-}
-
-function timeLabel(index: number, kind: "full" | "min" | "sec" | "tooltip") {
-  const d = new Date(T0 + (index / (N - 1)) * 240000);
-  const yyyy = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  if (kind === "tooltip") return `${yyyy}-${mo}-${dd} ${hh}:${mm}:${ss}`;
-  if (kind === "full") return `1-27(Tue) ${hh}:${mm}`;
-  if (kind === "min") return `${hh}:${mm}`;
-  return ss === "30" ? "30" : ss;
 }
 
 function voltageKey(qty: string, ch: number) {
@@ -145,6 +130,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
         <WavePane
           title={`${uQty} [V]`}
           series={uSeries}
+          samples={samples}
           window={window}
           hover={crosshair ? hover : null}
           onHover={setHover}
@@ -154,6 +140,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
         <WavePane
           title={`${iQty} [A]`}
           series={iSeries}
+          samples={samples}
           window={window}
           hover={crosshair ? hover : null}
           onHover={setHover}
@@ -284,6 +271,7 @@ function TimeSlider({
 function WavePane({
   title,
   series,
+  samples,
   window,
   hover,
   onHover,
@@ -292,6 +280,7 @@ function WavePane({
 }: {
   title: string;
   series: { key: string; name: string; color: string; values: number[] }[];
+  samples?: ChartSample[];
   window: { start: number; end: number };
   hover: number | null;
   onHover: (index: number | null) => void;
@@ -322,14 +311,9 @@ function WavePane({
     return d;
   };
 
-  const timeTicks: { i: number; kind: "full" | "min" | "sec" }[] = [];
-  if (axis) {
-    for (let i = window.start; i <= window.end; i++) {
-      const sec = Math.round((i / (N - 1)) * 240);
-      if (sec % 60 === 0) timeTicks.push({ i, kind: i === window.start ? "full" : "min" });
-      else if (sec % 30 === 0) timeTicks.push({ i, kind: "sec" });
-    }
-  }
+  const timeTicks = axis ? chartTimeTicks(window.start, window.end) : [];
+  const timeLabel = (index: number, kind: "full" | "min" | "sec" | "tooltip") =>
+    chartTimeLabel(samples, index, N, kind);
 
   return (
     <svg
@@ -396,15 +380,15 @@ function WavePane({
             />
           ))}
           <rect
-            x={Math.min(Math.max(xAt(hover) - 68, pad.l), W - pad.r - 136)}
+            x={Math.min(Math.max(xAt(hover) - 78, pad.l), W - pad.r - 156)}
             y={H - pad.b + 2}
-            width="136"
+            width="156"
             height="16"
             rx="2"
             fill="#334155"
           />
           <text
-            x={Math.min(Math.max(xAt(hover), pad.l + 68), W - pad.r - 68)}
+            x={Math.min(Math.max(xAt(hover), pad.l + 78), W - pad.r - 78)}
             y={H - pad.b + 13}
             textAnchor="middle"
             fill="white"
@@ -454,7 +438,7 @@ function WavePane({
               y={H - 8}
               textAnchor="middle"
               className="fill-slate-500"
-              fontSize={tick.kind === "sec" ? 9 : 10}
+              fontSize="10"
             >
               {timeLabel(tick.i, tick.kind)}
             </text>
