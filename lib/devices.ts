@@ -75,18 +75,20 @@ export function hydrateDevices() {
 }
 
 export async function upsertDevice(device: CatalogDevice) {
-  const devices = loadDevices();
-  const exists = devices.some((item) => item.id === device.id);
-  const next = exists
-    ? devices.map((item) => (item.id === device.id ? device : item))
-    : [device, ...devices];
-  await saveDevices(next);
-  return next;
+  const saved = await dbFetch<CatalogDevice[]>("devices", {
+    method: "POST",
+    body: JSON.stringify(device),
+  });
+  devicesCache = saved;
+  emitDbChange("devices");
+  return saved;
 }
 
-export function removeDevice(id: string) {
+export async function removeDevice(id: string) {
+  await dbFetch("devices", { method: "DELETE", query: { id } });
   const next = loadDevices().filter((item) => item.id !== id);
-  void saveDevices(next).catch(() => undefined);
+  devicesCache = next;
+  emitDbChange("devices");
   return next;
 }
 

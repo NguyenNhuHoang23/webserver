@@ -26,7 +26,24 @@ function badRequest(message: string) {
 
 function serverError(error: unknown) {
   console.error("EMS API error", error);
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code) : "";
+  const message = error instanceof Error ? error.message : "";
+  if (code === "ER_DUP_ENTRY" || message.includes("uq_devices_serial_number")) {
+    return Response.json({ error: "Serial này đã được dùng cho loại thiết bị khác." }, { status: 400 });
+  }
+  if (code === "ER_DATA_TOO_LONG" || message.includes("Data too long")) {
+    return Response.json({ error: "Dữ liệu quá dài, không lưu được vào database." }, { status: 400 });
+  }
   return Response.json({ error: "Không thể xử lý dữ liệu trên database." }, { status: 500 });
+}
+
+let deviceColumnsReady: Promise<void> | null = null;
+
+function ensureDeviceColumns() {
+  deviceColumnsReady ??= emsDb
+    .execute("ALTER TABLE devices MODIFY COLUMN image MEDIUMTEXT NULL")
+    .then(() => undefined);
+  return deviceColumnsReady;
 }
 
 function asString(value: unknown, fallback = "") {
@@ -125,6 +142,7 @@ async function getResource(resource: string, request: NextRequest) {
   }
   if (resource === "projects") return getProjects(projectId);
   if (resource === "devices") {
+    await ensureDeviceColumns();
     const rows = await queryRows<Row>(
       `SELECT id, name, serial_number AS sn, brand_model AS brandModel, brand,
               device_type AS type, category, kind, status, last_sync_label AS lastSync,
@@ -357,6 +375,7 @@ async function saveResource(resource: string, body: Row) {
     return getProjects(asString(body.id));
   }
   if (resource === "devices") {
+    await ensureDeviceColumns();
     if (Array.isArray(body.items)) {
       for (const item of body.items as Row[]) await saveResource(resource, item);
       return getResource(resource, new NextRequest("http://localhost/api/ems/devices"));
@@ -529,6 +548,10 @@ async function deleteResource(resource: string, request: NextRequest) {
   const table = tables[resource];
   if (!table) throw new Error(`Delete is not supported for ${resource}`);
   const key = resource === "emission-factors" ? "id" : resource === "meter-types" ? "name" : "id";
+  if (resource === "devices") {
+    await ensureDeviceColumns();
+    await emsDb.execute("UPDATE meter_points SET device_id = NULL WHERE device_id = ?", [id]);
+  }
   await emsDb.execute(`DELETE FROM ${table} WHERE ${key} = ?`, [id]);
   return { ok: true };
 }

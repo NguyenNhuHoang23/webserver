@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS devices (
   last_sync_label VARCHAR(80) NOT NULL,
   protocol VARCHAR(80) NULL,
   notes TEXT NULL,
-  image VARCHAR(500) NULL,
+  image MEDIUMTEXT NULL,
   extra_fields JSON NULL,
   registers JSON NULL,
   PRIMARY KEY (id),
@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS devices (
 
 ALTER TABLE devices
   ADD COLUMN IF NOT EXISTS category VARCHAR(120) NULL AFTER device_type;
+ALTER TABLE devices
+  MODIFY COLUMN image MEDIUMTEXT NULL;
 
 CREATE TABLE IF NOT EXISTS meter_points (
   id VARCHAR(64) NOT NULL,

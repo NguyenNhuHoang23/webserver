@@ -18,7 +18,14 @@ export async function dbFetch<T>(
   });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Database request failed (${response.status})`);
+    let detail = message;
+    try {
+      const parsed = JSON.parse(message) as { error?: string };
+      if (parsed.error) detail = parsed.error;
+    } catch {
+      detail = message;
+    }
+    throw new Error(detail || `Database request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
 }

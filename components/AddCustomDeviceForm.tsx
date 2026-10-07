@@ -48,7 +48,6 @@ export function AddCustomDeviceForm() {
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [isEdit, setIsEdit] = useState(false);
-  const [existingName, setExistingName] = useState("");
   const [extraFields, setExtraFields] = useState<ExtraField[]>([]);
   const [fieldToDelete, setFieldToDelete] = useState<ExtraField | null>(null);
   const [rowToDelete, setRowToDelete] = useState<RegisterRow | null>(null);
@@ -70,7 +69,6 @@ export function AddCustomDeviceForm() {
         return;
       }
       setIsEdit(true);
-      setExistingName(existing.name);
       setBrand(existing.brand);
       setModel(existing.brandModel.replace(`${existing.brand} `, "").trim() || existing.name);
       setProtocol(existing.protocol || protocols[0]);
@@ -126,12 +124,12 @@ export function AddCustomDeviceForm() {
       return;
     }
     setError("");
-    const id = editingId && isEdit ? editingId : `dev-${Date.now()}`;
+    const id = editingId || `dev-${Date.now()}`;
 
     try {
       await upsertDevice({
         id,
-        name: isEdit && existingName ? existingName : `${modelName}`,
+        name: modelName,
         sn: serialNumber,
         category: categoryName,
         brandModel,

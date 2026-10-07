@@ -6,7 +6,6 @@ import {
   DISPOSITION_LABEL,
   INTERNET_LABEL,
   METER_TYPE_LABEL,
-  alarmName,
   gatewayErrorText,
   replayLabel,
 } from "@/lib/gateway-protocol";
@@ -272,6 +271,15 @@ export function GatewayConsole() {
   const data = state.data;
   const gatewayAlarms = data?.alarms.filter((item) => item.source === "gateway") ?? [];
   const thresholdAlarms = data?.alarms.filter((item) => item.source === "threshold") ?? [];
+  const gatewayRunning = Boolean(
+    data?.gateways.some((device) => {
+      if (!device.lastSeenAt) return false;
+      const seen = Date.parse(device.lastSeenAt);
+      if (!Number.isFinite(seen)) return false;
+      const windowMs = Math.max(device.timeUpdate * 4, 180) * 1000;
+      return Date.now() - seen <= windowMs;
+    }),
+  );
 
   return (
     <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8 font-sans">
@@ -462,21 +470,9 @@ export function GatewayConsole() {
           </section>
 
           <section className="mb-6">
-            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-              <h2 className="text-sm font-bold text-slate-900">Bản tin gateway</h2>
-              <p className="text-[11px] text-slate-400">
-                Đang hiện {data.packets.length} / {data.packetCount} bản tin. Mỗi bản giữ đủ trường và raw JSON.
-              </p>
-            </div>
-            {data.packets.length === 0 ? (
-              <Empty text="Không có bản tin trong khoảng thời gian này." />
-            ) : (
-              <div className="space-y-3">
-                {data.packets.map((packet) => (
-                  <PacketCard key={packet.id} packet={packet} />
-                ))}
-              </div>
-            )}
+            <p className={`text-sm font-semibold ${gatewayRunning ? "text-emerald-700" : "text-slate-500"}`}>
+              {gatewayRunning ? "Gateway đang hoạt động, đang chạy." : "Gateway chưa nhận dữ liệu."}
+            </p>
           </section>
 
           <section className="mb-6 grid gap-4 xl:grid-cols-2">
@@ -608,55 +604,6 @@ export function GatewayConsole() {
         onConfirm={() => void confirmDeleteThreshold()}
       />
     </div>
-  );
-}
-
-function PacketCard({ packet }: { packet: GatewayPacketView }) {
-  const rows: Array<[string, string | null]> = [
-    ["Thời điểm server nhận", formatStamp(packet.receivedAt)],
-    ["disposition", DISPOSITION_LABEL[packet.disposition] ?? packet.disposition],
-    ["protocolVersion", packet.protocolVersion],
-    ["Internet", `${packet.internet} - ${INTERNET_LABEL[packet.internet] ?? packet.internet}`],
-    ["Packetnumber", packet.packetNumber],
-    ["gatewayId", packet.gatewayId],
-    ["gatewayTemperature", packet.gatewayTemperature],
-    ["gatewayHumidity", packet.gatewayHumidity],
-    ["meterType", meterTypeText(packet.meterType)],
-    ["meterModel", packet.meterModel],
-    ["meterId", packet.meterId],
-    ["readingTime", packet.readingTime],
-    ["isReplay", replayLabel(packet.isReplay)],
-    ["Error", `${packet.error} - ${gatewayErrorText(packet.error)}`],
-    ["DateTimeAlarm", packet.dateTimeAlarm],
-    ["IDAlarm", packet.idAlarm == null ? null : `${packet.idAlarm} - ${alarmName(packet.idAlarm)}`],
-    ["ValueAlarm", packet.valueAlarm == null ? null : String(packet.valueAlarm)],
-    ["checksum", packet.checksum],
-  ];
-
-  return (
-    <article className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white">#{packet.id}</span>
-        <span className="text-xs font-semibold text-slate-700">{DISPOSITION_LABEL[packet.disposition] ?? packet.disposition}</span>
-        <InternetBadge internet={packet.internet} />
-        <span className="text-[11px] text-slate-400">{replayLabel(packet.isReplay)}</span>
-      </div>
-      <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
-        {rows.map(([label, value]) => (
-          <Field key={label} label={label} value={value} />
-        ))}
-      </dl>
-      <div className="mt-3">
-        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">values</p>
-        <ValueList values={packet.values} />
-      </div>
-      <details className="mt-3">
-        <summary className="cursor-pointer text-xs font-medium text-emerald-700">Raw JSON gateway đã bắn</summary>
-        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
-          {packet.rawText}
-        </pre>
-      </details>
-    </article>
   );
 }
 

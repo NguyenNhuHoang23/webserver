@@ -20,6 +20,7 @@ export function DeviceList() {
   const [page, setPage] = useState(1);
   const [devices, setDevices] = useState<CatalogDevice[]>([]);
   const [deviceToDelete, setDeviceToDelete] = useState<CatalogDevice | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     setDevices(loadDevices());
@@ -62,8 +63,14 @@ export function DeviceList() {
     return { total: devices.length, mapped, withImage, brandsCount };
   }, [devices]);
 
-  function removeDevice(id: string) {
-    setDevices(removeStoredDevice(id));
+  async function removeDevice(id: string) {
+    setDeleteError("");
+    try {
+      setDevices(await removeStoredDevice(id));
+      setDeviceToDelete(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Không xóa được loại đồng hồ.");
+    }
   }
 
   return (
@@ -342,15 +349,18 @@ export function DeviceList() {
       <ConfirmDialog
         open={Boolean(deviceToDelete)}
         title="Xác nhận xóa loại đồng hồ"
-        description={`Bạn có chắc chắn muốn xóa thiết bị "${deviceToDelete?.name}" (${deviceToDelete?.brandModel}) không? Hành động này không thể hoàn tác.`}
+        description={
+          deleteError ||
+          `Bạn có chắc chắn muốn xóa thiết bị "${deviceToDelete?.name}" (${deviceToDelete?.brandModel}) không? Hành động này không thể hoàn tác.`
+        }
         confirmText="Xác nhận xóa"
         onConfirm={() => {
-          if (deviceToDelete) {
-            removeDevice(deviceToDelete.id);
-            setDeviceToDelete(null);
-          }
+          if (deviceToDelete) void removeDevice(deviceToDelete.id);
         }}
-        onCancel={() => setDeviceToDelete(null)}
+        onCancel={() => {
+          setDeviceToDelete(null);
+          setDeleteError("");
+        }}
       />
     </div>
   );
