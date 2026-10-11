@@ -13,6 +13,16 @@ import {
 } from "@/lib/client-meters";
 import { loadDevices, type CatalogDevice } from "@/lib/devices";
 import { loadProjects, resolveMeterTypes } from "@/lib/projects";
+import {
+  DEFAULT_VOLTAGE_LEVEL,
+  formatTariffPrice,
+  INDUSTRIAL_SCHEDULE_DECISION,
+  INDUSTRIAL_TARIFF_DECISION,
+  INDUSTRIAL_VOLTAGE_LEVELS,
+  pricesForLevel,
+  type TouBand,
+  type VoltageLevelId,
+} from "@/lib/industrial-electricity";
 import { hydrateProjectSettings, saveProjectSettings } from "@/lib/project-settings";
 
 type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
@@ -33,12 +43,26 @@ const FALLBACK_UTILITIES = ["Điện", "Nước", "Nhiệt", "Hơi"];
 const ALERT_TAGS = ["Energy", "U/I", "Tần số", "Công suất", "Sóng hài", "Mất cân bằng pha"];
 
 type Slot = { id: string; name: string; color: string; from: string; to: string; price: string };
+type TouPriceInputs = Record<TouBand, string>;
 type SavedCostConfig = {
   utility?: string;
   applyDate?: string;
   slots?: Slot[];
   flatPrices?: Record<string, string>;
+  electricity?: {
+    voltageLevel?: VoltageLevelId;
+    prices?: Partial<TouPriceInputs>;
+  };
 };
+
+function tariffInputs(levelId: string | undefined): TouPriceInputs {
+  const prices = pricesForLevel(levelId);
+  return {
+    normal: formatTariffPrice(prices.normal),
+    off: formatTariffPrice(prices.off),
+    peak: formatTariffPrice(prices.peak),
+  };
+}
 type AccountRow = {
   id: string;
   username: string;
@@ -62,6 +86,8 @@ export function ClientConfig() {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [applyDate, setApplyDate] = useState("");
   const [flatPrices, setFlatPrices] = useState<Record<string, string>>({});
+  const [voltageLevel, setVoltageLevel] = useState<VoltageLevelId>(DEFAULT_VOLTAGE_LEVEL);
+  const [touPrices, setTouPrices] = useState<TouPriceInputs>(() => tariffInputs(DEFAULT_VOLTAGE_LEVEL));
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [adding, setAdding] = useState(false);
 
@@ -93,6 +119,11 @@ export function ClientConfig() {
         if (saved?.applyDate) setApplyDate(saved.applyDate);
         if (saved?.slots?.length) setSlots(saved.slots.map((slot) => ({ ...slot })));
         if (saved?.flatPrices) setFlatPrices({ ...saved.flatPrices });
+        if (saved?.electricity?.voltageLevel) setVoltageLevel(saved.electricity.voltageLevel);
+        setTouPrices({
+          ...tariffInputs(saved?.electricity?.voltageLevel ?? DEFAULT_VOLTAGE_LEVEL),
+          ...saved?.electricity?.prices,
+        });
         if (saved?.utility && types.includes(saved.utility)) setUtility(saved.utility);
       })
       .catch(() => setMeters(loadClientMeters(projectId)));
@@ -111,6 +142,10 @@ export function ClientConfig() {
             applyDate,
             slots,
             flatPrices,
+            electricity: {
+              voltageLevel,
+              prices: touPrices,
+            },
           },
         });
       } else {
@@ -236,8 +271,13 @@ export function ClientConfig() {
               onUtility={setUtility}
               applyDate={applyDate}
               onApplyDate={setApplyDate}
-              slots={slots}
-              onSlots={setSlots}
+              voltageLevel={voltageLevel}
+              touPrices={touPrices}
+              onVoltageLevel={(levelId) => {
+                setVoltageLevel(levelId);
+                setTouPrices(tariffInputs(levelId));
+              }}
+              onTouPrice={(band, value) => setTouPrices((current) => ({ ...current, [band]: value }))}
               flatPrice={flatPrices[utility]}
               onFlatPrice={(value) => setFlatPrices((current) => ({ ...current, [utility]: value }))}
             />
@@ -292,6 +332,11 @@ export function ClientConfig() {
                     setSlots(saved?.slots?.map((slot) => ({ ...slot })) ?? []);
                     setApplyDate(saved?.applyDate ?? "");
                     setFlatPrices(saved?.flatPrices ? { ...saved.flatPrices } : {});
+                    setVoltageLevel(saved?.electricity?.voltageLevel ?? DEFAULT_VOLTAGE_LEVEL);
+                    setTouPrices({
+                      ...tariffInputs(saved?.electricity?.voltageLevel ?? DEFAULT_VOLTAGE_LEVEL),
+                      ...saved?.electricity?.prices,
+                    });
                   });
                   setAccounts([]);
                 }}
@@ -711,8 +756,10 @@ function CostPanel({
   onUtility,
   applyDate,
   onApplyDate,
-  slots,
-  onSlots,
+  voltageLevel,
+  touPrices,
+  onVoltageLevel,
+  onTouPrice,
   flatPrice,
   onFlatPrice,
 }: {
@@ -721,17 +768,19 @@ function CostPanel({
   onUtility: (v: Utility) => void;
   applyDate: string;
   onApplyDate: (v: string) => void;
-  slots: Slot[];
-  onSlots: (rows: Slot[]) => void;
+  voltageLevel: VoltageLevelId;
+  touPrices: TouPriceInputs;
+  onVoltageLevel: (levelId: VoltageLevelId) => void;
+  onTouPrice: (band: TouBand, value: string) => void;
   flatPrice?: string;
   onFlatPrice: (value: string) => void;
 }) {
   const isElectric = utility === "Điện";
   const unitMeta: Record<string, { title: string; hint: string; unit: string; defaultPrice: string }> = {
     Điện: {
-      title: "Giá điện theo khung giờ",
-      hint: "Cấu hình đơn giá cho từng khung giờ tiêu thụ (VNĐ/kWh)",
-      unit: "VNĐ/kWh",
+      title: "Giá điện sản xuất theo khung giờ",
+      hint: `Đơn giá chưa gồm VAT theo ${INDUSTRIAL_TARIFF_DECISION}. Khung giờ theo ${INDUSTRIAL_SCHEDULE_DECISION}.`,
+      unit: "đồng/kWh",
       defaultPrice: "0",
     },
     Nước: {
@@ -775,98 +824,97 @@ function CostPanel({
       </div>
 
       {isElectric ? (
-        <div className="mt-5">
-          <p className="text-[15px] font-semibold text-slate-800">{meta.title}</p>
-          <p className="mt-1 text-[12px] text-slate-500">{meta.hint}</p>
-          <div className="mt-4 overflow-hidden rounded-md border border-slate-200">
-            <div className="grid grid-cols-[1.2fr_1.2fr_1fr_40px] bg-slate-50 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400">
-              <span>TÊN KHUNG GIỜ</span>
-              <span>KHOẢNG THỜI GIAN</span>
-              <span>ĐƠN GIÁ (VNĐ/KWH)</span>
-              <span />
-            </div>
-            {slots.map((slot) => (
-              <div
-                key={slot.id}
-                className="grid grid-cols-[1.2fr_1.2fr_1fr_40px] items-center gap-2 border-t border-slate-100 px-4 py-3"
-              >
-                <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
-                  <span className="h-8 w-1 rounded-full" style={{ backgroundColor: slot.color }} />
-                  {slot.name}
+        <div className="mt-5 space-y-5">
+          <div>
+            <p className="text-[15px] font-semibold text-slate-800">{meta.title}</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-slate-500">{meta.hint}</p>
+            <p className="mt-2 text-[12px] text-slate-500">
+              Tiền điện năng = sản lượng bình thường × đơn giá bình thường + sản lượng thấp điểm × đơn giá thấp điểm + sản lượng cao điểm × đơn giá cao điểm.
+            </p>
+          </div>
+
+          <label className="block max-w-md">
+            <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-400">
+              CẤP ĐIỆN ÁP
+            </span>
+            <select
+              value={voltageLevel}
+              onChange={(e) => onVoltageLevel(e.target.value as VoltageLevelId)}
+              className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
+            >
+              {INDUSTRIAL_VOLTAGE_LEVELS.map((level) => (
+                <option key={level.id} value={level.id}>
+                  {level.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {(
+              [
+                ["normal", "Giờ bình thường", "#27ae60"],
+                ["off", "Giờ thấp điểm", "#7ec8e3"],
+                ["peak", "Giờ cao điểm", "#e67e22"],
+              ] as const
+            ).map(([band, label, color]) => (
+              <label key={band} className="rounded-md border border-slate-200 p-3">
+                <span className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold tracking-wide text-slate-400">
+                  <span className="h-4 w-1 rounded-full" style={{ backgroundColor: color }} />
+                  {label.toUpperCase()}
                 </span>
-                <span className="flex items-center gap-2">
+                <span className="relative block">
                   <input
-                    type="time"
-                    value={slot.from}
-                    onChange={(e) =>
-                      onSlots(
-                        slots.map((item) =>
-                          item.id === slot.id ? { ...item, from: e.target.value } : item,
-                        ),
-                      )
-                    }
-                    className="h-9 w-[108px] rounded-md border border-slate-200 px-2 text-sm"
-                  />
-                  <span className="text-slate-400">–</span>
-                  <input
-                    type="time"
-                    value={slot.to}
-                    onChange={(e) =>
-                      onSlots(
-                        slots.map((item) =>
-                          item.id === slot.id ? { ...item, to: e.target.value } : item,
-                        ),
-                      )
-                    }
-                    className="h-9 w-[108px] rounded-md border border-slate-200 px-2 text-sm"
-                  />
-                </span>
-                <span className="relative">
-                  <input
-                    value={slot.price}
-                    onChange={(e) =>
-                      onSlots(
-                        slots.map((item) =>
-                          item.id === slot.id ? { ...item, price: e.target.value } : item,
-                        ),
-                      )
-                    }
-                    className="h-9 w-full rounded-md border border-slate-200 pr-12 pl-3 text-sm font-semibold"
+                    value={touPrices[band]}
+                    onChange={(e) => onTouPrice(band, e.target.value)}
+                    inputMode="decimal"
+                    className="h-10 w-full rounded-md border border-slate-200 pr-16 pl-3 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500"
                   />
                   <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[11px] text-slate-400">
-                    VNĐ
+                    đ/kWh
                   </span>
                 </span>
-                <button
-                  type="button"
-                  title="Xóa"
-                  onClick={() => onSlots(slots.filter((item) => item.id !== slot.id))}
-                  className="flex h-8 w-8 items-center justify-center text-slate-400 hover:text-red-500"
-                >
-                  <TrashIcon />
-                </button>
+              </label>
+            ))}
+          </div>
+
+          <div className="overflow-hidden rounded-md border border-slate-200">
+            <div className="grid grid-cols-4 bg-slate-50 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400">
+              <span>CẤP ĐIỆN ÁP</span>
+              <span>BÌNH THƯỜNG</span>
+              <span>THẤP ĐIỂM</span>
+              <span>CAO ĐIỂM</span>
+            </div>
+            {INDUSTRIAL_VOLTAGE_LEVELS.map((level) => (
+              <div
+                key={level.id}
+                className={`grid grid-cols-4 border-t border-slate-100 px-4 py-2.5 text-sm ${
+                  level.id === voltageLevel ? "bg-emerald-50/70 font-semibold text-slate-800" : "text-slate-600"
+                }`}
+              >
+                <span>{level.label}</span>
+                <span className="font-mono">{formatTariffPrice(level.normal)}</span>
+                <span className="font-mono">{formatTariffPrice(level.off)}</span>
+                <span className="font-mono">{formatTariffPrice(level.peak)}</span>
               </div>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() =>
-              onSlots([
-                ...slots,
-                {
-                  id: `s${Date.now()}`,
-                  name: `Khung giờ ${slots.length + 1}`,
-                  color: "#64748b",
-                  from: "00:00",
-                  to: "01:00",
-                  price: "0",
-                },
-              ])
-            }
-            className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-md border border-dashed border-slate-300 text-sm font-medium text-slate-500 hover:bg-slate-50"
-          >
-            + Thêm khung giờ
-          </button>
+          <p className="text-[12px] text-slate-400">Đơn vị: đồng/kWh, chưa gồm VAT. Đổi cấp điện áp sẽ điền lại đơn giá theo bảng trên.</p>
+
+          <div className="grid gap-2 text-[12px] text-slate-600 sm:grid-cols-3">
+            <p className="rounded-md bg-slate-50 px-3 py-2">
+              <span className="block font-semibold text-slate-700">Giờ thấp điểm</span>
+              00:00 – 06:00, tất cả các ngày trong tuần.
+            </p>
+            <p className="rounded-md bg-slate-50 px-3 py-2">
+              <span className="block font-semibold text-slate-700">Giờ bình thường</span>
+              06:00 – 17:30 và 22:30 – 24:00 từ thứ Hai đến thứ Bảy. Chủ nhật: 06:00 – 24:00.
+            </p>
+            <p className="rounded-md bg-slate-50 px-3 py-2">
+              <span className="block font-semibold text-slate-700">Giờ cao điểm</span>
+              17:30 – 22:30 từ thứ Hai đến thứ Bảy. Chủ nhật không có giờ cao điểm.
+            </p>
+          </div>
         </div>
       ) : (
         <div className="mt-5">

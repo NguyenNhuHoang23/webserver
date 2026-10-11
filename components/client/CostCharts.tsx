@@ -12,9 +12,19 @@ import {
 } from "@/components/client/TimeFilterBar";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import {
+  civilWeekday,
+  formatTariffPrice,
+  industrialBand,
+  parseTariffPrice,
+  resolveTouPrices,
+  voltageLevelById,
+  type TouPrices,
+  type VoltageLevelId,
+} from "@/lib/industrial-electricity";
 import { hydrateProjectSettings } from "@/lib/project-settings";
 import { hydrateProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
-import { vietnamFromStored } from "@/lib/vietnam-time";
+import { vietnamFromStored, type VietnamParts } from "@/lib/vietnam-time";
 
 type CostPoint = {
   id: string;
@@ -41,58 +51,32 @@ const TOU = [
   { id: "none", label: "Không", color: "#9aa3af" },
 ] as const;
 
-const FALLBACK_VND_PER_KWH = 1912;
-
 type Band = "peak" | "normal" | "off" | "none";
-type PriceSlot = { from: string; to: string; price: number; band: Band };
 type CostBar = { key: string | number; label: string; light: number; dark: number };
+type TouKwh = Record<Band, number>;
+type RateSource =
+  | { kind: "flat"; price: number }
+  | { kind: "tou"; prices: TouPrices };
 
 function formatVnd(n: number) {
   return Math.round(n).toLocaleString("vi-VN");
 }
 
-function parsePrice(value: unknown) {
-  const text = String(value ?? "").trim().replace(/\s/g, "");
-  if (!text) return 0;
-  if (/^\d{1,3}(\.\d{3})+$/.test(text)) return Number(text.replace(/\./g, ""));
-  if (/^\d{1,3}(,\d{3})+$/.test(text)) return Number(text.replace(/,/g, ""));
-  const number = Number(text.replace(/,/g, ""));
-  return Number.isFinite(number) ? number : 0;
+function formatKwh(n: number) {
+  return n.toLocaleString("vi-VN", { maximumFractionDigits: 3 });
 }
 
-function bandForName(name: string): Band {
-  const text = name.toLowerCase();
-  if (text.includes("cao")) return "peak";
-  if (text.includes("thấp") || text.includes("thap")) return "off";
-  if (text.includes("không") || text.includes("khong")) return "none";
-  return "normal";
+function emptyKwh(): TouKwh {
+  return { peak: 0, normal: 0, off: 0, none: 0 };
 }
 
-function minutesOf(value: string) {
-  const [hour, minute] = value.split(":").map(Number);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return 0;
-  return hour * 60 + minute;
+function rateAt(source: RateSource, parts: VietnamParts): { price: number; band: Band } {
+  if (source.kind === "flat") return { price: source.price, band: "normal" };
+  const band = industrialBand(civilWeekday(parts.year, parts.month, parts.day), parts.hour, parts.minute);
+  return { price: source.prices[band], band };
 }
 
-function inSlot(hour: number, minute: number, from: string, to: string) {
-  const start = minutesOf(from);
-  const end = minutesOf(to);
-  const current = hour * 60 + minute;
-  if (start === end) return true;
-  if (start < end) return current >= start && current < end;
-  return current >= start || current < end;
-}
-
-function rateFor(hour: number, minute: number, slots: PriceSlot[]) {
-  const priced = slots.filter((slot) => slot.price > 0);
-  for (const slot of priced) {
-    if (inSlot(hour, minute, slot.from, slot.to)) return slot;
-  }
-  if (priced.length) return { price: 0, band: "none" as Band };
-  return { price: FALLBACK_VND_PER_KWH, band: "normal" as Band };
-}
-
-function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample[], slots: PriceSlot[]) {
+function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample[], source: RateSource) {
   const bars: CostBar[] = getTimeFilterPeriods(filter).map((period) => ({
     key: period.key,
     label: period.label,
@@ -100,6 +84,7 @@ function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample
     dark: 0,
   }));
   const tou = { peak: 0, normal: 0, off: 0, none: 0 };
+  const kwh = emptyKwh();
   const ordered = samples
     .filter((sample) => typeof sample.values.EPaed === "number" && Number.isFinite(sample.values.EPaed))
     .slice()
@@ -112,10 +97,11 @@ function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample
     const parts = vietnamFromStored(next.at);
     const bucket = periodIndexForInstant(filter, next.at, bars.length);
     if (!parts || bucket < 0) continue;
-    const rate = rateFor(parts.hour, parts.minute, slots);
+    const rate = rateAt(source, parts);
     const cost = delta * rate.price;
     bars[bucket].dark += cost;
     tou[rate.band] += cost;
+    kwh[rate.band] += delta;
     consumed += delta;
   }
   let indexMode = false;
@@ -124,14 +110,15 @@ function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample
     const parts = vietnamFromStored(last.at);
     const bucket = periodIndexForInstant(filter, last.at, bars.length);
     if (parts && bucket >= 0) {
-      const rate = rateFor(parts.hour, parts.minute, slots);
+      const rate = rateAt(source, parts);
       const cost = (last.values.EPaed / 1000) * rate.price;
       bars[bucket].dark += cost;
       tou[rate.band] += cost;
+      kwh[rate.band] += last.values.EPaed / 1000;
       indexMode = true;
     }
   }
-  return { bars, tou, indexMode };
+  return { bars, tou, kwh, indexMode };
 }
 
 function costLabel(energy: string) {
@@ -163,8 +150,9 @@ export function CostCharts() {
   const [hover, setHover] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [samples, setSamples] = useState<ProjectGatewaySample[]>([]);
-  const [slots, setSlots] = useState<PriceSlot[]>([]);
-  const [flatPrice, setFlatPrice] = useState(0);
+  const [voltageLevel, setVoltageLevel] = useState<VoltageLevelId>("kv-under-6");
+  const [touPrices, setTouPrices] = useState<TouPrices>(() => resolveTouPrices("kv-under-6").prices);
+  const [flatPrices, setFlatPrices] = useState<Record<string, number>>({});
   const [reloadKey, setReloadKey] = useState(0);
   const monthAligned = useRef(false);
   const selectionTouched = useRef(false);
@@ -186,16 +174,20 @@ export function CostCharts() {
         if (!active) return;
         setSamples(gatewayRows);
         const saved = settings.costConfig as {
-          slots?: Array<{ name?: string; from?: string; to?: string; price?: string }>;
           flatPrices?: Record<string, string>;
+          electricity?: {
+            voltageLevel?: string;
+            prices?: Partial<Record<"normal" | "off" | "peak", string>>;
+          };
         } | undefined;
-        setSlots((saved?.slots ?? []).map((slot) => ({
-          from: slot.from ?? "00:00",
-          to: slot.to ?? "24:00",
-          price: parsePrice(slot.price),
-          band: bandForName(slot.name ?? ""),
-        })));
-        setFlatPrice(parsePrice(saved?.flatPrices?.["Điện"]));
+        const tariff = resolveTouPrices(saved?.electricity?.voltageLevel, saved?.electricity?.prices);
+        setVoltageLevel(tariff.levelId);
+        setTouPrices(tariff.prices);
+        setFlatPrices(
+          Object.fromEntries(
+            Object.entries(saved?.flatPrices ?? {}).map(([key, value]) => [key, parseTariffPrice(value)]),
+          ),
+        );
         const project = projects.find((item) => item.id === projectId);
         const types = resolveMeterTypes(project);
         setEnergyKinds(types);
@@ -271,15 +263,10 @@ export function CostCharts() {
     [pointsForEnergy, selectedIds],
   );
 
-  const pricedSlots = useMemo(() => {
-    if (slots.some((slot) => slot.price > 0)) return slots;
-    if (flatPrice > 0) {
-      return [{ from: "00:00", to: "24:00", price: flatPrice, band: "normal" as Band }];
-    }
-    return slots;
-  }, [flatPrice, slots]);
-
-  const unitPrice = pricedSlots.find((slot) => slot.price > 0)?.price ?? FALLBACK_VND_PER_KWH;
+  const rateSource = useMemo<RateSource>(() => {
+    if (energy === "Điện") return { kind: "tou", prices: touPrices };
+    return { kind: "flat", price: flatPrices[energy] ?? 0 };
+  }, [energy, flatPrices, touPrices]);
 
   const series = useMemo(
     () =>
@@ -287,11 +274,17 @@ export function CostCharts() {
         const result = costBarsForPoint(
           timeFilter,
           samples.filter((sample) => sample.meterPointId === point.id),
-          pricedSlots,
+          rateSource,
         );
-        return { point, bars: result.bars, tou: result.tou, indexMode: result.indexMode };
+        return {
+          point,
+          bars: result.bars,
+          tou: result.tou,
+          kwh: result.kwh,
+          indexMode: result.indexMode,
+        };
       }),
-    [pricedSlots, samples, selectedPoints, timeFilter],
+    [rateSource, samples, selectedPoints, timeFilter],
   );
 
   const primaryBars = series[0]?.bars ?? costSeriesForFilter(timeFilter);
@@ -322,6 +315,21 @@ export function CostCharts() {
     ),
     [series],
   );
+
+  const kwh = useMemo(
+    () => series.reduce(
+      (sum, item) => ({
+        peak: sum.peak + item.kwh.peak,
+        normal: sum.normal + item.kwh.normal,
+        off: sum.off + item.kwh.off,
+        none: sum.none + item.kwh.none,
+      }),
+      emptyKwh(),
+    ),
+    [series],
+  );
+
+  const voltageLabel = voltageLevelById(voltageLevel).label;
 
   function togglePoint(id: string) {
     selectionTouched.current = true;
@@ -585,10 +593,49 @@ export function CostCharts() {
             {energy === "Điện" ? (
               <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
                 <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
-                  TỔNG HỢP CHI PHÍ THEO KHUNG GIỜ
+                  TIỀN ĐIỆN THEO KHUNG GIỜ
                 </h2>
+                <p className="mt-1 text-center text-[11px] text-slate-400">{voltageLabel}</p>
                 <TouChart values={tou} />
-                <p className="mt-1 text-right text-[11px] text-slate-400">(VND)</p>
+                <table className="mt-2 w-full text-left text-[11px]">
+                  <thead className="text-slate-400">
+                    <tr>
+                      <th className="py-1 font-semibold">Khung giờ</th>
+                      <th className="py-1 text-right font-semibold">kWh</th>
+                      <th className="py-1 text-right font-semibold">Đơn giá</th>
+                      <th className="py-1 text-right font-semibold">Thành tiền</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-700">
+                    {(
+                      [
+                        ["normal", "Bình thường"],
+                        ["off", "Thấp điểm"],
+                        ["peak", "Cao điểm"],
+                      ] as const
+                    ).map(([band, label]) => (
+                      <tr key={band} className="border-t border-slate-100">
+                        <td className="py-1.5">{label}</td>
+                        <td className="py-1.5 text-right font-mono">{formatKwh(kwh[band])}</td>
+                        <td className="py-1.5 text-right font-mono">{formatTariffPrice(touPrices[band])}</td>
+                        <td className="py-1.5 text-right font-mono">{formatVnd(tou[band])}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-slate-200 font-semibold text-slate-800">
+                      <td className="py-1.5">Tổng</td>
+                      <td className="py-1.5 text-right font-mono">
+                        {formatKwh(kwh.normal + kwh.off + kwh.peak)}
+                      </td>
+                      <td />
+                      <td className="py-1.5 text-right font-mono">
+                        {formatVnd(tou.normal + tou.off + tou.peak)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+                  Tiền điện năng trước thuế. Chưa gồm VAT và công suất phản kháng.
+                </p>
               </article>
             ) : null}
           </div>
@@ -598,9 +645,11 @@ export function CostCharts() {
           <p className="inline-flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${grandTotal > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
             {grandTotal > 0
-              ? indexMode
-                ? `Chỉ số điện chưa tăng. Đang hiện chỉ số hiện tại × ${formatVnd(unitPrice)} VNĐ/kWh.`
-                : `Chi phí = điện năng tiêu thụ × ${formatVnd(unitPrice)} VNĐ/kWh.`
+              ? energy === "Điện"
+                ? indexMode
+                  ? "Chỉ số điện chưa tăng. Đang ước tính theo khung giờ của chỉ số hiện tại, chưa gồm VAT."
+                  : "Tiền điện = sản lượng bình thường × đơn giá bình thường + thấp điểm × đơn giá thấp điểm + cao điểm × đơn giá cao điểm. Chưa gồm VAT."
+                : `Chi phí = sản lượng × ${formatVnd(flatPrices[energy] ?? 0)} VNĐ.`
               : "Chưa có số liệu chi phí trong kỳ này"}
           </p>
         </div>
@@ -778,7 +827,7 @@ function TouChart({ values }: { values: { peak: number; normal: number; off: num
     { label: "Thường", color: TOU[1].color, value: values.normal },
     { label: "Thấp", color: TOU[2].color, value: values.off },
     { label: "Không", color: TOU[3].color, value: values.none },
-  ];
+  ].filter((item) => item.label !== "Không" || item.value > 0);
   const groupW = innerW / items.length;
   const barW = 28;
 

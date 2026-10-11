@@ -38,12 +38,36 @@ function serverError(error: unknown) {
 }
 
 let deviceColumnsReady: Promise<void> | null = null;
+let ghgColumnsReady: Promise<void> | null = null;
 
 function ensureDeviceColumns() {
   deviceColumnsReady ??= emsDb
     .execute("ALTER TABLE devices MODIFY COLUMN image MEDIUMTEXT NULL")
     .then(() => undefined);
   return deviceColumnsReady;
+}
+
+function ensureGhgColumns() {
+  ghgColumnsReady ??= emsDb
+    .execute(
+      "ALTER TABLE ghg_emission_sources ADD COLUMN IF NOT EXISTS multipliers_json JSON NULL",
+    )
+    .then(() => undefined);
+  return ghgColumnsReady;
+}
+
+function asMultipliers(value: unknown) {
+  const rows = jsonField<Row[]>(value, []);
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((row, index) => ({
+      id: asString(row.id) || `mul-${index + 1}`,
+      label: asString(row.label).trim(),
+      symbol: asString(row.symbol).trim(),
+      value: asNumber(row.value),
+      unit: asString(row.unit).trim(),
+    }))
+    .filter((row) => row.label || row.symbol);
 }
 
 function asString(value: unknown, fallback = "") {
@@ -189,11 +213,13 @@ async function getResource(resource: string, request: NextRequest) {
     }));
   }
   if (resource === "ghg-sources") {
+    await ensureGhgColumns();
     const rows = await queryRows<Row>(
       `SELECT id, project_id AS projectId, scope_id AS scope, name,
               meter_point_id AS meterPointId,
               input_method AS method, factor_group_id AS factorGroupId,
               gas_key AS gasKey, factor_value AS factorValue, formula,
+              multipliers_json AS multipliers,
               DATE_FORMAT(applied_at, '%Y-%m-%d') AS appliedAt,
               tons_co2e AS tons
          FROM ghg_emission_sources ${projectId ? "WHERE project_id = ?" : ""}
@@ -205,6 +231,7 @@ async function getResource(resource: string, request: NextRequest) {
       scope: asNumber(row.scope),
       factorId: `${row.factorGroupId}:${row.gasKey}`,
       factorValue: asNumber(row.factorValue),
+      multipliers: asMultipliers(row.multipliers),
       tons: row.tons == null ? undefined : asNumber(row.tons),
     }));
   }
@@ -464,6 +491,7 @@ async function saveResource(resource: string, body: Row) {
     return getResource(resource, new NextRequest("http://localhost/api/ems/emission-factors"));
   }
   if (resource === "ghg-sources") {
+    await ensureGhgColumns();
     const projectId = asString(body.projectId);
     const sources = Array.isArray(body.sources) ? body.sources as Row[] : [];
     if (!projectId) throw new Error("projectId is required");
@@ -472,14 +500,16 @@ async function saveResource(resource: string, body: Row) {
       for (const source of sources) {
         const factorId = asString(source.factorId);
         const [factorGroupId, gasKey] = factorId.split(":");
+        const multipliers = asMultipliers(source.multipliers);
         await connection.execute(
           `INSERT INTO ghg_emission_sources
             (id, project_id, scope_id, name, input_method, factor_group_id, gas_key,
-             factor_value, formula, applied_at, meter_point_id, tons_co2e)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             factor_value, formula, multipliers_json, applied_at, meter_point_id, tons_co2e)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [source.id, projectId, asNumber(source.scope), source.name, source.method,
             factorGroupId || "do-industry", gasKey || "co2", asNumber(source.factorValue),
-            source.formula || "", source.appliedAt, asString(source.meterPointId) || null,
+            source.formula || "", multipliers.length ? JSON.stringify(multipliers) : null,
+            source.appliedAt, asString(source.meterPointId) || null,
             source.tons == null ? null : asNumber(source.tons)],
         );
       }

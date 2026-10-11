@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  flattenFactorGroups,
   formatFactorValue,
   hydrateFactorGroups,
   loadFactorGroups,
+  parseFactorNumber,
+  type FactorGroup,
   type GasKey,
-  type LibraryFactor,
+  type GasValue,
 } from "@/lib/emission-factors";
 import {
   GHG_SCOPES,
@@ -16,6 +17,7 @@ import {
   saveGhgSources,
   type GhgEmissionSource,
   type GhgInputMethod,
+  type GhgMultiplier,
   type ScopeId,
 } from "@/lib/ghg-sources";
 import { vietnamNow } from "@/lib/vietnam-time";
@@ -42,6 +44,49 @@ const METHOD_LABEL: Record<InputMethod, string> = {
   file: "Tải file",
 };
 
+const DEFAULT_METER_FORMULA = "{Giá trị điểm đo} * {Hệ số phát thải}";
+const DEFAULT_MANUAL_FORMULA = "{Giá trị thủ công} * {Hệ số phát thải}";
+
+type MultiplierDraft = {
+  id: string;
+  label: string;
+  symbol: string;
+  value: string;
+  unit: string;
+};
+
+function plainGasLabel(gas: Pick<GasValue, "key" | "label">) {
+  const fromLabel = gas.label
+    .replaceAll("₂", "2")
+    .replaceAll("₃", "3")
+    .replaceAll("₄", "4")
+    .replace(/\s+/g, "");
+  return fromLabel || gas.key.toUpperCase();
+}
+
+function gasToken(gas: Pick<GasValue, "key" | "label">) {
+  return `[${plainGasLabel(gas)}]`;
+}
+
+function groupIdFromFactor(factorId: string) {
+  const index = factorId.indexOf(":");
+  return index === -1 ? factorId : factorId.slice(0, index);
+}
+
+function activityToken(method: InputMethod) {
+  return method === "meter" ? "{Giá trị điểm đo}" : "{Giá trị thủ công}";
+}
+
+function draftsFromMultipliers(rows: GhgMultiplier[] | undefined): MultiplierDraft[] {
+  return (rows ?? []).map((row) => ({
+    id: row.id,
+    label: row.label,
+    symbol: row.symbol,
+    value: formatFactorValue(row.value),
+    unit: row.unit,
+  }));
+}
+
 function formatFactor(value: number) {
   return value.toLocaleString("en-US", {
     minimumFractionDigits: 4,
@@ -62,7 +107,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const [activeScope, setActiveScope] = useState<ScopeId>(1);
   const [tableFilter, setTableFilter] = useState<ScopeId>(1);
   const [query, setQuery] = useState("");
-  const [factors, setFactors] = useState<LibraryFactor[]>([]);
+  const [groups, setGroups] = useState<FactorGroup[]>([]);
   const [sources, setSources] = useState<EmissionSource[]>([]);
   const [sourcesProjectId, setSourcesProjectId] = useState<string | null>(null);
   const [meters, setMeters] = useState<ClientMeter[]>([]);
@@ -76,8 +121,9 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const [name, setName] = useState("");
   const [method, setMethod] = useState<InputMethod>("meter");
   const [meterPointId, setMeterPointId] = useState("");
-  const [factorId, setFactorId] = useState("");
-  const [formula, setFormula] = useState("{Giá trị điểm đo} * {Hệ số phát thải}");
+  const [factorGroupId, setFactorGroupId] = useState("");
+  const [multipliers, setMultipliers] = useState<MultiplierDraft[]>([]);
+  const [formula, setFormula] = useState(DEFAULT_METER_FORMULA);
   const [appliedAt, setAppliedAt] = useState(() => vietnamNow().date);
   const [formError, setFormError] = useState("");
 
@@ -85,33 +131,30 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     () => meters.find((meter) => meter.id === meterPointId),
     [meters, meterPointId],
   );
-  const selectedFactor = useMemo(
-    () => factors.find((factor) => factor.id === factorId),
-    [factors, factorId],
+  const selectedGroup = useMemo(
+    () => groups.find((group) => group.id === factorGroupId),
+    [groups, factorGroupId],
   );
   const factorHistoryRows = useMemo<FactorHistoryRow[]>(() => {
-    if (!selectedFactor) return [];
-    return [
-      {
-        id: selectedFactor.id,
-        label: `${selectedFactor.name} · ${selectedFactor.gasLabel}`,
-        value: selectedFactor.value,
-        unit: selectedFactor.unit,
-        validFrom: appliedAt,
-        validTo: "Đang áp dụng",
-      },
-    ];
-  }, [appliedAt, selectedFactor]);
+    if (!selectedGroup) return [];
+    return selectedGroup.gases.map((gas) => ({
+      id: `${selectedGroup.id}:${gas.key}`,
+      label: `${selectedGroup.name} · ${plainGasLabel(gas)}`,
+      value: gas.value,
+      unit: gas.unit,
+      validFrom: appliedAt,
+      validTo: "Đang áp dụng",
+    }));
+  }, [appliedAt, selectedGroup]);
 
   function handleMethodChange(nextMethod: InputMethod) {
     setMethod(nextMethod);
-    if (nextMethod === "meter") {
-      const meter = meters.find((item) => item.id === meterPointId);
-      setName(meter?.name ?? "");
-      setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
-    } else if (nextMethod === "manual") {
-      setFormula("{Giá trị thủ công} * {Hệ số phát thải}");
-    }
+    setFormula((current) => {
+      if (current.trim() && current !== DEFAULT_METER_FORMULA && current !== DEFAULT_MANUAL_FORMULA) {
+        return current;
+      }
+      return nextMethod === "meter" ? DEFAULT_METER_FORMULA : DEFAULT_MANUAL_FORMULA;
+    });
     setFormError("");
   }
 
@@ -130,14 +173,14 @@ export function GhgConfig({ projectId }: { projectId: string }) {
           setMetersProjectId(projectId);
         }
       });
-    void Promise.all([hydrateFactorGroups(), hydrateGhgSources(projectId)]).then(([groups, sources]) => {
+    void Promise.all([hydrateFactorGroups(), hydrateGhgSources(projectId)]).then(([nextGroups, sources]) => {
       if (!active) return;
-      setFactors(flattenFactorGroups(groups));
+      setGroups(nextGroups);
       setSources(sources);
       setSourcesProjectId(projectId);
     }).catch(() => {
       if (!active) return;
-      setFactors(flattenFactorGroups(loadFactorGroups()));
+      setGroups(loadFactorGroups());
       setSources(loadGhgSources());
       setSourcesProjectId(projectId);
     });
@@ -173,8 +216,9 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setName("");
       setMethod("meter");
       setMeterPointId("");
-      setFactorId("");
-      setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
+      setFactorGroupId("");
+      setMultipliers([]);
+      setFormula(DEFAULT_METER_FORMULA);
       setAppliedAt(vietnamNow().date);
       setFormError("");
       setTableFilter((current) => {
@@ -193,30 +237,61 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     saveGhgSources(withProject, projectId);
   }
 
-  const filteredFactors = useMemo(() => {
+  const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return factors;
-    return factors.filter(
-      (item) =>
-        item.name.toLowerCase().includes(q) ||
-        item.source.toLowerCase().includes(q) ||
-        item.gasLabel.toLowerCase().includes(q) ||
-        item.unit.toLowerCase().includes(q),
+    if (!q) return groups;
+    return groups.filter(
+      (group) =>
+        group.name.toLowerCase().includes(q) ||
+        group.source.toLowerCase().includes(q) ||
+        group.gases.some(
+          (gas) =>
+            gas.label.toLowerCase().includes(q) ||
+            gas.key.toLowerCase().includes(q) ||
+            gas.unit.toLowerCase().includes(q),
+        ),
     );
-  }, [factors, query]);
+  }, [groups, query]);
 
   const visibleSources = useMemo(
     () => sources.filter((item) => item.scope === tableFilter),
     [sources, tableFilter],
   );
 
-  function applyFactor(factor: LibraryFactor) {
-    setFactorId(factor.id);
-    setFormula((current) =>
-      current.includes("{Hệ số phát thải}")
-        ? current
-        : `${current || "{Giá trị điểm đo}"} * {Hệ số phát thải}`,
+  function applyGroup(group: FactorGroup) {
+    setFactorGroupId(group.id);
+    setFormula((current) => {
+      const trimmed = current.trim();
+      if (trimmed && trimmed !== DEFAULT_METER_FORMULA && trimmed !== DEFAULT_MANUAL_FORMULA) {
+        return current;
+      }
+      const first = group.gases[0];
+      return first ? `${activityToken(method)} * ${gasToken(first)}` : activityToken(method);
+    });
+    if (formError) setFormError("");
+  }
+
+  function addMultiplier() {
+    setMultipliers((current) => [
+      ...current,
+      {
+        id: `mul-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        label: "",
+        symbol: "",
+        value: "",
+        unit: "tấn CO2e",
+      },
+    ]);
+  }
+
+  function updateMultiplier(id: string, patch: Partial<Omit<MultiplierDraft, "id">>) {
+    setMultipliers((current) =>
+      current.map((row) => (row.id === id ? { ...row, ...patch } : row)),
     );
+  }
+
+  function removeMultiplier(id: string) {
+    setMultipliers((current) => current.filter((row) => row.id !== id));
   }
 
   function closeForm() {
@@ -224,8 +299,9 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setName("");
     setMethod("meter");
     setMeterPointId("");
-    setFactorId("");
-    setFormula("{Giá trị điểm đo} * {Hệ số phát thải}");
+    setFactorGroupId("");
+    setMultipliers([]);
+    setFormula(DEFAULT_METER_FORMULA);
     setAppliedAt(vietnamNow().date);
     setFormError("");
     setFormOpen(false);
@@ -262,11 +338,24 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setFormError("Vui lòng chọn điểm đo cho nguồn phát thải.");
       return;
     }
-    if (!factorId || !selectedFactor) {
+    if (!selectedGroup || selectedGroup.gases.length === 0) {
       setFormError("Vui lòng chọn hệ số phát thải từ thư viện.");
       return;
     }
-    const parsed = selectedFactor.value;
+    const filledMultipliers = multipliers.filter(
+      (row) => row.label.trim() || row.symbol.trim() || row.value.trim(),
+    );
+    if (filledMultipliers.some((row) => !row.label.trim() || !row.symbol.trim() || !row.value.trim())) {
+      setFormError("Mỗi hệ số nhân cần đủ tên, ký hiệu và giá trị.");
+      return;
+    }
+    const symbols = filledMultipliers.map((row) => row.symbol.trim());
+    if (new Set(symbols).size !== symbols.length) {
+      setFormError("Ký hiệu hệ số nhân không được trùng nhau.");
+      return;
+    }
+    const primary =
+      selectedGroup.gases.find((gas) => gas.key === "co2") ?? selectedGroup.gases[0];
     const existing = editingId ? sources.find((item) => item.id === editingId) : undefined;
     const next: EmissionSource = {
       ...existing,
@@ -274,8 +363,15 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       scope: activeScope,
       name: trimmed,
       method,
-      factorId: factorId || existing?.factorId || factors[0]?.id || "",
-      factorValue: Number.isFinite(parsed) ? parsed : 0,
+      factorId: `${selectedGroup.id}:${primary?.key ?? "co2"}`,
+      factorValue: primary?.value ?? 0,
+      multipliers: filledMultipliers.map((row) => ({
+        id: row.id,
+        label: row.label.trim(),
+        symbol: row.symbol.trim(),
+        value: parseFactorNumber(row.value),
+        unit: row.unit.trim() || "tấn CO2e",
+      })),
       formula,
       appliedAt,
       meterPointId: method === "meter" ? meterPointId : undefined,
@@ -296,7 +392,8 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setName(source.name);
     setMethod(source.method);
     setMeterPointId(source.meterPointId ?? "");
-    setFactorId(source.factorId);
+    setFactorGroupId(groupIdFromFactor(source.factorId));
+    setMultipliers(draftsFromMultipliers(source.multipliers));
     setFormula(source.formula);
     setAppliedAt(source.appliedAt);
     setFormError("");
@@ -346,8 +443,8 @@ export function GhgConfig({ projectId }: { projectId: string }) {
             e.preventDefault();
             setDropHover(false);
             const id = e.dataTransfer.getData("text/plain");
-            const factor = factors.find((item) => item.id === id);
-            if (factor) applyFactor(factor);
+            const group = groups.find((item) => item.id === id);
+            if (group) applyGroup(group);
           }}
           className={`rounded-xl border bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors ${
             dropHover ? "border-emerald-500 ring-2 ring-emerald-500/15" : "border-slate-200"
@@ -369,26 +466,16 @@ export function GhgConfig({ projectId }: { projectId: string }) {
               handleSave();
             }}
           >
-            <Field label={method === "meter" ? "TÊN NGUỒN PHÁT THẢI (TỰ ĐỘNG)" : "TÊN NGUỒN PHÁT THẢI"}>
+            <Field label="TÊN NGUỒN PHÁT THẢI">
               <input
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
                   if (formError) setFormError("");
                 }}
-                readOnly={method === "meter"}
-                placeholder={
-                  method === "meter"
-                    ? "Tên sẽ tự lấy sau khi chọn điểm đo"
-                    : "VD: Tiêu thụ điện sản xuất - Xưởng A"
-                }
-                className={`input ${method === "meter" ? "bg-slate-50 text-slate-600" : ""}`}
+                placeholder="VD: Phát thải từ tiêu thụ dầu FO cho lò hơi"
+                className="input"
               />
-              {method === "meter" ? (
-                <p className="mt-1.5 text-xs text-slate-500">
-                  Tên nguồn và thông tin điểm đo được tự động lấy từ lựa chọn bên dưới.
-                </p>
-              ) : null}
             </Field>
 
             <fieldset>
@@ -439,10 +526,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
                   <select
                     value={meterPointId}
                     onChange={(e) => {
-                      const nextId = e.target.value;
-                      setMeterPointId(nextId);
-                      const meter = meters.find((item) => item.id === nextId);
-                      setName(meter?.name ?? "");
+                      setMeterPointId(e.target.value);
                       if (formError) setFormError("");
                     }}
                     required
@@ -491,38 +575,137 @@ export function GhgConfig({ projectId }: { projectId: string }) {
             <Field label="LỰA CHỌN HỆ SỐ PHÁT THẢI">
               <div className="relative">
                 <select
-                  value={factorId}
+                  value={factorGroupId}
                   onChange={(e) => {
                     const nextId = e.target.value;
-                    setFactorId(nextId);
+                    const group = groups.find((item) => item.id === nextId);
+                    if (group) applyGroup(group);
+                    else setFactorGroupId("");
                     if (formError) setFormError("");
                   }}
                   required
                   className="input appearance-none pr-9"
                 >
                   <option value="">Chọn hệ số từ thư viện</option>
-                  {factors.map((factor) => (
-                    <option key={factor.id} value={factor.id}>
-                      {factor.name} ({factor.gasLabel}) — {formatFactorValue(factor.value)}{" "}
-                      {factor.unit}
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
                     </option>
                   ))}
                 </select>
                 <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
               </div>
-              {selectedFactor ? (
-                <div className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+              {selectedGroup ? (
+                <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
                   <span className="text-slate-500">Giá trị tự lấy từ thư viện hệ số</span>
-                  <strong className="font-mono text-slate-800">
-                    {formatFactorValue(selectedFactor.value)} {selectedFactor.unit}
-                  </strong>
+                  <ul className="mt-1.5 space-y-1">
+                    {selectedGroup.gases.map((gas) => (
+                      <li key={gas.key} className="flex items-center justify-between gap-3">
+                        <span className="font-medium text-slate-700">{plainGasLabel(gas)}</span>
+                        <strong className="font-mono text-slate-800">
+                          {formatFactorValue(gas.value)} {gas.unit}
+                        </strong>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ) : (
                 <p className="mt-1.5 text-xs text-slate-500">
-                  Chọn hệ số phù hợp với loại nhiên liệu/năng lượng và đơn vị dữ liệu đầu vào.
+                  Mỗi hệ số dùng chung cho nhiều dự án. Mặc định gồm các khí CO2, N2O và CH4.
                 </p>
               )}
             </Field>
+
+            {selectedGroup ? (
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-semibold tracking-wide text-slate-500">
+                    HỆ SỐ NHÂN
+                  </span>
+                  <button
+                    type="button"
+                    onClick={addMultiplier}
+                    className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                  >
+                    <span aria-hidden>+</span>
+                    Thêm hệ số nhân
+                  </button>
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[560px] text-left text-xs">
+                    <thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2">Hệ số</th>
+                        <th className="px-3 py-2">Ký hiệu</th>
+                        <th className="px-3 py-2">Giá trị</th>
+                        <th className="px-3 py-2">Đơn vị</th>
+                        <th className="w-10 px-2 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {multipliers.map((row) => (
+                        <tr key={row.id} className="border-b border-slate-50 last:border-0">
+                          <td className="px-2 py-2">
+                            <input
+                              value={row.label}
+                              onChange={(e) => updateMultiplier(row.id, { label: e.target.value })}
+                              placeholder="Hệ số quy đổi CO2"
+                              className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input
+                              value={row.symbol}
+                              onChange={(e) =>
+                                updateMultiplier(row.id, {
+                                  symbol: e.target.value.replace(/[{}[\]]/g, ""),
+                                })
+                              }
+                              placeholder="kCO2"
+                              className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input
+                              value={row.value}
+                              onChange={(e) => updateMultiplier(row.id, { value: e.target.value })}
+                              inputMode="decimal"
+                              placeholder="2"
+                              className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input
+                              value={row.unit}
+                              onChange={(e) => updateMultiplier(row.id, { unit: e.target.value })}
+                              placeholder="tấn CO2e"
+                              className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <button
+                              type="button"
+                              onClick={() => removeMultiplier(row.id)}
+                              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
+                              aria-label={`Xóa ${row.label || "hệ số nhân"}`}
+                            >
+                              <TrashIcon className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {multipliers.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-4 text-center text-xs text-slate-400">
+                            Thêm hệ số nhân, ví dụ hệ số quy đổi CO2. Ký hiệu sẽ hiện dưới công thức để chèn vào.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
 
             <Field label="NHẬP CÔNG THỨC TÍNH (KG CO₂E)">
               <div className="overflow-hidden rounded-xl border border-slate-200 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/15 transition-all">
@@ -531,25 +714,38 @@ export function GhgConfig({ projectId }: { projectId: string }) {
                   value={formula}
                   onChange={(e) => setFormula(e.target.value)}
                   rows={4}
-                  placeholder={`${method === "meter" ? "{Giá trị điểm đo}" : "{Giá trị thủ công}"} * {Hệ số phát thải}`}
+                  placeholder={`${activityToken(method)} * [CO2] * {kCO2}`}
                   className="w-full resize-none bg-white px-3 pt-3 pb-2 font-mono text-sm text-slate-800 outline-none placeholder:text-slate-400"
                 />
-                <div className="flex justify-end gap-2 px-3 pb-3">
+                <div className="flex flex-wrap justify-end gap-2 px-3 pb-3">
+                  {(selectedGroup?.gases ?? []).map((gas) => (
+                    <button
+                      key={gas.key}
+                      type="button"
+                      onClick={() => insertToken(gasToken(gas))}
+                      className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
+                    >
+                      {gasToken(gas)}
+                    </button>
+                  ))}
+                  {multipliers
+                    .filter((row) => row.symbol.trim())
+                    .map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => insertToken(`{${row.symbol.trim()}}`)}
+                        className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
+                      >
+                        [{row.symbol.trim()}]
+                      </button>
+                    ))}
                   <button
                     type="button"
-                    onClick={() =>
-                      insertToken(method === "meter" ? "{Giá trị điểm đo}" : "{Giá trị thủ công}")
-                    }
+                    onClick={() => insertToken(activityToken(method))}
                     className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
                   >
                     {method === "meter" ? "[Điểm đo]" : "[Giá trị thủ công]"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => insertToken("{Hệ số phát thải}")}
-                    className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
-                  >
-                    [Hệ số]
                   </button>
                 </div>
               </div>
@@ -657,18 +853,18 @@ export function GhgConfig({ projectId }: { projectId: string }) {
           </label>
 
           <ul className="max-h-[min(640px,70vh)] space-y-2 overflow-y-auto pr-1">
-            {filteredFactors.map((factor) => {
-              const Icon = factorIcons[factor.gasKey as GasKey] ?? BoltIcon;
+            {filteredGroups.map((group) => {
+              const Icon = factorIcons[group.gases[0]?.key as GasKey] ?? BoltIcon;
               return (
-                <li key={factor.id}>
+                <li key={group.id}>
                   <button
                     type="button"
                     draggable
                     onDragStart={(e) => {
-                      e.dataTransfer.setData("text/plain", factor.id);
+                      e.dataTransfer.setData("text/plain", group.id);
                       e.dataTransfer.effectAllowed = "copy";
                     }}
-                    onClick={() => applyFactor(factor)}
+                    onClick={() => applyGroup(group)}
                     className="flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-3 text-left hover:border-emerald-200 hover:bg-emerald-50/30 transition-colors"
                   >
                     <GripIcon className="h-3.5 w-3.5 shrink-0 text-slate-300" />
@@ -677,17 +873,17 @@ export function GhgConfig({ projectId }: { projectId: string }) {
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium text-slate-800">
-                        {factor.name}
+                        {group.name}
                       </span>
                       <span className="block truncate text-xs text-slate-400">
-                        {factor.gasLabel}: {formatFactorValue(factor.value)} {factor.unit}
+                        {group.gases.map((gas) => plainGasLabel(gas)).join(", ") || "Chưa có khí"}
                       </span>
                     </span>
                   </button>
                 </li>
               );
             })}
-            {filteredFactors.length === 0 && (
+            {filteredGroups.length === 0 && (
               <li className="py-6 text-center text-sm text-slate-400">Không tìm thấy hệ số</li>
             )}
           </ul>
@@ -734,6 +930,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
             <tbody>
               {visibleSources.map((source) => {
                 const MethodIcon = methodIcons[source.method];
+                const sourceGroup = groups.find((group) => group.id === groupIdFromFactor(source.factorId));
                 return (
                   <tr
                     key={source.id}
@@ -753,8 +950,12 @@ export function GhgConfig({ projectId }: { projectId: string }) {
                         {METHOD_LABEL[source.method]}
                       </span>
                     </td>
-                    <td className="px-5 py-3.5 font-mono font-semibold text-slate-800">
-                      {formatFactor(source.factorValue)}
+                    <td className="px-5 py-3.5 font-mono text-xs font-semibold text-slate-800">
+                      {sourceGroup
+                        ? sourceGroup.gases
+                            .map((gas) => `${plainGasLabel(gas)} ${formatFactorValue(gas.value)}`)
+                            .join(" · ")
+                        : formatFactor(source.factorValue)}
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex justify-end gap-1">

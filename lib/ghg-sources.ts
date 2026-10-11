@@ -3,6 +3,15 @@ import { dbFetch, emitDbChange } from "@/lib/db-client";
 export type ScopeId = 1 | 2 | 3;
 export type GhgInputMethod = "meter" | "manual" | "file";
 
+/** Hệ số nhân gắn với một nguồn, ví dụ hệ số quy đổi CO₂ (kCO2). */
+export type GhgMultiplier = {
+  id: string;
+  label: string;
+  symbol: string;
+  value: number;
+  unit: string;
+};
+
 export type GhgEmissionSource = {
   id: string;
   projectId?: string;
@@ -15,6 +24,8 @@ export type GhgEmissionSource = {
   appliedAt: string;
   /** Điểm đo được chọn làm dữ liệu hoạt động cho nguồn phát thải */
   meterPointId?: string;
+  /** Hệ số nhân riêng của nguồn, ký hiệu được chèn vào công thức */
+  multipliers?: GhgMultiplier[];
   /** tấn CO₂e đã lưu — dùng trang tổng quan */
   tons?: number;
 };

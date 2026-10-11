@@ -181,6 +181,9 @@ CREATE TABLE IF NOT EXISTS ghg_emission_sources (
 ALTER TABLE ghg_emission_sources
   ADD COLUMN IF NOT EXISTS meter_point_id VARCHAR(64) NULL AFTER applied_at;
 
+ALTER TABLE ghg_emission_sources
+  ADD COLUMN IF NOT EXISTS multipliers_json JSON NULL AFTER formula;
+
 CREATE TABLE IF NOT EXISTS alert_recipients (
   id VARCHAR(64) NOT NULL,
   project_id VARCHAR(64) NOT NULL,
