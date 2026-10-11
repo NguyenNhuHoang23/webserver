@@ -12,7 +12,7 @@ import {
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
-import { loadProjectGatewayDailyRange, loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import { loadProjectGatewayEnergySlots, type GatewayEnergySlot } from "@/lib/gateway-series";
 import {
   civilWeekday,
   formatTariffPrice,
@@ -77,7 +77,12 @@ function rateAt(source: RateSource, parts: VietnamParts): { price: number; band:
   return { price: source.prices[band], band };
 }
 
-function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample[], source: RateSource) {
+function slotStoredAt(day: string, hour: number, minute: number) {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, date, hour, minute) - 7 * 60 * 60 * 1000).toISOString().slice(0, 19);
+}
+
+function costBarsFromSlots(filter: TimeFilterValue, slots: GatewayEnergySlot[], source: RateSource) {
   const bars: CostBar[] = getTimeFilterPeriods(filter).map((period) => ({
     key: period.key,
     label: period.label,
@@ -86,40 +91,20 @@ function costBarsForPoint(filter: TimeFilterValue, samples: ProjectGatewaySample
   }));
   const tou = { peak: 0, normal: 0, off: 0, none: 0 };
   const kwh = emptyKwh();
-  const ordered = samples
-    .filter((sample) => typeof sample.values.EPaed === "number" && Number.isFinite(sample.values.EPaed))
-    .slice()
-    .sort((left, right) => left.at.localeCompare(right.at));
-  let consumed = 0;
-  for (let index = 1; index < ordered.length; index += 1) {
-    const next = ordered[index];
-    const delta = Math.max(0, (next.values.EPaed - ordered[index - 1].values.EPaed) / 1000);
-    if (delta <= 0) continue;
-    const parts = vietnamFromStored(next.at);
-    const bucket = periodIndexForInstant(filter, next.at, bars.length);
+  for (const slot of slots) {
+    const deltaKwh = Math.max(0, (slot.lastWh - slot.firstWh) / 1000);
+    if (deltaKwh <= 0) continue;
+    const at = slotStoredAt(slot.day, slot.hour, slot.minute);
+    const parts = vietnamFromStored(at);
+    const bucket = periodIndexForInstant(filter, at, bars.length);
     if (!parts || bucket < 0) continue;
     const rate = rateAt(source, parts);
-    const cost = delta * rate.price;
+    const cost = deltaKwh * rate.price;
     bars[bucket].dark += cost;
     tou[rate.band] += cost;
-    kwh[rate.band] += delta;
-    consumed += delta;
+    kwh[rate.band] += deltaKwh;
   }
-  let indexMode = false;
-  if (consumed === 0 && ordered.length) {
-    const last = ordered[ordered.length - 1];
-    const parts = vietnamFromStored(last.at);
-    const bucket = periodIndexForInstant(filter, last.at, bars.length);
-    if (parts && bucket >= 0) {
-      const rate = rateAt(source, parts);
-      const cost = (last.values.EPaed / 1000) * rate.price;
-      bars[bucket].dark += cost;
-      tou[rate.band] += cost;
-      kwh[rate.band] += last.values.EPaed / 1000;
-      indexMode = true;
-    }
-  }
-  return { bars, tou, kwh, indexMode };
+  return { bars, tou, kwh };
 }
 
 function costLabel(energy: string) {
@@ -150,7 +135,7 @@ export function CostCharts() {
   const [showSum, setShowSum] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [query, setQuery] = useState("");
-  const [samples, setSamples] = useState<ProjectGatewaySample[]>([]);
+  const [slots, setSlots] = useState<GatewayEnergySlot[]>([]);
   const [voltageLevel, setVoltageLevel] = useState<VoltageLevelId>("kv-under-6");
   const [touPrices, setTouPrices] = useState<TouPrices>(() => resolveTouPrices("kv-under-6").prices);
   const [flatPrices, setFlatPrices] = useState<Record<string, number>>({});
@@ -220,20 +205,41 @@ export function CostCharts() {
   useEffect(() => {
     const span = timeFilterSpan(timeFilter);
     let active = true;
-    void Promise.all([
-      loadProjectGatewaySamples(projectId, {
-        from: span.from,
-        to: span.to,
-        limit: span.hourly ? 6000 : 8000,
-      }),
-      loadProjectGatewayDailyRange(projectId, span.from, span.to),
-    ]).then(([rows, summary]) => {
+    void loadProjectGatewayEnergySlots(projectId, span.from, span.to).then((summary) => {
       if (!active) return;
-      setSamples(rows);
-      if (filterTouched.current || monthAligned.current || !summary.latest) return;
+      setSlots(summary.slots);
+      if (filterTouched.current) return;
+      const days = [...new Set(summary.slots.map((slot) => slot.day))].sort();
+      if (days.length > 0) {
+        if (monthAligned.current) return;
+        monthAligned.current = true;
+        const first = days[0];
+        const last = days[days.length - 1];
+        setTimeFilter((current) =>
+          current.mode === "custom_date" &&
+          current.customDateMode === "range" &&
+          current.startDate === first &&
+          current.endDate === last
+            ? current
+            : {
+                ...current,
+                mode: "custom_date",
+                customDateMode: "range",
+                startDate: first,
+                endDate: last,
+                date: last,
+                month: last.slice(0, 7),
+                year: Number(last.slice(0, 4)),
+              },
+        );
+        return;
+      }
+      if (monthAligned.current || !summary.latest) return;
       const parts = vietnamFromStored(summary.latest.at);
-      monthAligned.current = true;
-      if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) return;
+      if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) {
+        monthAligned.current = true;
+        return;
+      }
       setTimeFilter((current) => ({ ...current, mode: "month", month: parts.monthKey, year: parts.year }));
     });
     return () => {
@@ -260,7 +266,7 @@ export function CostCharts() {
     setSelectedIds((current) => {
       const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
       if (selectionTouched.current) return kept;
-      const linked = pointsForEnergy.filter((point) => samples.some((sample) => sample.meterPointId === point.id));
+      const linked = pointsForEnergy.filter((point) => slots.some((slot) => slot.meterPointId === point.id));
       if (linked.length > 0 && !kept.some((id) => linked.some((point) => point.id === id))) {
         return linked.slice(0, 1).map((point) => point.id);
       }
@@ -268,7 +274,7 @@ export function CostCharts() {
       const source = linked.length > 0 ? linked : pointsForEnergy;
       return source.slice(0, 1).map((point) => point.id);
     });
-  }, [pointsForEnergy, samples]);
+  }, [pointsForEnergy, slots]);
 
   const selectedPoints = useMemo(
     () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
@@ -283,9 +289,9 @@ export function CostCharts() {
   const series = useMemo(
     () =>
       selectedPoints.map((point) => {
-        const result = costBarsForPoint(
+        const result = costBarsFromSlots(
           timeFilter,
-          samples.filter((sample) => sample.meterPointId === point.id),
+          slots.filter((slot) => slot.meterPointId === point.id),
           rateSource,
         );
         return {
@@ -293,10 +299,9 @@ export function CostCharts() {
           bars: result.bars,
           tou: result.tou,
           kwh: result.kwh,
-          indexMode: result.indexMode,
         };
       }),
-    [rateSource, samples, selectedPoints, timeFilter],
+    [rateSource, slots, selectedPoints, timeFilter],
   );
 
   const primaryBars = series[0]?.bars ?? costSeriesForFilter(timeFilter);
@@ -304,8 +309,6 @@ export function CostCharts() {
     (sum, item) => sum + item.bars.reduce((s, b) => s + b.dark, 0),
     0,
   );
-  const indexMode = series.length > 0 && series.every((item) => item.indexMode || item.bars.every((bar) => bar.dark === 0));
-
   const pointTotals = useMemo(
     () =>
       series.map((item) => ({
@@ -664,11 +667,11 @@ export function CostCharts() {
             <span className={`h-2.5 w-2.5 rounded-full ${grandTotal > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
             {grandTotal > 0
               ? energy === "Điện"
-                ? indexMode
-                  ? "Chỉ số điện chưa tăng. Đang ước tính theo khung giờ của chỉ số hiện tại, chưa gồm VAT."
-                  : "Tiền điện = sản lượng bình thường × đơn giá bình thường + thấp điểm × đơn giá thấp điểm + cao điểm × đơn giá cao điểm. Chưa gồm VAT."
+                ? "Tiền điện = sản lượng bình thường × đơn giá bình thường + thấp điểm × đơn giá thấp điểm + cao điểm × đơn giá cao điểm. Chưa gồm VAT."
                 : `Chi phí = sản lượng × ${formatVnd(flatPrices[energy] ?? 0)} VNĐ.`
-              : "Chưa có số liệu chi phí trong kỳ này"}
+              : slots.length > 0 && energy === "Điện"
+                ? "Đã lấy mọi ngày có số liệu trong kỳ. Chỉ số điện không tăng nên sản lượng từng khung giờ là 0 kWh, tiền điện theo công thức là 0. Chưa gồm VAT."
+                : "Chưa có số liệu chi phí trong kỳ này"}
           </p>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import {
   getProjectGatewayDailyEnergy,
   getProjectGatewayDailyRange,
+  getProjectGatewayEnergySlots,
   getProjectGatewaySeries,
 } from "@/lib/gateway-store";
 
@@ -29,6 +30,10 @@ export async function GET(request: NextRequest) {
     if (civilDate.test(from) && civilDate.test(to) && summary === "day") {
       const days = await getProjectGatewayDailyRange(projectId, from, to);
       return Response.json(days);
+    }
+    if (civilDate.test(from) && civilDate.test(to) && summary === "slot") {
+      const slots = await getProjectGatewayEnergySlots(projectId, from, to);
+      return Response.json(slots);
     }
     const samples = await getProjectGatewaySeries(projectId, {
       from: civilDate.test(from) ? from : undefined,

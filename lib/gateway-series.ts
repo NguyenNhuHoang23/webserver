@@ -69,6 +69,40 @@ export async function loadProjectGatewayDailyRange(
   }
 }
 
+export type GatewayEnergySlot = {
+  meterPointId: string;
+  day: string;
+  hour: number;
+  minute: number;
+  firstWh: number;
+  lastWh: number;
+};
+
+export type GatewayEnergySlotSummary = {
+  slots: GatewayEnergySlot[];
+  latest: ProjectGatewaySample | null;
+};
+
+export async function loadProjectGatewayEnergySlots(
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<GatewayEnergySlotSummary> {
+  const empty = { slots: [], latest: null };
+  try {
+    const params = new URLSearchParams({ projectId, from, to, summary: "slot" });
+    const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
+    if (!response.ok) return empty;
+    const body = (await response.json()) as Partial<GatewayEnergySlotSummary>;
+    return {
+      slots: Array.isArray(body.slots) ? body.slots : [],
+      latest: body.latest ?? null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
 export async function loadProjectGatewaySamples(
   projectId: string,
   range?: { from?: string; to?: string; limit?: number },

@@ -1198,6 +1198,134 @@ export async function getProjectGatewayDailyRange(
   return queryProjectGatewayDaily(projectId, bounds);
 }
 
+export type GatewayEnergySlot = {
+  meterPointId: string;
+  day: string;
+  hour: number;
+  minute: number;
+  firstWh: number;
+  lastWh: number;
+};
+
+export type GatewayEnergySlotSummary = {
+  slots: GatewayEnergySlot[];
+  latest: ProjectGatewaySample | null;
+};
+
+export async function getProjectGatewayEnergySlots(
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<GatewayEnergySlotSummary> {
+  const empty = { slots: [], latest: null };
+  const bounds = vietnamRangeBounds(from, to);
+  const id = projectId.trim();
+  if (!id || !bounds) return empty;
+  await ensureGatewaySchema();
+
+  let points: Array<{
+    id: string;
+    serialNumber: string | null;
+    category: string | null;
+    deviceSerial: string | null;
+  }> = [];
+  try {
+    points = await queryRows(
+      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
+         FROM meter_points mp
+         LEFT JOIN devices d ON d.id = mp.device_id
+        WHERE mp.project_id = ?`,
+      [id],
+    );
+  } catch (error) {
+    console.error("Project gateway match failed", error);
+    return empty;
+  }
+
+  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
+  for (const point of points) {
+    const model = modelCodeForCategory(point.category ?? "");
+    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
+    if (model == null || !meterId) continue;
+    const key = `${model}:${meterId}`;
+    const existing = pairs.get(key);
+    if (existing) existing.pointIds.push(String(point.id));
+    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
+  }
+
+  const slots: GatewayEnergySlot[] = [];
+  let latest: ProjectGatewaySample | null = null;
+  for (const pair of pairs.values()) {
+    const [rows, latestRows] = await Promise.all([
+      queryRows<RowDataPacket>(
+        `SELECT slot_vn,
+                MAX(CASE WHEN rn_asc = 1 THEN epaed END) AS first_wh,
+                MAX(CASE WHEN rn_desc = 1 THEN epaed END) AS last_wh
+           FROM (
+             SELECT slot_vn,
+                    epaed,
+                    ROW_NUMBER() OVER (PARTITION BY slot_vn ORDER BY received_at ASC, id ASC) AS rn_asc,
+                    ROW_NUMBER() OVER (PARTITION BY slot_vn ORDER BY received_at DESC, id DESC) AS rn_desc
+               FROM (
+                 SELECT DATE_FORMAT(
+                          DATE_SUB(
+                            DATE_ADD(received_at, INTERVAL 7 HOUR),
+                            INTERVAL MOD(MINUTE(DATE_ADD(received_at, INTERVAL 7 HOUR)), 30) MINUTE
+                          ),
+                          '%Y-%m-%d %H:%i'
+                        ) AS slot_vn,
+                        CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed,
+                        received_at,
+                        id
+                   FROM gateway_samples
+                  WHERE meter_model = ? AND meter_id = ?
+                    AND received_at >= ? AND received_at < ?
+                    AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
+               ) stamped
+           ) ranked
+          WHERE rn_asc = 1 OR rn_desc = 1
+          GROUP BY slot_vn
+          ORDER BY slot_vn`,
+        [pair.model, pair.meterId, bounds.start, bounds.end],
+      ),
+      queryRows<RowDataPacket>(
+        `SELECT received_at, values_json
+           FROM gateway_samples
+          WHERE meter_model = ? AND meter_id = ?
+          ORDER BY received_at DESC, id DESC
+          LIMIT 1`,
+        [pair.model, pair.meterId],
+      ),
+    ]);
+    for (const row of rows) {
+      const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})$/.exec(String(row.slot_vn ?? ""));
+      const firstWh = Number(row.first_wh);
+      const lastWh = Number(row.last_wh);
+      if (!match || !Number.isFinite(firstWh) || !Number.isFinite(lastWh)) continue;
+      for (const meterPointId of pair.pointIds) {
+        slots.push({
+          meterPointId,
+          day: match[1],
+          hour: Number(match[2]),
+          minute: Number(match[3]),
+          firstWh,
+          lastWh,
+        });
+      }
+    }
+    const latestRow = latestRows[0];
+    if (latestRow) {
+      const sample = {
+        meterPointId: pair.pointIds[0] ?? "",
+        at: receivedAtText(latestRow.received_at),
+        values: numericValues(latestRow.values_json),
+      };
+      if (!latest || sample.at > latest.at) latest = sample;
+    }
+  }
+  return { slots, latest };
+}
+
 async function meterIsRegistered(packet: NormalizedPacket) {
   const serial = packet.meterId.trim();
   const category = packet.meterModel.trim();
