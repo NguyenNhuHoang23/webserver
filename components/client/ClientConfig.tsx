@@ -170,7 +170,7 @@ export function ClientConfig() {
       title: "Cụm điểm đo",
       hint: `Cấu hình phân cấp cây cha–con của các điểm đo trên Sơ đồ · Dự án ${projectId}`,
     },
-    cost: { title: "Cấu hình chi phí", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
+    cost: { title: "Cấu hình chi phí123", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
     alerts: { title: "Cấu hình cảnh báo", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
     accounts: { title: "Quản lý tài khoản", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
   }[tab];
