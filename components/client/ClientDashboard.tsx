@@ -6,7 +6,11 @@ import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
 import { hydrateGhgSources } from "@/lib/ghg-sources";
 import { hydrateMeterReadings } from "@/lib/meter-readings";
 import { hydrateDevices } from "@/lib/devices";
-import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import {
+  loadProjectGatewayDaily,
+  type GatewayDailyPoint,
+  type ProjectGatewaySample,
+} from "@/lib/gateway-series";
 import { formatStoredVietnam, vietnamFromStored } from "@/lib/vietnam-time";
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -23,10 +27,6 @@ const EMPTY_STATUS: StatusSlice[] = [
   { label: "NGOẠI TUYẾN", value: 0, color: "#9aa3af" },
 ];
 
-function sampleStamp(at: string) {
-  return vietnamFromStored(at)?.stamp ?? null;
-}
-
 function formatKwh(value: number) {
   if (!Number.isFinite(value)) return "0.0";
   const digits = Math.abs(value) > 0 && Math.abs(value) < 10 ? 3 : 1;
@@ -38,43 +38,29 @@ function formatReading(value: number, digits: number) {
   return value.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
-function dailyEnergy(samples: ProjectGatewaySample[], year: number, month: number): EnergyPoint[] {
-  const prefix = `${year}-${String(month).padStart(2, "0")}`;
-  const byPointDay = new Map<string, number[]>();
-  for (const sample of samples) {
-    const stamp = sampleStamp(sample.at);
-    if (!stamp?.startsWith(prefix)) continue;
-    const wh = sample.values.EPaed;
-    if (typeof wh !== "number" || !Number.isFinite(wh)) continue;
-    const key = `${sample.meterPointId}|${stamp.slice(5, 10)}`;
-    const list = byPointDay.get(key) ?? [];
-    list.push(wh);
-    byPointDay.set(key, list);
-  }
+function dailyEnergy(rows: GatewayDailyPoint[]): EnergyPoint[] {
   const byDay = new Map<string, { kwh: number; indexKwh: number }>();
-  for (const [key, list] of byPointDay) {
-    const day = key.split("|")[1] ?? "";
-    const consumed = list.length > 1 ? Math.max(0, (list[list.length - 1] - list[0]) / 1000) : 0;
-    const indexKwh = list[list.length - 1] / 1000;
-    const current = byDay.get(day) ?? { kwh: 0, indexKwh: 0 };
-    byDay.set(day, { kwh: current.kwh + consumed, indexKwh: current.indexKwh + indexKwh });
+  for (const row of rows) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day)) continue;
+    const firstWh = Number(row.firstWh);
+    const lastWh = Number(row.lastWh);
+    if (!Number.isFinite(firstWh) || !Number.isFinite(lastWh)) continue;
+    const consumed = Math.max(0, (lastWh - firstWh) / 1000);
+    const indexKwh = lastWh / 1000;
+    const current = byDay.get(row.day) ?? { kwh: 0, indexKwh: 0 };
+    byDay.set(row.day, { kwh: current.kwh + consumed, indexKwh: current.indexKwh + indexKwh });
   }
   return [...byDay.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([day, point]) => ({ day, kwh: point.kwh, indexKwh: point.indexKwh }));
-}
-
-function latestSample(samples: ProjectGatewaySample[], year: number, month: number) {
-  const prefix = `${year}-${String(month).padStart(2, "0")}`;
-  const inMonth = samples.filter((sample) => sampleStamp(sample.at)?.startsWith(prefix));
-  return inMonth.length ? inMonth[inMonth.length - 1] : null;
+    .map(([day, point]) => ({ day: day.slice(5), kwh: point.kwh, indexKwh: point.indexKwh }));
 }
 
 export function ClientDashboard({ project }: { project: Project }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
-  const [samples, setSamples] = useState<ProjectGatewaySample[]>([]);
+  const [dailyRows, setDailyRows] = useState<GatewayDailyPoint[]>([]);
+  const [latest, setLatest] = useState<ProjectGatewaySample | null>(null);
   const [energy, setEnergy] = useState<EnergyPoint[]>([]);
   const [deviceStatus, setDeviceStatus] = useState(EMPTY_STATUS);
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
@@ -89,10 +75,8 @@ export function ClientDashboard({ project }: { project: Project }) {
         hydrateAlertEvents(project.id),
         hydrateDevices(),
         hydrateGhgSources(project.id),
-        loadProjectGatewaySamples(project.id),
-      ]).then(([readings, alertEvents, devices, sources, gatewaySamples]) => {
+      ]).then(([readings, alertEvents, devices, sources]) => {
         if (!active) return;
-        setSamples(gatewaySamples);
         const energyRows = readings.filter((row) => row.metric === "energy");
         setEnergy(energyRows.map((row) => ({
           day: row.recordedAt.slice(5, 10),
@@ -128,15 +112,29 @@ export function ClientDashboard({ project }: { project: Project }) {
   }, [project.id]);
 
   useEffect(() => {
-    if (alignedMonth.current || !samples.length) return;
-    const stamp = sampleStamp(samples[samples.length - 1].at);
+    let active = true;
+    void loadProjectGatewayDaily(project.id, year, month).then((summary) => {
+      if (!active) return;
+      setDailyRows(summary.days);
+      setLatest(summary.latest);
+    });
+    return () => {
+      active = false;
+    };
+  }, [project.id, year, month]);
+
+  useEffect(() => {
+    if (alignedMonth.current || !latest) return;
+    const stamp = vietnamFromStored(latest.at);
     if (!stamp) return;
     alignedMonth.current = true;
-    setYear(Number(stamp.slice(0, 4)));
-    setMonth(Number(stamp.slice(5, 7)));
-  }, [samples]);
+    if (stamp.year !== year || stamp.month !== month) {
+      setYear(stamp.year);
+      setMonth(stamp.month);
+    }
+  }, [latest, year, month]);
 
-  const gatewayEnergy = useMemo(() => dailyEnergy(samples, year, month), [samples, year, month]);
+  const gatewayEnergy = useMemo(() => dailyEnergy(dailyRows), [dailyRows]);
   const consumptionTotal = gatewayEnergy.length
     ? gatewayEnergy.reduce((sum, item) => sum + item.kwh, 0)
     : energy.reduce((sum, item) => sum + item.kwh, 0);
@@ -144,7 +142,6 @@ export function ClientDashboard({ project }: { project: Project }) {
   const energySeries = gatewayEnergy.length
     ? gatewayEnergy.map((item) => ({ day: item.day, kwh: showIndex ? item.indexKwh : item.kwh }))
     : energy;
-  const latest = useMemo(() => latestSample(samples, year, month), [samples, year, month]);
   const energyMax = Math.max(...energySeries.map((item) => item.kwh), 0);
   const energyMin = energySeries.length ? Math.min(...energySeries.map((item) => item.kwh)) : 0;
 
@@ -380,9 +377,9 @@ function EnergyChart({ data }: { data: { day: string; kwh: number }[] }) {
   const max = Math.max(...data.map((item) => item.kwh), 0.001);
 
   return (
-    <div className="flex h-[250px] items-end justify-center gap-1.5 pb-1">
+    <div className="flex h-[250px] items-end gap-1.5 overflow-x-auto pb-1">
       {data.map((item) => (
-        <div key={item.day} className="flex min-w-0 max-w-8 flex-1 flex-col items-center">
+        <div key={item.day} className="flex min-w-8 flex-1 flex-col items-center">
           <div className="flex h-[220px] w-full items-end">
             <div
               className="mx-auto w-[78%] rounded-t-md bg-emerald-600 transition-all hover:bg-emerald-500"

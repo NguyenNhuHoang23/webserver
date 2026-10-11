@@ -975,7 +975,10 @@ function isDuplicate(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ER_DUP_ENTRY";
 }
 
-export async function getProjectGatewaySeries(projectId: string): Promise<ProjectGatewaySample[]> {
+export async function getProjectGatewaySeries(
+  projectId: string,
+  options?: { from?: string; to?: string; limit?: number },
+): Promise<ProjectGatewaySample[]> {
   const id = projectId.trim();
   if (!id) return [];
   await ensureGatewaySchema();
@@ -1010,15 +1013,18 @@ export async function getProjectGatewaySeries(projectId: string): Promise<Projec
     else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
   }
 
+  const bounds = options?.from && options?.to ? vietnamRangeBounds(options.from, options.to) : null;
+  const limit = Math.min(8000, Math.max(1, Math.floor(options?.limit ?? (bounds ? 2000 : 800))));
   const samples: ProjectGatewaySample[] = [];
   for (const pair of pairs.values()) {
     const rows = await queryRows<RowDataPacket>(
       `SELECT received_at, values_json
          FROM gateway_samples
         WHERE meter_model = ? AND meter_id = ?
+          ${bounds ? "AND received_at >= ? AND received_at < ?" : ""}
         ORDER BY received_at DESC
-        LIMIT 800`,
-      [pair.model, pair.meterId],
+        LIMIT ${limit}`,
+      bounds ? [pair.model, pair.meterId, bounds.start, bounds.end] : [pair.model, pair.meterId],
     );
     const chronological = [...rows].reverse();
     for (const row of chronological) {
@@ -1030,6 +1036,166 @@ export async function getProjectGatewaySeries(projectId: string): Promise<Projec
     }
   }
   return samples;
+}
+
+export type GatewayDailyEnergy = {
+  meterPointId: string;
+  day: string;
+  firstWh: number;
+  lastWh: number;
+};
+
+export type GatewayDailySummary = {
+  days: GatewayDailyEnergy[];
+  latest: ProjectGatewaySample | null;
+};
+
+function sqlDateTime(value: Date) {
+  return value.toISOString().slice(0, 19).replace("T", " ");
+}
+
+function vietnamRangeBounds(from: string, to: string) {
+  const startMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(from);
+  const endMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(to);
+  if (!startMatch || !endMatch) return null;
+  const startDay = Date.UTC(Number(startMatch[1]), Number(startMatch[2]) - 1, Number(startMatch[3]));
+  const endDay = Date.UTC(Number(endMatch[1]), Number(endMatch[2]) - 1, Number(endMatch[3]));
+  const first = Math.min(startDay, endDay);
+  const last = Math.max(startDay, endDay);
+  const offset = 7 * 60 * 60 * 1000;
+  return {
+    start: sqlDateTime(new Date(first - offset)),
+    end: sqlDateTime(new Date(last + 24 * 60 * 60 * 1000 - offset)),
+  };
+}
+
+function vietnamMonthBounds(year: number, month: number) {
+  const from = `${year}-${String(month).padStart(2, "0")}-01`;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+  return vietnamRangeBounds(from, to);
+}
+
+async function queryProjectGatewayDaily(
+  projectId: string,
+  bounds: { start: string; end: string },
+): Promise<GatewayDailySummary> {
+  const empty = { days: [], latest: null };
+  const id = projectId.trim();
+  if (!id) return empty;
+  await ensureGatewaySchema();
+
+  let points: Array<{
+    id: string;
+    serialNumber: string | null;
+    category: string | null;
+    deviceSerial: string | null;
+  }> = [];
+  try {
+    points = await queryRows(
+      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
+         FROM meter_points mp
+         LEFT JOIN devices d ON d.id = mp.device_id
+        WHERE mp.project_id = ?`,
+      [id],
+    );
+  } catch (error) {
+    console.error("Project gateway match failed", error);
+    return empty;
+  }
+
+  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
+  for (const point of points) {
+    const model = modelCodeForCategory(point.category ?? "");
+    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
+    if (model == null || !meterId) continue;
+    const key = `${model}:${meterId}`;
+    const existing = pairs.get(key);
+    if (existing) existing.pointIds.push(String(point.id));
+    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
+  }
+
+  const days: GatewayDailyEnergy[] = [];
+  let latest: ProjectGatewaySample | null = null;
+  for (const pair of pairs.values()) {
+    const [rows, latestRows] = await Promise.all([
+      queryRows<RowDataPacket>(
+        `SELECT day_vn,
+                MAX(CASE WHEN rn_asc = 1 THEN epaed END) AS first_wh,
+                MAX(CASE WHEN rn_desc = 1 THEN epaed END) AS last_wh
+           FROM (
+             SELECT DATE_FORMAT(DATE(DATE_ADD(received_at, INTERVAL 7 HOUR)), '%Y-%m-%d') AS day_vn,
+                    CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY DATE(DATE_ADD(received_at, INTERVAL 7 HOUR))
+                      ORDER BY received_at ASC, id ASC
+                    ) AS rn_asc,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY DATE(DATE_ADD(received_at, INTERVAL 7 HOUR))
+                      ORDER BY received_at DESC, id DESC
+                    ) AS rn_desc
+               FROM gateway_samples
+              WHERE meter_model = ? AND meter_id = ?
+                AND received_at >= ? AND received_at < ?
+                AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
+           ) ranked
+          WHERE rn_asc = 1 OR rn_desc = 1
+          GROUP BY day_vn
+          ORDER BY day_vn`,
+        [pair.model, pair.meterId, bounds.start, bounds.end],
+      ),
+      queryRows<RowDataPacket>(
+        `SELECT received_at, values_json
+           FROM gateway_samples
+          WHERE meter_model = ? AND meter_id = ?
+          ORDER BY received_at DESC, id DESC
+          LIMIT 1`,
+        [pair.model, pair.meterId],
+      ),
+    ]);
+    for (const row of rows) {
+      const day = String(row.day_vn ?? "");
+      const firstWh = Number(row.first_wh);
+      const lastWh = Number(row.last_wh);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(firstWh) || !Number.isFinite(lastWh)) continue;
+      for (const meterPointId of pair.pointIds) {
+        days.push({ meterPointId, day, firstWh, lastWh });
+      }
+    }
+    const latestRow = latestRows[0];
+    if (latestRow) {
+      const sample = {
+        meterPointId: pair.pointIds[0] ?? "",
+        at: receivedAtText(latestRow.received_at),
+        values: numericValues(latestRow.values_json),
+      };
+      if (!latest || sample.at > latest.at) latest = sample;
+    }
+  }
+  return { days, latest };
+}
+
+export async function getProjectGatewayDailyEnergy(
+  projectId: string,
+  year: number,
+  month: number,
+): Promise<GatewayDailySummary> {
+  if (!projectId.trim() || !Number.isInteger(year) || month < 1 || month > 12) {
+    return { days: [], latest: null };
+  }
+  const bounds = vietnamMonthBounds(year, month);
+  if (!bounds) return { days: [], latest: null };
+  return queryProjectGatewayDaily(projectId, bounds);
+}
+
+export async function getProjectGatewayDailyRange(
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<GatewayDailySummary> {
+  const bounds = vietnamRangeBounds(from, to);
+  if (!bounds) return { days: [], latest: null };
+  return queryProjectGatewayDaily(projectId, bounds);
 }
 
 async function meterIsRegistered(packet: NormalizedPacket) {

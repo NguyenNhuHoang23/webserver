@@ -5,13 +5,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
+  timeFilterSpan,
   getTimeFilterLabel,
   getTimeFilterPeriods,
   periodIndexForInstant,
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
-import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import { loadProjectGatewayDailyRange, loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
 import {
   civilWeekday,
   formatTariffPrice,
@@ -155,10 +156,12 @@ export function CostCharts() {
   const [flatPrices, setFlatPrices] = useState<Record<string, number>>({});
   const [reloadKey, setReloadKey] = useState(0);
   const monthAligned = useRef(false);
+  const filterTouched = useRef(false);
   const selectionTouched = useRef(false);
 
   useEffect(() => {
     monthAligned.current = false;
+    filterTouched.current = false;
     selectionTouched.current = false;
   }, [projectId]);
 
@@ -168,11 +171,9 @@ export function CostCharts() {
       void Promise.all([
         hydrateProjects(),
         hydrateClientMeters(projectId),
-        loadProjectGatewaySamples(projectId),
         hydrateProjectSettings(projectId),
-      ]).then(([projects, meterRows, gatewayRows, settings]) => {
+      ]).then(([projects, meterRows, settings]) => {
         if (!active) return;
-        setSamples(gatewayRows);
         const saved = settings.costConfig as {
           flatPrices?: Record<string, string>;
           electricity?: {
@@ -217,17 +218,28 @@ export function CostCharts() {
   }, [projectId, reloadKey]);
 
   useEffect(() => {
-    if (monthAligned.current || !samples.length) return;
-    const latest = samples.reduce((best, sample) => (sample.at > best.at ? sample : best));
-    const parts = vietnamFromStored(latest.at);
-    if (!parts) return;
-    monthAligned.current = true;
-    setTimeFilter((current) =>
-      current.mode === "month" && current.month === parts.monthKey
-        ? current
-        : { ...current, mode: "month", month: parts.monthKey, year: parts.year },
-    );
-  }, [samples]);
+    const span = timeFilterSpan(timeFilter);
+    let active = true;
+    void Promise.all([
+      loadProjectGatewaySamples(projectId, {
+        from: span.from,
+        to: span.to,
+        limit: span.hourly ? 6000 : 8000,
+      }),
+      loadProjectGatewayDailyRange(projectId, span.from, span.to),
+    ]).then(([rows, summary]) => {
+      if (!active) return;
+      setSamples(rows);
+      if (filterTouched.current || monthAligned.current || !summary.latest) return;
+      const parts = vietnamFromStored(summary.latest.at);
+      monthAligned.current = true;
+      if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) return;
+      setTimeFilter((current) => ({ ...current, mode: "month", month: parts.monthKey, year: parts.year }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId, timeFilter]);
 
   const pointsForEnergy = useMemo(
     () => allPoints.filter((p) => p.energy === energy),
@@ -505,7 +517,13 @@ export function CostCharts() {
               );
             })}
           </div>
-          <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
+          <TimeFilterBar
+            value={timeFilter}
+            onChange={(next) => {
+              filterTouched.current = true;
+              setTimeFilter(next);
+            }}
+          />
         </div>
 
         <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">

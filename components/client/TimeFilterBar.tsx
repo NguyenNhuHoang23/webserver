@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatCivilDate, vietnamFromStored, vietnamNow } from "@/lib/vietnam-time";
 
 export type TimeFilterMode = "day" | "month" | "year" | "custom_date";
@@ -55,7 +55,9 @@ export function periodIndexForInstant(value: TimeFilterValue, at: string, length
 export function getTimeFilterLabel(value: TimeFilterValue): string {
   switch (value.mode) {
     case "day":
-      return `Hôm nay (${formatCivilDate(value.date)})`;
+      return value.date === vietnamNow().date
+        ? `Hôm nay (${formatCivilDate(value.date)})`
+        : formatCivilDate(value.date);
     case "custom_date":
       return value.customDateMode === "range"
         ? `${formatCivilDate(value.startDate)} đến ${formatCivilDate(value.endDate)}`
@@ -136,6 +138,49 @@ export function getTimeFilterScaleFactor(value: TimeFilterValue): number {
   }
 }
 
+export function timeFilterSpan(value: TimeFilterValue): { from: string; to: string; hourly: boolean } {
+  if (value.mode === "day") return { from: value.date, to: value.date, hourly: true };
+  if (value.mode === "month") {
+    const [year, month] = value.month.split("-").map(Number);
+    if (!year || !month) {
+      const now = vietnamNow();
+      return { from: `${now.monthKey}-01`, to: now.date, hourly: false };
+    }
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const mm = String(month).padStart(2, "0");
+    return {
+      from: `${year}-${mm}-01`,
+      to: `${year}-${mm}-${String(last).padStart(2, "0")}`,
+      hourly: false,
+    };
+  }
+  if (value.mode === "year") return { from: `${value.year}-01-01`, to: `${value.year}-12-31`, hourly: false };
+  if (value.mode === "custom_date" && value.customDateMode === "range") {
+    const from = value.startDate <= value.endDate ? value.startDate : value.endDate;
+    const to = value.startDate <= value.endDate ? value.endDate : value.startDate;
+    return { from, to, hourly: from === to };
+  }
+  return { from: value.customDate, to: value.customDate, hourly: true };
+}
+
+function shiftCivilDate(value: string, days: number) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const base = match
+    ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : Date.parse(`${vietnamNow().date}T00:00:00Z`);
+  return new Date(base + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function withCivilDate(value: TimeFilterValue, date: string): TimeFilterValue {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return value;
+  return {
+    ...value,
+    date,
+    month: date.slice(0, 7),
+    year: Number(date.slice(0, 4)),
+  };
+}
+
 export function TimeFilterBar({
   value,
   onChange,
@@ -164,14 +209,7 @@ export function TimeFilterBar({
             <button
               key={item.id}
               type="button"
-              onClick={() => {
-                if (item.id === "day") {
-                  const now = vietnamNow();
-                  onChange({ ...value, mode: "day", date: now.date });
-                  return;
-                }
-                onChange({ ...value, mode: item.id });
-              }}
+              onClick={() => onChange({ ...value, mode: item.id })}
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
                 active
                   ? "bg-slate-900 text-white shadow-xs"
@@ -187,24 +225,22 @@ export function TimeFilterBar({
       {/* Dynamic Selector Input based on active mode */}
       <div className="inline-flex items-center">
         {value.mode === "day" && (
-          <div className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs">
-            <CalendarSmallIcon className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Hôm nay: <strong className="font-mono text-slate-900">{formatCivilDate(value.date)}</strong></span>
+          <div className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-700 shadow-xs">
+            <StepButton label="Ngày trước" onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, -1)))} />
+            <VietnamDateInput
+              value={value.date}
+              onChange={(date) => onChange(withCivilDate(value, date))}
+              className="min-w-[4.5rem] border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none"
+            />
+            <StepButton label="Ngày sau" onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, 1)))} />
           </div>
         )}
 
         {value.mode === "month" && (
-          <label className="relative inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs hover:border-slate-300 transition-colors cursor-pointer">
-            <CalendarSmallIcon className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-            <span className="font-semibold text-slate-900">Tháng {value.month.slice(5, 7)}/{value.month.slice(0, 4)}</span>
-            <input
-              type="month"
-              value={value.month}
-              onChange={(e) => onChange({ ...value, month: e.target.value })}
-              aria-label="Tháng"
-              className="absolute inset-0 cursor-pointer opacity-0"
-            />
-          </label>
+          <MonthField
+            month={/^\d{4}-\d{2}$/.test(value.month) ? value.month : vietnamNow().monthKey}
+            onChange={(month) => onChange({ ...value, month, year: Number(month.slice(0, 4)) })}
+          />
         )}
 
         {value.mode === "year" && (
@@ -231,7 +267,7 @@ export function TimeFilterBar({
             mode={value.customDateMode}
             onModeChange={(customDateMode) => onChange({ ...value, customDateMode })}
             date={value.customDate}
-            onDateChange={(customDate) => onChange({ ...value, customDate })}
+            onDateChange={(customDate) => onChange(withCivilDate({ ...value, customDate }, customDate))}
             startDate={value.startDate}
             endDate={value.endDate}
             onStartDateChange={(startDate) => onChange({ ...value, startDate })}
@@ -299,6 +335,93 @@ export function DateSelectionControl({
   );
 }
 
+const MONTH_LABELS = ["Th1", "Th2", "Th3", "Th4", "Th5", "Th6", "Th7", "Th8", "Th9", "Th10", "Th11", "Th12"];
+
+function MonthField({ month, onChange }: { month: string; onChange: (month: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const year = Number(month.slice(0, 4)) || vietnamNow().year;
+  const monthIndex = Number(month.slice(5, 7)) || vietnamNow().month;
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const choose = (nextYear: number, nextMonth: number) => {
+    onChange(`${nextYear}-${String(nextMonth).padStart(2, "0")}`);
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-label="Chọn tháng"
+        className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 shadow-xs transition-colors hover:border-slate-300"
+      >
+        <CalendarSmallIcon className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+        Tháng {String(monthIndex).padStart(2, "0")}/{year}
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-40 mt-1 w-[232px] rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+          <div className="mb-2 flex items-center justify-between">
+            <StepButton label="Năm trước" onClick={() => choose(year - 1, monthIndex)} />
+            <span className="text-sm font-semibold text-slate-900">{year}</span>
+            <StepButton label="Năm sau" onClick={() => choose(year + 1, monthIndex)} />
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {MONTH_LABELS.map((label, index) => {
+              const active = index + 1 === monthIndex;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    choose(year, index + 1);
+                    setOpen(false);
+                  }}
+                  className={`h-8 rounded-lg text-xs font-semibold ${
+                    active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StepButton({ label, onClick }: { label: string; onClick: () => void }) {
+  const previous = label.includes("trước");
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+    >
+      {previous ? "‹" : "›"}
+    </button>
+  );
+}
+
 function VietnamDateInput({
   value,
   onChange,
@@ -312,15 +435,33 @@ function VietnamDateInput({
   max?: string;
   className?: string;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
-    <label className="relative inline-flex items-center">
-      <span className={className}>{formatCivilDate(value)}</span>
+    <label
+      className="relative inline-flex cursor-pointer items-center"
+      onClick={(event) => {
+        event.preventDefault();
+        const input = inputRef.current;
+        if (!input) return;
+        try {
+          input.showPicker();
+        } catch {
+          input.focus();
+        }
+      }}
+    >
+      <span className={className}>{formatCivilDate(value) || "Chọn ngày"}</span>
       <input
+        ref={inputRef}
         type="date"
         value={value}
         min={min}
         max={max}
-        onChange={(e) => onChange(e.target.value)}
+        aria-label="Chọn ngày"
+        onChange={(event) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) return;
+          onChange(event.target.value);
+        }}
         className="absolute inset-0 cursor-pointer opacity-0"
       />
     </label>

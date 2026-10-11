@@ -8,6 +8,7 @@ import {
   getTimeFilterLabel,
   getTimeFilterPeriods,
   periodIndexForInstant,
+  timeFilterSpan,
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
 import { FrequencyChart } from "@/components/client/FrequencyChart";
@@ -17,7 +18,12 @@ import { UiWaveform } from "@/components/client/UiWaveform";
 import { UnbalanceChart } from "@/components/client/UnbalanceChart";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { hydrateProjects, loadProjects, resolveMeterTypes } from "@/lib/projects";
-import { loadProjectGatewaySamples, type ProjectGatewaySample } from "@/lib/gateway-series";
+import {
+  loadProjectGatewayDailyRange,
+  loadProjectGatewaySamples,
+  type GatewayDailyPoint,
+  type ProjectGatewaySample,
+} from "@/lib/gateway-series";
 import { formatStoredVietnam, vietnamFromStored } from "@/lib/vietnam-time";
 import { hydrateMeterReadings, type MeterReading } from "@/lib/meter-readings";
 
@@ -136,11 +142,30 @@ function energyBarsFromGateway(filter: TimeFilterValue, samples: ProjectGatewayS
   }
   return periods.map((period, index) => {
     const list = grouped.get(index);
-    const kwh = !list?.length
-      ? 0
-      : list.length > 1
-        ? Math.max(0, list[list.length - 1] - list[0])
-        : list[list.length - 1];
+    const kwh = !list || list.length < 2 ? 0 : Math.max(0, list[list.length - 1] - list[0]);
+    return {
+      minute: index,
+      label: period.label,
+      kwh: Number(kwh.toFixed(4)),
+    };
+  });
+}
+
+function energyBarsFromDaily(filter: TimeFilterValue, rows: GatewayDailyPoint[]) {
+  const periods = getTimeFilterPeriods(filter);
+  const buckets = periods.map(() => ({ first: null as number | null, last: null as number | null }));
+  const sorted = [...rows].sort((a, b) => a.day.localeCompare(b.day));
+  for (const row of sorted) {
+    const index = periodIndexForInstant(filter, `${row.day}T00:00:00`, periods.length);
+    if (index < 0) continue;
+    const bucket = buckets[index];
+    if (bucket.first == null) bucket.first = row.firstWh;
+    bucket.last = row.lastWh;
+  }
+  return periods.map((period, index) => {
+    const bucket = buckets[index];
+    const kwh =
+      bucket.first == null || bucket.last == null ? 0 : Math.max(0, (bucket.last - bucket.first) / 1000);
     return {
       minute: index,
       label: period.label,
@@ -199,11 +224,14 @@ export function EnergyCharts() {
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [gatewaySamples, setGatewaySamples] = useState<ProjectGatewaySample[]>([]);
+  const [dailyRows, setDailyRows] = useState<GatewayDailyPoint[]>([]);
   const gatewayMonthAligned = useRef(false);
+  const filterTouched = useRef(false);
   const selectionTouched = useRef(false);
 
   useEffect(() => {
     gatewayMonthAligned.current = false;
+    filterTouched.current = false;
     selectionTouched.current = false;
   }, [projectId]);
 
@@ -214,11 +242,9 @@ export function EnergyCharts() {
         hydrateProjects(),
         hydrateClientMeters(projectId),
         hydrateMeterReadings(projectId),
-        loadProjectGatewaySamples(projectId),
-      ]).then(([projects, meterRows, readingRows, gatewayRows]) => {
+      ]).then(([projects, meterRows, readingRows]) => {
         if (!active) return;
         setReadings(readingRows);
-        setGatewaySamples(gatewayRows);
         const project = projects.find((item) => item.id === projectId);
         const types = resolveMeterTypes(project);
         setEnergyKinds(types);
@@ -248,17 +274,33 @@ export function EnergyCharts() {
   }, [projectId]);
 
   useEffect(() => {
-    if (gatewayMonthAligned.current || gatewaySamples.length === 0) return;
-    const latest = gatewaySamples.reduce((best, sample) => (sample.at > best.at ? sample : best));
-    const parts = vietnamFromStored(latest.at);
-    if (!parts) return;
-    gatewayMonthAligned.current = true;
-    setTimeFilter((current) =>
-      current.mode === "month" && current.month === parts.monthKey
-        ? current
-        : { ...current, mode: "month", month: parts.monthKey, year: parts.year },
-    );
-  }, [gatewaySamples]);
+    const span = timeFilterSpan(timeFilter);
+    let active = true;
+    if (span.hourly) {
+      void loadProjectGatewaySamples(projectId, { from: span.from, to: span.to, limit: 6000 }).then((rows) => {
+        if (!active) return;
+        setGatewaySamples(rows);
+        setDailyRows([]);
+      });
+    } else {
+      void Promise.all([
+        loadProjectGatewayDailyRange(projectId, span.from, span.to),
+        loadProjectGatewaySamples(projectId, { from: span.from, to: span.to, limit: 800 }),
+      ]).then(([summary, rows]) => {
+        if (!active) return;
+        setDailyRows(summary.days);
+        setGatewaySamples(rows);
+        if (filterTouched.current || gatewayMonthAligned.current || !summary.latest) return;
+        const parts = vietnamFromStored(summary.latest.at);
+        gatewayMonthAligned.current = true;
+        if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) return;
+        setTimeFilter((current) => ({ ...current, mode: "month", month: parts.monthKey, year: parts.year }));
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [projectId, timeFilter]);
 
   const pointsForEnergy = useMemo(
     () => allPoints.filter((p) => p.energy === energy),
@@ -281,8 +323,10 @@ export function EnergyCharts() {
     setSelectedIds((current) => {
       const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
       if (selectionTouched.current) return kept;
-      const linked = pointsForEnergy.filter((point) =>
-        gatewaySamples.some((sample) => sample.meterPointId === point.id),
+      const linked = pointsForEnergy.filter(
+        (point) =>
+          gatewaySamples.some((sample) => sample.meterPointId === point.id) ||
+          dailyRows.some((row) => row.meterPointId === point.id),
       );
       if (linked.length > 0 && !kept.some((id) => linked.some((point) => point.id === id))) {
         return linked.slice(0, Math.min(2, linked.length)).map((point) => point.id);
@@ -291,7 +335,7 @@ export function EnergyCharts() {
       const source = linked.length > 0 ? linked : pointsForEnergy;
       return source.slice(0, Math.min(2, source.length)).map((point) => point.id);
     });
-  }, [pointsForEnergy, gatewaySamples]);
+  }, [dailyRows, pointsForEnergy, gatewaySamples]);
 
   const selectedPoints = useMemo(
     () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
@@ -313,18 +357,24 @@ export function EnergyCharts() {
     return grouped;
   }, [gatewaySamples]);
 
+  const filterSpan = useMemo(() => timeFilterSpan(timeFilter), [timeFilter]);
+
   const multiBars = useMemo(
     () =>
-      selectedPoints.map((point, i) => {
+      selectedPoints.map((point) => {
         const samples = gatewayByPoint.get(point.id);
+        const daily = dailyRows.filter((row) => row.meterPointId === point.id);
         return {
           point,
-          bars: samples?.length
-            ? energyBarsFromGateway(timeFilter, samples)
-            : energyBarsFromReadings(timeFilter, point.id, readings),
+          bars:
+            !filterSpan.hourly && daily.length
+              ? energyBarsFromDaily(timeFilter, daily)
+              : samples?.length
+                ? energyBarsFromGateway(timeFilter, samples)
+                : energyBarsFromReadings(timeFilter, point.id, readings),
         };
       }),
-    [gatewayByPoint, readings, selectedPoints, timeFilter],
+    [dailyRows, filterSpan.hourly, gatewayByPoint, readings, selectedPoints, timeFilter],
   );
 
   const liveSamples = useMemo(() => {
@@ -576,7 +626,13 @@ export function EnergyCharts() {
                 </button>
               ))}
             </div>
-            <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
+            <TimeFilterBar
+              value={timeFilter}
+              onChange={(next) => {
+                filterTouched.current = true;
+                setTimeFilter(next);
+              }}
+            />
           </div>
           {isElectric ? (
             <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
@@ -1005,10 +1061,11 @@ function MultiConsumptionBarChart({
           const globalIndex = range.start + i;
           const point = base[globalIndex];
           if (!point) return null;
+          const tick = Number(point.label.match(/\d+/)?.[0]);
           const show =
             visibleLen <= 16 ||
-            Number(point.label) % 2 === 1 ||
-            Number(point.label) === 1 ||
+            tick % 2 === 1 ||
+            globalIndex === range.start ||
             globalIndex === range.end;
           if (!show) return null;
           return (

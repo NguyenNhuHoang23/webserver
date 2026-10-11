@@ -13,11 +13,74 @@ export type ChartSample = {
 
 export type ChartTimeKind = "full" | "min" | "sec" | "tooltip";
 
-export async function loadProjectGatewaySamples(projectId: string): Promise<ProjectGatewaySample[]> {
+export type GatewayDailyPoint = {
+  meterPointId: string;
+  day: string;
+  firstWh: number;
+  lastWh: number;
+};
+
+export type GatewayDailySummary = {
+  days: GatewayDailyPoint[];
+  latest: ProjectGatewaySample | null;
+};
+
+export async function loadProjectGatewayDaily(
+  projectId: string,
+  year: number,
+  month: number,
+): Promise<GatewayDailySummary> {
+  const empty = { days: [], latest: null };
   try {
-    const response = await fetch(`/api/gateway/series?projectId=${encodeURIComponent(projectId)}`, {
-      cache: "no-store",
+    const params = new URLSearchParams({
+      projectId,
+      year: String(year),
+      month: String(month),
     });
+    const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
+    if (!response.ok) return empty;
+    const body = (await response.json()) as Partial<GatewayDailySummary>;
+    return {
+      days: Array.isArray(body.days) ? body.days : [],
+      latest: body.latest ?? null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export async function loadProjectGatewayDailyRange(
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<GatewayDailySummary> {
+  const empty = { days: [], latest: null };
+  try {
+    const params = new URLSearchParams({ projectId, from, to, summary: "day" });
+    const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
+    if (!response.ok) return empty;
+    const body = (await response.json()) as Partial<GatewayDailySummary>;
+    return {
+      days: Array.isArray(body.days) ? body.days : [],
+      latest: body.latest ?? null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export async function loadProjectGatewaySamples(
+  projectId: string,
+  range?: { from?: string; to?: string; limit?: number },
+): Promise<ProjectGatewaySample[]> {
+  try {
+    const params = new URLSearchParams({ projectId });
+    if (range?.from && range.to) {
+      params.set("from", range.from);
+      params.set("to", range.to);
+    }
+    if (range?.limit) params.set("limit", String(range.limit));
+    const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
     if (!response.ok) return [];
     const body = (await response.json()) as ProjectGatewaySample[];
     return Array.isArray(body) ? body : [];
