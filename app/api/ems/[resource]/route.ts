@@ -39,12 +39,30 @@ function serverError(error: unknown) {
 
 let deviceColumnsReady: Promise<void> | null = null;
 let ghgColumnsReady: Promise<void> | null = null;
+let projectSettingsReady: Promise<void> | null = null;
 
 function ensureDeviceColumns() {
   deviceColumnsReady ??= emsDb
     .execute("ALTER TABLE devices MODIFY COLUMN image MEDIUMTEXT NULL")
     .then(() => undefined);
   return deviceColumnsReady;
+}
+
+function ensureProjectSettingsTable() {
+  projectSettingsReady ??= emsDb
+    .execute(
+      `CREATE TABLE IF NOT EXISTS project_settings (
+         project_id VARCHAR(64) NOT NULL,
+         payload JSON NOT NULL,
+         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         PRIMARY KEY (project_id),
+         CONSTRAINT fk_project_settings_project
+           FOREIGN KEY (project_id) REFERENCES projects (id)
+           ON DELETE CASCADE ON UPDATE CASCADE
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    )
+    .then(() => undefined);
+  return projectSettingsReady;
 }
 
 function ensureGhgColumns() {
@@ -296,6 +314,7 @@ async function getResource(resource: string, request: NextRequest) {
   }
   if (resource === "project-settings") {
     if (!projectId) throw new Error("projectId is required");
+    await ensureProjectSettingsTable();
     const rows = await queryRows<Row>(
       "SELECT project_id AS projectId, payload, updated_at AS updatedAt FROM project_settings WHERE project_id = ?",
       [projectId],
@@ -547,10 +566,12 @@ async function saveResource(resource: string, body: Row) {
   if (resource === "project-settings") {
     const projectId = asString(body.projectId);
     if (!projectId) throw new Error("projectId is required");
+    await ensureProjectSettingsTable();
+    const payload = JSON.stringify(body.payload ?? {});
     await emsDb.execute(
       `INSERT INTO project_settings (project_id, payload) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE payload = VALUES(payload)`,
-      [projectId, JSON.stringify(body.payload ?? {})],
+       ON DUPLICATE KEY UPDATE payload = ?`,
+      [projectId, payload, payload],
     );
     return getResource(resource, new NextRequest(`http://localhost/api/ems/project-settings?projectId=${encodeURIComponent(projectId)}`));
   }

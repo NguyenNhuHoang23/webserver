@@ -10,6 +10,16 @@ export type MeterParameter = {
   key: string;
 };
 
+/**
+ * Gateway PM2230 gửi điện năng tác dụng bằng kWh (ví dụ 3.991).
+ * Bản ghi cũ lưu Wh nguyên từ 1000 trở lên (3991 Wh = 3.991 kWh).
+ */
+export function registerToKwh(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  if (Number.isInteger(value) && Math.abs(value) >= 1000) return value / 1000;
+  return value;
+}
+
 export const METER_PARAMETERS: MeterParameter[] = [
   { id: 1, group: "Điện năng 2 chiều", chart: "energy", name: "Điện năng tác dụng nhận", unit: "Wh", key: "EPaed" },
   { id: 2, group: "Điện năng 2 chiều", chart: "energy", name: "Điện năng tác dụng phát", unit: "Wh", key: "EPaer" },

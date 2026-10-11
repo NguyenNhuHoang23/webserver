@@ -16,6 +16,7 @@ import { loadProjects, resolveMeterTypes } from "@/lib/projects";
 import {
   DEFAULT_VOLTAGE_LEVEL,
   formatTariffPrice,
+  parseTariffPrice,
   INDUSTRIAL_SCHEDULE_DECISION,
   INDUSTRIAL_TARIFF_DECISION,
   INDUSTRIAL_VOLTAGE_LEVELS,
@@ -153,9 +154,9 @@ export function ClientConfig() {
       }
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1600);
-    } catch {
+    } catch (error) {
       setSaved(false);
-      setSaveError("Không thể lưu cấu hình điểm đo. Vui lòng thử lại.");
+      setSaveError(error instanceof Error ? error.message : "Không thể lưu cấu hình. Vui lòng thử lại.");
     }
   };
 
@@ -170,7 +171,7 @@ export function ClientConfig() {
       title: "Cụm điểm đo",
       hint: `Cấu hình phân cấp cây cha–con của các điểm đo trên Sơ đồ · Dự án ${projectId}`,
     },
-    cost: { title: "Cấu hình chi phí123", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
+    cost: { title: "Cấu hình chi phí", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
     alerts: { title: "Cấu hình cảnh báo", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
     accounts: { title: "Quản lý tài khoản", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
   }[tab];
@@ -356,7 +357,7 @@ export function ClientConfig() {
           {saveError ? (
             <p className="mt-3 text-right text-[12px] font-medium text-red-600">{saveError}</p>
           ) : saved ? (
-            <p className="mt-3 text-right text-[12px] font-medium text-emerald-600">Đã lưu cấu hình</p>
+            <p className="mt-3 text-right text-[12px] font-medium text-emerald-600">Đã lưu cấu hình vào database</p>
           ) : null}
         </section>
       </div>
@@ -885,21 +886,29 @@ function CostPanel({
               <span>THẤP ĐIỂM</span>
               <span>CAO ĐIỂM</span>
             </div>
-            {INDUSTRIAL_VOLTAGE_LEVELS.map((level) => (
-              <div
-                key={level.id}
-                className={`grid grid-cols-4 border-t border-slate-100 px-4 py-2.5 text-sm ${
-                  level.id === voltageLevel ? "bg-emerald-50/70 font-semibold text-slate-800" : "text-slate-600"
-                }`}
-              >
-                <span>{level.label}</span>
-                <span className="font-mono">{formatTariffPrice(level.normal)}</span>
-                <span className="font-mono">{formatTariffPrice(level.off)}</span>
-                <span className="font-mono">{formatTariffPrice(level.peak)}</span>
-              </div>
-            ))}
+            {INDUSTRIAL_VOLTAGE_LEVELS.map((level) => {
+              const selected = level.id === voltageLevel;
+              const normal = selected ? parseTariffPrice(touPrices.normal) : level.normal;
+              const off = selected ? parseTariffPrice(touPrices.off) : level.off;
+              const peak = selected ? parseTariffPrice(touPrices.peak) : level.peak;
+              return (
+                <div
+                  key={level.id}
+                  className={`grid grid-cols-4 border-t border-slate-100 px-4 py-2.5 text-sm ${
+                    selected ? "bg-emerald-50/70 font-semibold text-slate-800" : "text-slate-600"
+                  }`}
+                >
+                  <span>{level.label}{selected ? " · đang dùng" : ""}</span>
+                  <span className="font-mono">{formatTariffPrice(normal)}</span>
+                  <span className="font-mono">{formatTariffPrice(off)}</span>
+                  <span className="font-mono">{formatTariffPrice(peak)}</span>
+                </div>
+              );
+            })}
           </div>
-          <p className="text-[12px] text-slate-400">Đơn vị: đồng/kWh, chưa gồm VAT. Đổi cấp điện áp sẽ điền lại đơn giá theo bảng trên.</p>
+          <p className="text-[12px] text-slate-400">
+            Dòng được tô là đơn giá đang áp dụng và sẽ ghi vào database khi bấm Lưu cấu hình. Các dòng còn lại là biểu giá nhà nước để đối chiếu. Đổi cấp điện áp sẽ điền lại đơn giá theo biểu giá đó.
+          </p>
 
           <div className="grid gap-2 text-[12px] text-slate-600 sm:grid-cols-3">
             <p className="rounded-md bg-slate-50 px-3 py-2">

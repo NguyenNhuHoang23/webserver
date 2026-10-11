@@ -23,6 +23,7 @@ import {
   type TouPrices,
   type VoltageLevelId,
 } from "@/lib/industrial-electricity";
+import { registerToKwh } from "@/lib/meter-parameters";
 import { hydrateProjectSettings } from "@/lib/project-settings";
 import { hydrateProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
 import { vietnamFromStored, type VietnamParts } from "@/lib/vietnam-time";
@@ -82,6 +83,27 @@ function slotStoredAt(day: string, hour: number, minute: number) {
   return new Date(Date.UTC(year, month - 1, date, hour, minute) - 7 * 60 * 60 * 1000).toISOString().slice(0, 19);
 }
 
+function addSlotCost(
+  filter: TimeFilterValue,
+  bars: CostBar[],
+  tou: TouKwh,
+  kwh: TouKwh,
+  source: RateSource,
+  at: string,
+  deltaKwh: number,
+) {
+  if (deltaKwh <= 0) return false;
+  const parts = vietnamFromStored(at);
+  const bucket = periodIndexForInstant(filter, at, bars.length);
+  if (!parts || bucket < 0) return false;
+  const rate = rateAt(source, parts);
+  const cost = deltaKwh * rate.price;
+  bars[bucket].dark += cost;
+  tou[rate.band] += cost;
+  kwh[rate.band] += deltaKwh;
+  return true;
+}
+
 function costBarsFromSlots(filter: TimeFilterValue, slots: GatewayEnergySlot[], source: RateSource) {
   const bars: CostBar[] = getTimeFilterPeriods(filter).map((period) => ({
     key: period.key,
@@ -89,22 +111,27 @@ function costBarsFromSlots(filter: TimeFilterValue, slots: GatewayEnergySlot[], 
     light: 0,
     dark: 0,
   }));
-  const tou = { peak: 0, normal: 0, off: 0, none: 0 };
+  const tou = emptyKwh();
   const kwh = emptyKwh();
-  for (const slot of slots) {
-    const deltaKwh = Math.max(0, (slot.lastWh - slot.firstWh) / 1000);
-    if (deltaKwh <= 0) continue;
+  const ordered = [...slots].sort(
+    (a, b) => a.day.localeCompare(b.day) || a.hour - b.hour || a.minute - b.minute,
+  );
+  let previous: number | null = null;
+  let lastAt = "";
+  let lastKwh = 0;
+  for (const slot of ordered) {
+    const endKwh = registerToKwh(slot.lastWh);
     const at = slotStoredAt(slot.day, slot.hour, slot.minute);
-    const parts = vietnamFromStored(at);
-    const bucket = periodIndexForInstant(filter, at, bars.length);
-    if (!parts || bucket < 0) continue;
-    const rate = rateAt(source, parts);
-    const cost = deltaKwh * rate.price;
-    bars[bucket].dark += cost;
-    tou[rate.band] += cost;
-    kwh[rate.band] += deltaKwh;
+    const delta =
+      previous == null ? Math.max(0, endKwh - registerToKwh(slot.firstWh)) : Math.max(0, endKwh - previous);
+    addSlotCost(filter, bars, tou, kwh, source, at, delta);
+    previous = endKwh;
+    lastAt = at;
+    lastKwh = endKwh;
   }
-  return { bars, tou, kwh };
+  const consumed = kwh.normal + kwh.off + kwh.peak + kwh.none;
+  const usedIndex = consumed <= 0 && lastKwh > 0 && addSlotCost(filter, bars, tou, kwh, source, lastAt, lastKwh);
+  return { bars, tou, kwh, usedIndex };
 }
 
 function costLabel(energy: string) {
@@ -299,6 +326,7 @@ export function CostCharts() {
           bars: result.bars,
           tou: result.tou,
           kwh: result.kwh,
+          usedIndex: result.usedIndex,
         };
       }),
     [rateSource, slots, selectedPoints, timeFilter],
@@ -667,11 +695,11 @@ export function CostCharts() {
             <span className={`h-2.5 w-2.5 rounded-full ${grandTotal > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
             {grandTotal > 0
               ? energy === "Điện"
-                ? "Tiền điện = sản lượng bình thường × đơn giá bình thường + thấp điểm × đơn giá thấp điểm + cao điểm × đơn giá cao điểm. Chưa gồm VAT."
+                ? series.some((item) => item.usedIndex)
+                  ? "Công tơ không tăng trong kỳ nên tiền điện = chỉ số hiện tại × đơn giá khung giờ của lần đo cuối. Chưa gồm VAT."
+                  : "Tiền điện = sản lượng bình thường × đơn giá bình thường + thấp điểm × đơn giá thấp điểm + cao điểm × đơn giá cao điểm. Chưa gồm VAT."
                 : `Chi phí = sản lượng × ${formatVnd(flatPrices[energy] ?? 0)} VNĐ.`
-              : slots.length > 0 && energy === "Điện"
-                ? "Đã lấy mọi ngày có số liệu trong kỳ. Chỉ số điện không tăng nên sản lượng từng khung giờ là 0 kWh, tiền điện theo công thức là 0. Chưa gồm VAT."
-                : "Chưa có số liệu chi phí trong kỳ này"}
+              : "Chưa có số liệu chi phí trong kỳ này"}
           </p>
         </div>
       </div>
