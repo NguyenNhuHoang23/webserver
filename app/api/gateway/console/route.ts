@@ -46,11 +46,18 @@ export async function POST(request: NextRequest) {
       if (!Number.isInteger(timeUpdate) || timeUpdate < 1 || timeUpdate > 86400) {
         return badRequest("TimeUpdate phải là số giây từ 1 đến 86400.");
       }
+      const hmacSecret =
+        body.hmacSecret === undefined
+          ? undefined
+          : body.hmacSecret === null || body.hmacSecret === ""
+            ? null
+            : text(body.hmacSecret);
       await saveGatewayConfig({
         gatewayId,
         wifi: optionalText(body.wifi),
         passWifi: optionalText(body.passWifi),
         timeUpdate,
+        hmacSecret,
       });
       return Response.json({ ok: true });
     }

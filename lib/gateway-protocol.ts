@@ -31,10 +31,11 @@ export const DISPOSITION_LABEL: Record<string, string> = {
   clock_replay: "Bỏ qua: bản phát lại có readingTime vượt giờ server quá 20 giây",
   gateway_error: "Bỏ qua: Error khác 0",
   checksum: "Bỏ qua: lỗi checksum",
+  hmac_invalid: "Bỏ qua: HMAC không khớp hoặc thiếu chữ ký",
   unknown_meter: "Bỏ qua: chưa có đồng hồ trùng serial và category",
 };
 
-const CHECKSUM_KEYS = new Set(["checksum", "CRC", "crc"]);
+const CHECKSUM_KEYS = new Set(["checksum", "CRC", "crc", "HMAC", "hmac", "SIG", "signature"]);
 
 export type PacketNumber = string | number;
 
@@ -61,6 +62,7 @@ export type NormalizedPacket = {
   idAlarm: number | null;
   valueAlarm: number | null;
   checksum: string;
+  hmac: string | null;
   shortKeys: boolean;
 };
 
@@ -132,10 +134,10 @@ export function canonicalPayload(value: Record<string, unknown>) {
   return JSON.stringify(copy);
 }
 
-/** CRC firmware tính trên đúng byte đã gửi, sau khi bỏ trường CRC, kể cả `-nan` và dấu phẩy thiếu. */
+/** CRC firmware tính trên đúng byte đã gửi, sau khi bỏ CRC/HMAC, kể cả `-nan` và dấu phẩy thiếu. */
 export function rawChecksumPayload(rawText: string) {
   return rawText.replace(
-    /,?\s*"(?:checksum|CRC|crc)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|null|true|false)\s*,?/g,
+    /,?\s*"(?:checksum|CRC|crc|HMAC|hmac|SIG|signature)"\s*:\s*(?:"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|null|true|false)\s*,?/gi,
     "",
   );
 }
@@ -240,6 +242,7 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
   const error = parseError(readField(source, ["Error", "ER"]));
   const valuesField = readField(source, ["values", "VAL"]);
   const checksumField = readField(source, ["checksum", "CRC", "crc"]);
+  const hmacField = readField(source, ["HMAC", "hmac", "SIG", "signature"]);
 
   const missing: string[] = [];
   if (!protocolVersion) missing.push("protocolVersion");
@@ -296,6 +299,10 @@ export function parseGatewayPacket(rawText: string): GatewayParse {
     idAlarm: finiteInt(readField(sourceValues, ["IDAlarm", "IDA"])),
     valueAlarm: finiteNumber(readField(sourceValues, ["ValueAlarm", "VALA"])),
     checksum: String(checksumField).trim(),
+    hmac:
+      hmacField == null || String(hmacField).trim() === ""
+        ? null
+        : String(hmacField).trim(),
     shortKeys,
   };
 

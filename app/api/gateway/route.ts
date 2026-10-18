@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   try {
     const raw = await request.text();
     console.log(`[gateway] ${new Date().toISOString()} ${raw}`);
-    return Response.json(await ingestGateway(raw));
+    return Response.json(await ingestGateway(raw, request.headers));
   } catch (error) {
     console.error("Gateway ingest error", error);
     return Response.json({ error: "Không thể lưu bản tin gateway." }, { status: 500 });

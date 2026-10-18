@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useAuth } from "@/components/auth/useAuth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { customerPassword, ensureCustomerAccount } from "@/lib/customer-accounts";
+import { hasPermission } from "@/lib/permissions";
 import { hydrateProjects, loadProjects, removeProject, type Project, type ProjectStatus } from "@/lib/projects";
 
 const statusMeta: Record<
@@ -41,6 +43,9 @@ const PROJECT_TELEMETRY: Record<string, { loadKw: number; meterCount: number; co
 const PAGE_SIZE = 10;
 
 export function ProjectList() {
+  const { session } = useAuth();
+  const canManageProjects = hasPermission(session, "manageProjects");
+  const canManageDevices = hasPermission(session, "manageDevices");
   const [items, setItems] = useState<Project[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [customer, setCustomer] = useState("all");
@@ -109,20 +114,24 @@ export function ProjectList() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
-          <Link
-            href="/thiet-bi"
-            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
-          >
-            <DeviceIcon className="h-4 w-4 text-slate-500" />
-            Thư viện thiết bị
-          </Link>
-          <Link
-            href="/tao-du-an"
-            className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-3.5 sm:px-4 text-xs font-semibold text-white shadow-md shadow-emerald-700/20 hover:from-emerald-500 hover:to-teal-500 transition-all"
-          >
-            <span className="text-base font-bold leading-none">+</span>
-            Thêm Dự Án Mới
-          </Link>
+          {canManageDevices ? (
+            <Link
+              href="/thiet-bi"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
+            >
+              <DeviceIcon className="h-4 w-4 text-slate-500" />
+              Thư viện thiết bị
+            </Link>
+          ) : null}
+          {canManageProjects ? (
+            <Link
+              href="/tao-du-an"
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-3.5 sm:px-4 text-xs font-semibold text-white shadow-md shadow-emerald-700/20 hover:from-emerald-500 hover:to-teal-500 transition-all"
+            >
+              <span className="text-base font-bold leading-none">+</span>
+              Thêm Dự Án Mới
+            </Link>
+          ) : null}
         </div>
       </div>
 

@@ -2,6 +2,12 @@ import "server-only";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
 import {
+  hmacSigningPayload,
+  readHmacFromBody,
+  readHmacFromHeaders,
+  verifyGatewayHmac,
+} from "@/lib/gateway-hmac";
+import {
   CLOCK_SKEW_MS,
   DEFAULT_TIME_UPDATE_SECONDS,
   METER_MODEL_BY_CODE,
@@ -58,6 +64,9 @@ export type GatewayDeviceView = {
   wifi: string | null;
   passWifi: string | null;
   timeUpdate: number;
+  /** true khi gateway đã được cấp secretKey HMAC. */
+  hmacEnabled: boolean;
+  hmacSecret: string | null;
 };
 
 export type GatewayStats = {
@@ -154,6 +163,7 @@ const STATEMENTS = [
     last_seen_at VARCHAR(40) NULL,
     wifi_ssid VARCHAR(191) NULL,
     wifi_password VARCHAR(191) NULL,
+    hmac_secret VARCHAR(128) NULL,
     time_update_seconds INT NOT NULL DEFAULT 30,
     PRIMARY KEY (gateway_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -283,14 +293,20 @@ async function createSchema() {
     await emsDb.query(statement);
   }
   await emsDb.query(
+    "ALTER TABLE gateway_devices ADD COLUMN IF NOT EXISTS hmac_secret VARCHAR(128) NULL",
+  ).catch(() => undefined);
+  await emsDb.query(
     "INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-09-23-gateway-server-1')",
   ).catch(() => undefined);
   await emsDb.query(
     "INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-10-04-gateway-samples')",
   ).catch(() => undefined);
+  await emsDb.query(
+    "INSERT IGNORE INTO schema_migrations (version) VALUES ('2026-10-17-gateway-hmac')",
+  ).catch(() => undefined);
 }
 
-export async function ingestGateway(rawText: string) {
+export async function ingestGateway(rawText: string, headers?: Headers) {
   await ensureGatewaySchema();
   const receivedAt = new Date().toISOString();
   const parsed = parseGatewayPacket(rawText);
@@ -325,11 +341,31 @@ export async function ingestGateway(rawText: string) {
   let disposition = parsed.ok ? "accepted" : "checksum";
   const notes: Array<{ level: string; reason: string }> = [];
 
-  if (!parsed.ok) {
+  // HMAC chống giả mạo: chỉ bắt buộc khi gateway đã được cấp secretKey.
+  if (config.hmacSecret) {
+    const provided =
+      packet.hmac ||
+      readHmacFromBody((parsed.raw as Record<string, unknown>) ?? {}) ||
+      readHmacFromHeaders(headers);
+    const payload = hmacSigningPayload(rawText);
+    const ok = verifyGatewayHmac(config.hmacSecret, payload, provided);
+    if (!ok) {
+      disposition = "hmac_invalid";
+      server = 2;
+      notes.push({
+        level: "log",
+        reason: provided
+          ? "HMAC không khớp: dữ liệu có thể bị sửa hoặc secretKey sai."
+          : "Thiếu chữ ký HMAC trong body (HMAC) hoặc header X-Gateway-HMAC.",
+      });
+    }
+  }
+
+  if (!parsed.ok && disposition !== "hmac_invalid") {
     if (parsed.packet?.meterModelCode == null) {
       notes.push({ level: "log", reason: parsed.reason });
     }
-  } else if (packet.timeSynced) {
+  } else if (disposition === "accepted" && packet.timeSynced) {
     const duplicate = await readingExists(packet);
     if (duplicate) {
       disposition = "duplicate";
@@ -403,7 +439,7 @@ export async function ingestGateway(rawText: string) {
     }
 
     let packetId = 0;
-    if (registered && sample) {
+    if (registered && sample && disposition === "accepted") {
       const receivedSql = receivedAt.slice(0, 23).replace("T", " ").replace("Z", "");
       const valuesJson = JSON.stringify(packet.values);
       const crcOk = parsed.ok ? 1 : 0;
@@ -449,9 +485,9 @@ export async function ingestGateway(rawText: string) {
           receivedSql,
           packet.timeSynced ? Math.trunc(packet.readingDate.getTime() / 1000) : null,
           packet.error,
-        valuesJson,
-      ],
-    );
+          valuesJson,
+        ],
+      );
     }
     if (registered) {
     const [inserted] = await connection.execute<ResultSetHeader>(
@@ -678,8 +714,24 @@ export async function saveGatewayConfig(input: {
   wifi: string | null;
   passWifi: string | null;
   timeUpdate: number;
+  /** undefined = giữ nguyên; null/"" = xóa secret; string = ghi secret mới. */
+  hmacSecret?: string | null;
 }) {
   await ensureGatewaySchema();
+  if (input.hmacSecret !== undefined) {
+    const secret = input.hmacSecret?.trim() || null;
+    await emsDb.execute(
+      `INSERT INTO gateway_devices (gateway_id, wifi_ssid, wifi_password, time_update_seconds, hmac_secret)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         wifi_ssid = VALUES(wifi_ssid),
+         wifi_password = VALUES(wifi_password),
+         time_update_seconds = VALUES(time_update_seconds),
+         hmac_secret = VALUES(hmac_secret)`,
+      [input.gatewayId, input.wifi, input.passWifi, input.timeUpdate, secret],
+    );
+    return;
+  }
   await emsDb.execute(
     `INSERT INTO gateway_devices (gateway_id, wifi_ssid, wifi_password, time_update_seconds)
      VALUES (?, ?, ?, ?)
@@ -740,10 +792,15 @@ async function readingExists(packet: NormalizedPacket) {
 
 async function loadConfig(gatewayId: string) {
   if (!gatewayId) {
-    return { timeUpdate: DEFAULT_TIME_UPDATE_SECONDS, wifi: null as string | null, passWifi: null as string | null };
+    return {
+      timeUpdate: DEFAULT_TIME_UPDATE_SECONDS,
+      wifi: null as string | null,
+      passWifi: null as string | null,
+      hmacSecret: null as string | null,
+    };
   }
   const rows = await queryRows<RowDataPacket>(
-    `SELECT wifi_ssid, wifi_password, time_update_seconds
+    `SELECT wifi_ssid, wifi_password, time_update_seconds, hmac_secret
        FROM gateway_devices WHERE gateway_id = ? LIMIT 1`,
     [gatewayId],
   );
@@ -752,6 +809,7 @@ async function loadConfig(gatewayId: string) {
     timeUpdate: row ? asCount(row.time_update_seconds) || DEFAULT_TIME_UPDATE_SECONDS : DEFAULT_TIME_UPDATE_SECONDS,
     wifi: row?.wifi_ssid ? String(row.wifi_ssid) : null,
     passWifi: row?.wifi_password ? String(row.wifi_password) : null,
+    hmacSecret: row?.hmac_secret ? String(row.hmac_secret) : null,
   };
 }
 
@@ -877,6 +935,8 @@ function mapDevice(row: RowDataPacket): GatewayDeviceView {
     wifi: textOrNull(row.wifi_ssid),
     passWifi: textOrNull(row.wifi_password),
     timeUpdate: asCount(row.time_update_seconds) || DEFAULT_TIME_UPDATE_SECONDS,
+    hmacEnabled: Boolean(row.hmac_secret),
+    hmacSecret: textOrNull(row.hmac_secret),
   };
 }
 

@@ -3,12 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Project } from "@/lib/projects";
 import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
+import { hydrateClientMeters } from "@/lib/client-meters";
 import { hydrateGhgSources } from "@/lib/ghg-sources";
-import { hydrateMeterReadings } from "@/lib/meter-readings";
 import { hydrateDevices } from "@/lib/devices";
 import {
+  civilWeekday,
+  industrialBand,
+  resolveTouPrices,
+  type TouPrices,
+} from "@/lib/industrial-electricity";
+import { registerToKwh } from "@/lib/meter-parameters";
+import { hydrateProjectSettings } from "@/lib/project-settings";
+import {
   loadProjectGatewayDaily,
+  loadProjectGatewayEnergySlots,
   type GatewayDailyPoint,
+  type GatewayEnergySlot,
   type ProjectGatewaySample,
 } from "@/lib/gateway-series";
 import { formatStoredVietnam, vietnamFromStored } from "@/lib/vietnam-time";
@@ -17,8 +27,8 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 const YEAR_OPTIONS = [2024, 2025, 2026, 2027];
 
-type DashboardAlert = { time: string; point: string; param: string; value: string };
-type EnergyPoint = { day: string; kwh: number; indexKwh: number };
+type DashboardAlert = { id: string; time: string; point: string; param: string; value: string };
+type EnergyPoint = { day: string; label: string; kwh: number; indexKwh: number; hasSample: boolean };
 type StatusSlice = { label: string; value: number; color: string };
 
 const EMPTY_STATUS: StatusSlice[] = [
@@ -26,6 +36,23 @@ const EMPTY_STATUS: StatusSlice[] = [
   { label: "CẢNH BÁO", value: 0, color: "#ef8d3a" },
   { label: "NGOẠI TUYẾN", value: 0, color: "#9aa3af" },
 ];
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function daysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function monthRange(year: number, month: number) {
+  const last = daysInMonth(year, month);
+  return {
+    from: `${year}-${pad2(month)}-01`,
+    to: `${year}-${pad2(month)}-${pad2(last)}`,
+    last,
+  };
+}
 
 function formatKwh(value: number) {
   if (!Number.isFinite(value)) return "0.0";
@@ -38,21 +65,72 @@ function formatReading(value: number, digits: number) {
   return value.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
-function dailyEnergy(rows: GatewayDailyPoint[]): EnergyPoint[] {
+function formatVnd(value: number) {
+  return Math.round(value).toLocaleString("vi-VN");
+}
+
+function slotStoredAt(day: string, hour: number, minute: number) {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, hour, minute) - 7 * 60 * 60 * 1000).toISOString().slice(0, 19);
+}
+
+function monthlyCostFromSlots(slots: GatewayEnergySlot[], prices: TouPrices) {
+  const byMeter = new Map<string, GatewayEnergySlot[]>();
+  for (const slot of slots) {
+    const list = byMeter.get(slot.meterPointId) ?? [];
+    list.push(slot);
+    byMeter.set(slot.meterPointId, list);
+  }
+  let total = 0;
+  for (const list of byMeter.values()) {
+    const ordered = [...list].sort(
+      (a, b) => a.day.localeCompare(b.day) || a.hour - b.hour || a.minute - b.minute,
+    );
+    let previous: number | null = null;
+    for (const slot of ordered) {
+      const startKwh = registerToKwh(slot.firstWh);
+      const endKwh = registerToKwh(slot.lastWh);
+      const within = Math.max(0, endKwh - startKwh);
+      const gap = previous == null ? 0 : Math.max(0, startKwh - previous);
+      const delta = within + gap;
+      previous = endKwh;
+      if (delta <= 0) continue;
+      const parts = vietnamFromStored(slotStoredAt(slot.day, slot.hour, slot.minute));
+      if (!parts) continue;
+      const band = industrialBand(civilWeekday(parts.year, parts.month, parts.day), parts.hour, parts.minute);
+      total += delta * prices[band];
+    }
+  }
+  return total;
+}
+
+function monthEnergySeries(rows: GatewayDailyPoint[], year: number, month: number): EnergyPoint[] {
   const byDay = new Map<string, { kwh: number; indexKwh: number }>();
   for (const row of rows) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day)) continue;
-    const firstWh = Number(row.firstWh);
-    const lastWh = Number(row.lastWh);
-    if (!Number.isFinite(firstWh) || !Number.isFinite(lastWh)) continue;
-    const consumed = Math.max(0, (lastWh - firstWh) / 1000);
-    const indexKwh = lastWh / 1000;
+    const firstKwh = registerToKwh(Number(row.firstWh));
+    const lastKwh = registerToKwh(Number(row.lastWh));
+    if (!Number.isFinite(firstKwh) || !Number.isFinite(lastKwh)) continue;
+    const consumed = Math.max(0, lastKwh - firstKwh);
     const current = byDay.get(row.day) ?? { kwh: 0, indexKwh: 0 };
-    byDay.set(row.day, { kwh: current.kwh + consumed, indexKwh: current.indexKwh + indexKwh });
+    byDay.set(row.day, {
+      kwh: current.kwh + consumed,
+      indexKwh: current.indexKwh + lastKwh,
+    });
   }
-  return [...byDay.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([day, point]) => ({ day: day.slice(5), kwh: point.kwh, indexKwh: point.indexKwh }));
+  const last = daysInMonth(year, month);
+  return Array.from({ length: last }, (_, index) => {
+    const day = index + 1;
+    const iso = `${year}-${pad2(month)}-${pad2(day)}`;
+    const point = byDay.get(iso);
+    return {
+      day: iso,
+      label: pad2(day),
+      kwh: point?.kwh ?? 0,
+      indexKwh: point?.indexKwh ?? 0,
+      hasSample: Boolean(point),
+    };
+  });
 }
 
 export function ClientDashboard({ project }: { project: Project }) {
@@ -60,63 +138,86 @@ export function ClientDashboard({ project }: { project: Project }) {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [dailyRows, setDailyRows] = useState<GatewayDailyPoint[]>([]);
+  const [monthSlots, setMonthSlots] = useState<GatewayEnergySlot[]>([]);
   const [latest, setLatest] = useState<ProjectGatewaySample | null>(null);
-  const [energy, setEnergy] = useState<EnergyPoint[]>([]);
+  const [touPrices, setTouPrices] = useState<TouPrices>(() => resolveTouPrices("kv-under-6").prices);
   const [deviceStatus, setDeviceStatus] = useState(EMPTY_STATUS);
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
   const [co2, setCo2] = useState(0);
   const alignedMonth = useRef(false);
 
   useEffect(() => {
+    alignedMonth.current = false;
+  }, [project.id]);
+
+  useEffect(() => {
     let active = true;
     const reload = () => {
       void Promise.all([
-        hydrateMeterReadings(project.id),
         hydrateAlertEvents(project.id),
         hydrateDevices(),
+        hydrateClientMeters(project.id),
         hydrateGhgSources(project.id),
-      ]).then(([readings, alertEvents, devices, sources]) => {
+        hydrateProjectSettings(project.id),
+      ]).then(([alertEvents, devices, meters, sources, settings]) => {
         if (!active) return;
-        const energyRows = readings.filter((row) => row.metric === "energy");
-        setEnergy(energyRows.map((row) => ({
-          day: row.recordedAt.slice(5, 10),
-          kwh: row.value,
-          indexKwh: row.value,
-        })));
-        const counts = devices.reduce((result, device) => {
-          if (device.status === "offline") result.offline += 1;
-          else if (device.status === "maintenance") result.warning += 1;
-          else result.normal += 1;
-          return result;
-        }, { normal: 0, warning: 0, offline: 0 });
+        const saved = settings.costConfig as {
+          electricity?: {
+            voltageLevel?: string;
+            prices?: Partial<Record<"normal" | "off" | "peak", string>>;
+          };
+        } | undefined;
+        setTouPrices(resolveTouPrices(saved?.electricity?.voltageLevel, saved?.electricity?.prices).prices);
+        const deviceIds = new Set(meters.map((meter) => meter.deviceId).filter(Boolean));
+        const projectDevices = devices.filter((device) => deviceIds.has(device.id));
+        const sourceDevices = projectDevices.length ? projectDevices : devices;
+        const counts = sourceDevices.reduce(
+          (result, device) => {
+            if (device.status === "offline") result.offline += 1;
+            else if (device.status === "maintenance") result.warning += 1;
+            else result.normal += 1;
+            return result;
+          },
+          { normal: 0, warning: 0, offline: 0 },
+        );
         setDeviceStatus([
           { label: "BÌNH THƯỜNG", value: counts.normal, color: "#43a047" },
           { label: "CẢNH BÁO", value: counts.warning, color: "#ef8d3a" },
           { label: "NGOẠI TUYẾN", value: counts.offline, color: "#9aa3af" },
         ]);
-        setAlerts(alertEvents.slice(0, 8).map((event: AlertEvent) => ({
-          time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
-          point: event.pointName ?? event.meterPointId ?? "--",
-          param: event.parameter,
-          value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
-        })));
+        setAlerts(
+          alertEvents.slice(0, 12).map((event: AlertEvent) => ({
+            id: event.id ?? `${event.occurredAt}-${event.meterPointId}-${event.parameter}`,
+            time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
+            point: event.pointName ?? event.meterPointId ?? "--",
+            param: event.parameter,
+            value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
+          })),
+        );
         setCo2(sources.reduce((sum, source) => sum + (source.tons ?? 0), 0));
       }).catch(() => undefined);
     };
     reload();
     window.addEventListener("ems-alert-events-changed", reload);
+    window.addEventListener("ems-client-meters-changed", reload);
     return () => {
       active = false;
       window.removeEventListener("ems-alert-events-changed", reload);
+      window.removeEventListener("ems-client-meters-changed", reload);
     };
   }, [project.id]);
 
   useEffect(() => {
     let active = true;
-    void loadProjectGatewayDaily(project.id, year, month).then((summary) => {
+    const { from, to } = monthRange(year, month);
+    void Promise.all([
+      loadProjectGatewayDaily(project.id, year, month),
+      loadProjectGatewayEnergySlots(project.id, from, to),
+    ]).then(([summary, slots]) => {
       if (!active) return;
       setDailyRows(summary.days);
       setLatest(summary.latest);
+      setMonthSlots(slots.slots);
     });
     return () => {
       active = false;
@@ -134,16 +235,19 @@ export function ClientDashboard({ project }: { project: Project }) {
     }
   }, [latest, year, month]);
 
-  const gatewayEnergy = useMemo(() => dailyEnergy(dailyRows), [dailyRows]);
-  const consumptionTotal = gatewayEnergy.length
-    ? gatewayEnergy.reduce((sum, item) => sum + item.kwh, 0)
-    : energy.reduce((sum, item) => sum + item.kwh, 0);
-  const showIndex = gatewayEnergy.length > 0 && consumptionTotal === 0;
-  const energySeries = gatewayEnergy.length
-    ? gatewayEnergy.map((item) => ({ day: item.day, kwh: showIndex ? item.indexKwh : item.kwh }))
-    : energy;
-  const energyMax = Math.max(...energySeries.map((item) => item.kwh), 0);
-  const energyMin = energySeries.length ? Math.min(...energySeries.map((item) => item.kwh)) : 0;
+  const energySeries = useMemo(() => monthEnergySeries(dailyRows, year, month), [dailyRows, year, month]);
+  const consumptionTotal = energySeries.reduce((sum, item) => sum + item.kwh, 0);
+  const showIndex = dailyRows.length > 0 && consumptionTotal === 0;
+  const chartSeries = energySeries.map((item) => ({
+    day: item.label,
+    kwh: showIndex ? item.indexKwh : item.kwh,
+    hasSample: item.hasSample,
+  }));
+  const sampledValues = chartSeries.filter((item) => item.hasSample).map((item) => item.kwh);
+  const energyMax = sampledValues.length ? Math.max(...sampledValues) : 0;
+  const energyMin = sampledValues.length ? Math.min(...sampledValues) : 0;
+  const monthCost = useMemo(() => monthlyCostFromSlots(monthSlots, touPrices), [monthSlots, touPrices]);
+  const monthCostThousands = monthCost / 1000;
 
   return (
     <div className="mx-auto h-full max-w-[1480px] overflow-y-auto px-5 py-5 lg:px-6">
@@ -175,12 +279,17 @@ export function ClientDashboard({ project }: { project: Project }) {
               <span className="font-semibold text-emerald-600">{formatKwh(energyMin)} kWh</span>
             </p>
             <p>
-              {showIndex ? "Tiêu thụ" : "Tổng"}:{" "}
+              Tổng tiêu thụ:{" "}
               <span className="font-semibold text-slate-800">{formatKwh(consumptionTotal)} kWh</span>
             </p>
+            {showIndex ? (
+              <p className="w-full text-[12px] text-amber-700">
+                Công tơ không tăng trong tháng — cột đang hiện chỉ số EPaed cuối ngày để thấy các ngày có bản tin.
+              </p>
+            ) : null}
           </div>
           {latest ? <LatestReading sample={latest} /> : null}
-          <EnergyChart data={energySeries} />
+          <EnergyChart data={chartSeries} />
         </DashboardCard>
 
         <DashboardCard title="PHÁT THẢI CO2">
@@ -202,9 +311,17 @@ export function ClientDashboard({ project }: { project: Project }) {
         <DashboardCard title="CHI PHÍ">
           <DonutChart
             color="#1e5f8a"
-            value={(consumptionTotal * 1.912).toFixed(2)}
+            value={monthCostThousands.toLocaleString("vi-VN", {
+              maximumFractionDigits: monthCostThousands > 0 && monthCostThousands < 10 ? 2 : 0,
+            })}
             unit="nghìn VNĐ"
-            caption="Tủ điện văn phòng: 100% chi phí hệ thống"
+            caption={
+              monthCost > 0
+                ? `Tổng tháng ${pad2(month)}/${year}: ${formatVnd(monthCost)} VND (trước VAT)`
+                : monthSlots.length > 0
+                  ? `Tháng ${pad2(month)}/${year}: có bản tin nhưng EPaed không tăng → 0 VND`
+                  : `Chưa có số liệu chi phí tháng ${pad2(month)}/${year}`
+            }
           />
         </DashboardCard>
 
@@ -355,7 +472,7 @@ function LatestReading({ sample }: { sample: ProjectGatewaySample }) {
   add("Ub", sample.values.Vbn, "V", 1);
   add("Uc", sample.values.Vcn, "V", 1);
   add("F", sample.values.F, "Hz", 2);
-  add("E", typeof sample.values.EPaed === "number" ? sample.values.EPaed / 1000 : undefined, "kWh", 3);
+  add("E", typeof sample.values.EPaed === "number" ? registerToKwh(sample.values.EPaed) : undefined, "kWh", 3);
   if (!items.length) return null;
   return (
     <p className="mb-3 text-xs text-slate-500">
@@ -366,7 +483,7 @@ function LatestReading({ sample }: { sample: ProjectGatewaySample }) {
   );
 }
 
-function EnergyChart({ data }: { data: { day: string; kwh: number }[] }) {
+function EnergyChart({ data }: { data: { day: string; kwh: number; hasSample?: boolean }[] }) {
   if (!data.length) {
     return (
       <div className="flex h-[250px] items-center justify-center text-sm text-slate-400">
@@ -377,19 +494,33 @@ function EnergyChart({ data }: { data: { day: string; kwh: number }[] }) {
   const max = Math.max(...data.map((item) => item.kwh), 0.001);
 
   return (
-    <div className="flex h-[250px] items-end gap-1.5 overflow-x-auto pb-1">
-      {data.map((item) => (
-        <div key={item.day} className="flex min-w-8 flex-1 flex-col items-center">
-          <div className="flex h-[220px] w-full items-end">
-            <div
-              className="mx-auto w-[78%] rounded-t-md bg-emerald-600 transition-all hover:bg-emerald-500"
-              style={{ height: `${(item.kwh / max) * 100}%` }}
-              title={`${item.day}: ${item.kwh} kWh`}
-            />
+    <div className="flex h-[250px] items-end gap-[2px] overflow-x-auto pb-1">
+      {data.map((item) => {
+        const heightPct = item.kwh > 0 ? Math.max((item.kwh / max) * 100, 4) : 0;
+        return (
+          <div key={item.day} className="flex min-w-[10px] flex-1 flex-col items-center">
+            <div className="flex h-[210px] w-full items-end justify-center">
+              {heightPct > 0 ? (
+                <div
+                  className="w-[7px] rounded-t-sm bg-emerald-600 transition-all hover:bg-emerald-500"
+                  style={{ height: `${heightPct}%` }}
+                  title={`Ngày ${item.day}: ${formatKwh(item.kwh)} kWh`}
+                />
+              ) : (
+                <div
+                  className={`h-[2px] w-[7px] rounded-sm ${item.hasSample ? "bg-emerald-300" : "bg-slate-200"}`}
+                  title={
+                    item.hasSample
+                      ? `Ngày ${item.day}: có bản tin, sản lượng 0 kWh`
+                      : `Ngày ${item.day}: không có bản tin`
+                  }
+                />
+              )}
+            </div>
+            <span className="mt-1 text-[9px] leading-none text-slate-400">{item.day}</span>
           </div>
-          <span className="mt-1.5 text-[10px] text-slate-400">{item.day}</span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -399,53 +530,56 @@ function DeviceStatusChart({
 }: {
   items: { label: string; value: number; color: string }[];
 }) {
-  const ticks = [15, 10, 5, 0];
-  const yMax = 15;
+  const maxValue = Math.max(...items.map((item) => item.value), 0);
+  const yMax = Math.max(4, Math.ceil(maxValue / 4) * 4 || 4);
+  const ticks = [yMax, Math.round((yMax * 2) / 3), Math.round(yMax / 3), 0];
+  const total = items.reduce((sum, item) => sum + item.value, 0);
 
   return (
-    <div className="flex h-[280px] gap-2 pt-2">
-      <div className="flex h-[230px] flex-col justify-between py-0.5 text-[11px] text-slate-400">
-        {ticks.map((tick) => (
-          <span key={tick} className="leading-none">
-            {tick}
-          </span>
-        ))}
-      </div>
-      <div className="relative min-w-0 flex-1">
-        <div className="absolute inset-x-0 top-0 h-[230px]">
-          {ticks.map((tick, i) => (
-            <div
-              key={tick}
-              className="absolute inset-x-0 border-t border-slate-100"
-              style={{ top: `${(i / (ticks.length - 1)) * 100}%` }}
-            />
+    <div className="flex h-[280px] flex-col gap-2 pt-2">
+      <p className="text-[12px] text-slate-500">Tổng thiết bị dự án: {total}</p>
+      <div className="flex min-h-0 flex-1 gap-2">
+        <div className="flex h-[210px] flex-col justify-between py-0.5 text-[11px] text-slate-400">
+          {ticks.map((tick) => (
+            <span key={tick} className="leading-none">
+              {tick}
+            </span>
           ))}
         </div>
-        <div className="relative flex h-[230px] items-end justify-around px-4">
-          {items.map((item) => (
-            <div key={item.label} className="flex h-full w-[28%] flex-col items-center justify-end">
-              <span className="mb-1 text-sm font-semibold text-slate-700">
-                {item.value}
-              </span>
+        <div className="relative min-w-0 flex-1">
+          <div className="absolute inset-x-0 top-0 h-[210px]">
+            {ticks.map((tick, i) => (
               <div
-                className="w-full rounded-t-md"
-                style={{
-                  height: `${(item.value / yMax) * 100}%`,
-                  backgroundColor: item.color,
-                }}
+                key={`${tick}-${i}`}
+                className="absolute inset-x-0 border-t border-slate-100"
+                style={{ top: `${(i / (ticks.length - 1)) * 100}%` }}
               />
-            </div>
-          ))}
-        </div>
-        <div className="mt-2 flex justify-around px-4">
-          {items.map((item) => (
-            <p
-              key={item.label}
-              className="w-[28%] text-center text-[10px] font-medium tracking-wide text-slate-400"
-            >
-              {item.label}
-            </p>
-          ))}
+            ))}
+          </div>
+          <div className="relative flex h-[210px] items-end justify-around px-4">
+            {items.map((item) => (
+              <div key={item.label} className="flex h-full w-[28%] flex-col items-center justify-end">
+                <span className="mb-1 text-sm font-semibold text-slate-700">{item.value}</span>
+                <div
+                  className="w-full max-w-[42px] rounded-t-md"
+                  style={{
+                    height: `${item.value > 0 ? Math.max((item.value / yMax) * 100, 6) : 0}%`,
+                    backgroundColor: item.color,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex justify-around px-4">
+            {items.map((item) => (
+              <p
+                key={item.label}
+                className="w-[28%] text-center text-[10px] font-medium tracking-wide text-slate-400"
+              >
+                {item.label}
+              </p>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -582,18 +716,26 @@ function AlertLogTable({ rows: sourceRows }: { rows: DashboardAlert[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.time} className="border-t border-slate-100 text-slate-600">
-              <td className="py-2.5 whitespace-nowrap">{row.time}</td>
-              <td className="py-2.5">{row.point}</td>
-              <td className="py-2.5">
-                <button type="button" className="text-emerald-600 hover:underline">
-                  {row.param}
-                </button>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={4} className="py-8 text-center text-sm text-slate-400">
+                {sourceRows.length === 0 ? "Chưa có nhật ký cảnh báo trong dự án" : "Không khớp bộ lọc"}
               </td>
-              <td className="py-2.5">{row.value}</td>
             </tr>
-          ))}
+          ) : (
+            rows.map((row) => (
+              <tr key={row.id} className="border-t border-slate-100 text-slate-600">
+                <td className="py-2.5 whitespace-nowrap">{row.time}</td>
+                <td className="py-2.5">{row.point}</td>
+                <td className="py-2.5">
+                  <button type="button" className="text-emerald-600 hover:underline">
+                    {row.param}
+                  </button>
+                </td>
+                <td className="py-2.5">{row.value}</td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>

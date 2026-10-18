@@ -1,5 +1,6 @@
 import type { PoolConnection } from "mysql2/promise";
 import { NextRequest } from "next/server";
+import { requirePermission } from "@/lib/server-auth";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
 
 type Params = { params: Promise<{ resource: string }> };
@@ -22,6 +23,10 @@ const RESOURCE_NAMES = new Set([
 
 function badRequest(message: string) {
   return Response.json({ error: message }, { status: 400 });
+}
+
+function forbidden(message = "Không có quyền thực hiện thao tác này.") {
+  return Response.json({ error: message }, { status: 403 });
 }
 
 function serverError(error: unknown) {
@@ -628,6 +633,10 @@ export async function POST(request: NextRequest, context: Params) {
   try {
     const resource = await resourceName(context);
     if (!RESOURCE_NAMES.has(resource)) return badRequest("Tài nguyên không hợp lệ.");
+    if (resource === "accounts") {
+      const gate = await requirePermission("manageUsers");
+      if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý người dùng.");
+    }
     const body = (await request.json()) as Row;
     return Response.json(await saveResource(resource, body));
   } catch (error) {
@@ -639,6 +648,10 @@ export async function DELETE(request: NextRequest, context: Params) {
   try {
     const resource = await resourceName(context);
     if (!RESOURCE_NAMES.has(resource)) return badRequest("Tài nguyên không hợp lệ.");
+    if (resource === "accounts") {
+      const gate = await requirePermission("manageUsers");
+      if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý người dùng.");
+    }
     return Response.json(await deleteResource(resource, request));
   } catch (error) {
     return serverError(error);

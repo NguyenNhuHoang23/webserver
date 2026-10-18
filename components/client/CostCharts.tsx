@@ -116,22 +116,29 @@ function costBarsFromSlots(filter: TimeFilterValue, slots: GatewayEnergySlot[], 
   const ordered = [...slots].sort(
     (a, b) => a.day.localeCompare(b.day) || a.hour - b.hour || a.minute - b.minute,
   );
+  // Chỉ tính ΔkWh (chỉ số tăng thêm). Không nhân cả chỉ số tích lũy EPaed.
   let previous: number | null = null;
-  let lastAt = "";
-  let lastKwh = 0;
+  let lastIndexKwh = 0;
   for (const slot of ordered) {
+    const startKwh = registerToKwh(slot.firstWh);
     const endKwh = registerToKwh(slot.lastWh);
     const at = slotStoredAt(slot.day, slot.hour, slot.minute);
-    const delta =
-      previous == null ? Math.max(0, endKwh - registerToKwh(slot.firstWh)) : Math.max(0, endKwh - previous);
-    addSlotCost(filter, bars, tou, kwh, source, at, delta);
+    const bucket = periodIndexForInstant(filter, at, bars.length);
+    if (bucket >= 0) bars[bucket].light += 1;
+    const within = Math.max(0, endKwh - startKwh);
+    const gap = previous == null ? 0 : Math.max(0, startKwh - previous);
+    addSlotCost(filter, bars, tou, kwh, source, at, within + gap);
     previous = endKwh;
-    lastAt = at;
-    lastKwh = endKwh;
+    lastIndexKwh = endKwh;
   }
-  const consumed = kwh.normal + kwh.off + kwh.peak + kwh.none;
-  const usedIndex = consumed <= 0 && lastKwh > 0 && addSlotCost(filter, bars, tou, kwh, source, lastAt, lastKwh);
-  return { bars, tou, kwh, usedIndex };
+  return {
+    bars,
+    tou,
+    kwh,
+    sampleDays: new Set(ordered.map((slot) => slot.day)).size,
+    slotCount: ordered.length,
+    lastIndexKwh,
+  };
 }
 
 function costLabel(energy: string) {
@@ -326,7 +333,9 @@ export function CostCharts() {
           bars: result.bars,
           tou: result.tou,
           kwh: result.kwh,
-          usedIndex: result.usedIndex,
+          sampleDays: result.sampleDays,
+          slotCount: result.slotCount,
+          lastIndexKwh: result.lastIndexKwh,
         };
       }),
     [rateSource, slots, selectedPoints, timeFilter],
@@ -603,7 +612,23 @@ export function CostCharts() {
                 Chưa có điểm đo loại {energy} để hiển thị chi phí
               </p>
             ) : (
-              <MultiCostBarChart series={series} hover={hover} onHover={setHover} />
+              <>
+                {slots.length > 0 && series.every((item) => item.slotCount === 0) ? (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-900">
+                    API đã trả {slots.length} khung giờ, nhưng điểm đo đang chọn không khớp `meterPointId` của series.
+                    Chọn đúng điểm đo có dữ liệu (ví dụ {slots[0]?.meterPointId}) để xem chi phí.
+                  </div>
+                ) : null}
+                {grandTotal <= 0 && series.some((item) => item.slotCount > 0) ? (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-900">
+                    Series đã trả {series.reduce((sum, item) => sum + item.slotCount, 0)} khung giờ /
+                    {" "}{Math.max(...series.map((item) => item.sampleDays), 0)} ngày có bản tin.
+                    Chỉ số EPaed đứng yên (ví dụ {formatKwh(Math.max(...series.map((item) => item.lastIndexKwh), 0))} kWh)
+                    nên sản lượng từng ngày = 0 kWh và cột chi phí = 0 VND. Khi công tơ tăng, cột sẽ hiện đúng theo từng ngày.
+                  </div>
+                ) : null}
+                <MultiCostBarChart series={series} hover={hover} onHover={setHover} />
+              </>
             )}
           </article>
 
@@ -695,11 +720,11 @@ export function CostCharts() {
             <span className={`h-2.5 w-2.5 rounded-full ${grandTotal > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
             {grandTotal > 0
               ? energy === "Điện"
-                ? series.some((item) => item.usedIndex)
-                  ? "Công tơ không tăng trong kỳ nên tiền điện = chỉ số hiện tại × đơn giá khung giờ của lần đo cuối. Chưa gồm VAT."
-                  : "Tiền điện = sản lượng bình thường × đơn giá bình thường + thấp điểm × đơn giá thấp điểm + cao điểm × đơn giá cao điểm. Chưa gồm VAT."
+                ? "Tiền điện = sản lượng từng khung giờ (chỉ số cuối − chỉ số đầu) × đơn giá khung giờ tương ứng. Chưa gồm VAT."
                 : `Chi phí = sản lượng × ${formatVnd(flatPrices[energy] ?? 0)} VNĐ.`
-              : "Chưa có số liệu chi phí trong kỳ này"}
+              : slots.length > 0 && energy === "Điện"
+                ? `Đã lấy ${Math.max(...series.map((item) => item.sampleDays), 0)} ngày có bản tin trong kỳ, nhưng EPaed không tăng (first = last) nên sản lượng và tiền điện mỗi ngày đều là 0. Chưa gồm VAT.`
+                : "Chưa có số liệu chi phí trong kỳ này"}
           </p>
         </div>
       </div>
@@ -712,7 +737,10 @@ function MultiCostBarChart({
   hover,
   onHover,
 }: {
-  series: { point: CostPoint; bars: ReturnType<typeof costSeriesForFilter> }[];
+  series: {
+    point: CostPoint;
+    bars: CostBar[];
+  }[];
   hover: number | null;
   onHover: (index: number | null) => void;
 }) {
@@ -758,22 +786,60 @@ function MultiCostBarChart({
       })}
       {base.map((bar, i) => {
         const gx = pad.l + i * groupW;
+        const hasSamples = series.some((item) => (item.bars[i]?.light ?? 0) > 0);
         return (
           <g key={bar.key} onMouseEnter={() => onHover(i)}>
+            {hasSamples ? (
+              <rect
+                x={gx + 2}
+                y={pad.t}
+                width={Math.max(groupW - 4, 2)}
+                height={innerH}
+                fill="#ecfdf5"
+                opacity={hover == null || hover === i ? 0.85 : 0.35}
+              />
+            ) : null}
             {series.map((item, sIdx) => {
               const value = item.bars[i]?.dark ?? 0;
+              const samples = item.bars[i]?.light ?? 0;
               const x = gx + groupW * 0.15 + sIdx * barW;
-              return (
-                <rect
-                  key={item.point.id}
-                  x={x}
-                  y={yAt(value)}
-                  width={Math.max(3, barW * 0.85)}
-                  height={Math.max(0, yAt(0) - yAt(value))}
-                  fill={item.point.color}
-                  opacity={hover == null || hover === i ? 1 : 0.4}
-                />
-              );
+              const width = Math.max(3, barW * 0.85);
+              if (value > 0) {
+                return (
+                  <rect
+                    key={item.point.id}
+                    x={x}
+                    y={yAt(value)}
+                    width={width}
+                    height={Math.max(0, yAt(0) - yAt(value))}
+                    fill={item.point.color}
+                    opacity={hover == null || hover === i ? 1 : 0.4}
+                  />
+                );
+              }
+              if (samples > 0) {
+                return (
+                  <g key={item.point.id}>
+                    <line
+                      x1={x}
+                      x2={x + width}
+                      y1={yAt(0) - 1}
+                      y2={yAt(0) - 1}
+                      stroke={item.point.color}
+                      strokeWidth="3"
+                      opacity={hover == null || hover === i ? 1 : 0.4}
+                    />
+                    <circle
+                      cx={x + width / 2}
+                      cy={yAt(0) - 6}
+                      r="3.5"
+                      fill={item.point.color}
+                      opacity={hover == null || hover === i ? 1 : 0.4}
+                    />
+                  </g>
+                );
+              }
+              return null;
             })}
             {i % labelStep === 0 || i === base.length - 1 ? (
               <text
@@ -790,10 +856,10 @@ function MultiCostBarChart({
         );
       })}
       {hover != null && base[hover] ? (
-        <g transform={`translate(${Math.min(pad.l + hover * groupW + 12, W - 180)}, ${pad.t + 6})`}>
+        <g transform={`translate(${Math.min(pad.l + hover * groupW + 12, W - 200)}, ${pad.t + 6})`}>
           <rect
-            width="168"
-            height={20 + series.length * 16}
+            width="188"
+            height={28 + series.length * 28}
             rx="4"
             fill="white"
             stroke="#e2e8f0"
@@ -801,18 +867,20 @@ function MultiCostBarChart({
           <text x="10" y="16" className="fill-slate-500" fontSize="11">
             {base[hover].label}
           </text>
-          {series.map((item, i) => (
-            <text
-              key={item.point.id}
-              x="10"
-              y={34 + i * 16}
-              fontSize="11"
-              fontWeight="600"
-              fill={item.point.color}
-            >
-              {item.point.code}: {formatVnd(item.bars[hover]?.dark ?? 0)} VND
-            </text>
-          ))}
+          {series.map((item, i) => {
+            const samples = item.bars[hover]?.light ?? 0;
+            const cost = item.bars[hover]?.dark ?? 0;
+            return (
+              <g key={item.point.id}>
+                <text x="10" y={34 + i * 28} fontSize="11" fontWeight="600" fill={item.point.color}>
+                  {item.point.code}: {formatVnd(cost)} VND
+                </text>
+                <text x="10" y={48 + i * 28} fontSize="10" fill="#64748b">
+                  {samples > 0 ? `${samples} khung đo` : "Không có bản tin"}
+                </text>
+              </g>
+            );
+          })}
         </g>
       ) : null}
     </svg>

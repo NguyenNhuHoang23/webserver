@@ -30,6 +30,8 @@ type GatewayDeviceView = {
   wifi: string | null;
   passWifi: string | null;
   timeUpdate: number;
+  hmacEnabled: boolean;
+  hmacSecret: string | null;
 };
 
 type GatewayPacketView = {
@@ -137,6 +139,8 @@ export function GatewayConsole() {
   const [passWifi, setPassWifi] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [timeUpdate, setTimeUpdate] = useState("30");
+  const [hmacSecret, setHmacSecret] = useState("");
+  const [showHmac, setShowHmac] = useState(false);
   const [configMessage, setConfigMessage] = useState("");
   const [configError, setConfigError] = useState("");
   const [savingConfig, setSavingConfig] = useState(false);
@@ -190,6 +194,7 @@ export function GatewayConsole() {
     setWifi(device.wifi ?? "");
     setPassWifi(device.passWifi ?? "");
     setTimeUpdate(String(device.timeUpdate));
+    setHmacSecret(device.hmacSecret ?? "");
     setMeterModel(device.meterModel ?? "");
     setMeterId(device.meterId ?? "");
     setPicked(true);
@@ -206,6 +211,7 @@ export function GatewayConsole() {
     setWifi(device.wifi ?? "");
     setPassWifi(device.passWifi ?? "");
     setTimeUpdate(String(device.timeUpdate));
+    setHmacSecret(device.hmacSecret ?? "");
     setMeterModel(device.meterModel ?? "");
     setMeterId(device.meterId ?? "");
     setPicked(true);
@@ -224,10 +230,15 @@ export function GatewayConsole() {
         wifi,
         passWifi,
         timeUpdate: Number(timeUpdate),
+        hmacSecret: hmacSecret.trim() || null,
       });
       setSelectedId(draftId.trim());
       setPicked(true);
-      setConfigMessage("Đã lưu. Bản ACK sau của gateway này sẽ mang Wifi, PassWifi và TimeUpdate vừa cài.");
+      setConfigMessage(
+        hmacSecret.trim()
+          ? "Đã lưu. Gateway này bắt buộc HMAC-SHA256; bản tin thiếu/sai chữ ký sẽ bị từ chối."
+          : "Đã lưu. Chưa có secretKey nên server chỉ kiểm CRC (tương thích firmware cũ).",
+      );
       await load();
     } catch (error) {
       setConfigError(error instanceof Error ? error.message : "Không lưu được cấu hình.");
@@ -293,15 +304,15 @@ export function GatewayConsole() {
           </span>
         </div>
         <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">
-          Gateway bắn JSON đầy đủ hoặc dạng viết tắt (PV, IT, PN, GID, GT, GH, MT, MM, MID, TIM, RE, ER, VAL, CRC).
+          Gateway bắn JSON đầy đủ hoặc dạng viết tắt (PV, IT, PN, GID, GT, GH, MT, MM, MID, TIM, RE, ER, VAL, CRC, HMAC).
           Server lưu nguyên văn bản tin, toàn bộ values kể cả Null, rồi trả ACK kèm SeverTime, TimeUpdate, Wifi và PassWifi.
-          Checksum là CRC-16/MODBUS (4 ký tự hex) hoặc CRC-32 (8 ký tự hex) của đúng chuỗi JSON gốc sau khi bỏ trường CRC. Firmware có thể thiếu dấu phẩy giữa MT và MM, và gửi -nan.
+          CRC kiểm lỗi truyền. HMAC-SHA256 (khi đã cấp secretKey) chống giả mạo thiết bị: ký trên JSON sau khi bỏ CRC/HMAC.
         </p>
       </div>
 
       <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <InfoCard title="Server = 1" text="Đã lưu bản tin." />
-        <InfoCard title="Server = 2" text="Lỗi checksum. Không dùng số liệu." />
+        <InfoCard title="Server = 2" text="Lỗi CRC hoặc HMAC. Không dùng số liệu." />
         <InfoCard title="Server = 3" text="Lỗi format JSON hoặc thiếu trường." />
         <InfoCard title="Server = 4" text="Bỏ qua: trùng readingTime, lệch giờ quá 20 giây, hoặc Error khác 0. Vẫn trả giờ server để gateway chỉnh đồng hồ." />
       </section>
@@ -447,6 +458,57 @@ export function GatewayConsole() {
                   Hiện mật khẩu
                 </label>
                 <TextField label="TimeUpdate (giây)" value={timeUpdate} onChange={setTimeUpdate} />
+                <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+                  <p className="text-xs font-semibold text-slate-800">HMAC chống giả mạo</p>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                    Cấp secretKey riêng cho gateway. Firmware tính HMAC-SHA256(secretKey, JSON bỏ CRC/HMAC)
+                    rồi gửi trường <code className="font-mono">HMAC</code> (hoặc header <code className="font-mono">X-Gateway-HMAC</code>).
+                    Có secret → bắt buộc chữ ký đúng mới lưu số liệu.
+                  </p>
+                  <label className="mt-3 block text-xs font-medium text-slate-600">
+                    secretKey
+                    <input
+                      type={showHmac ? "text" : "password"}
+                      value={hmacSecret}
+                      onChange={(event) => setHmacSecret(event.target.value)}
+                      placeholder="Để trống = tắt HMAC"
+                      className="mt-1 block h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-mono text-[11px] outline-none focus:border-emerald-500"
+                    />
+                  </label>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={showHmac}
+                        onChange={(event) => setShowHmac(event.target.checked)}
+                      />
+                      Hiện secret
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setHmacSecret(generateClientSecret())}
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Sinh secret mới
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHmacSecret("")}
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-50"
+                    >
+                      Xóa secret
+                    </button>
+                    {selected?.hmacEnabled ? (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                        Đang bật HMAC
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                        HMAC tắt
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => void saveConfig()}
@@ -799,6 +861,12 @@ function formatStamp(value: string | null) {
 
 function localInput(date: Date) {
   return vietnamInputValue(date);
+}
+
+function generateClientSecret() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function postConsole(body: Record<string, unknown>) {

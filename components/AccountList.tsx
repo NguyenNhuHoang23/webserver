@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useAuth } from "@/components/auth/useAuth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   hydrateAccounts,
@@ -10,6 +11,7 @@ import {
   type Account,
   type AccountRole,
 } from "@/lib/accounts";
+import { hasPermission } from "@/lib/permissions";
 
 const PAGE_SIZE = 6;
 
@@ -21,6 +23,8 @@ const ROLE_STYLE: Record<AccountRole, string> = {
 };
 
 export function AccountList() {
+  const { session } = useAuth();
+  const canManage = hasPermission(session, "manageUsers");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -61,23 +65,25 @@ export function AccountList() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Quản lý tài khoản đăng nhập
+              Quản trị người dùng
             </h1>
             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
               {accounts.length} tài khoản
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Quản trị danh sách nhân sự vận hành, kỹ sư và quyền truy cập vào bảng điều khiển EMS.
+            Đăng nhập hệ thống, phân quyền theo vai trò User và quản lý tài khoản vận hành EMS.
           </p>
         </div>
-        <Link
-          href="/tai-khoan/them-moi"
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors shrink-0"
-        >
-          <span className="text-base leading-none font-bold">+</span>
-          Thêm tài khoản
-        </Link>
+        {canManage ? (
+          <Link
+            href="/tai-khoan/them-moi"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors shrink-0"
+          >
+            <span className="text-base leading-none font-bold">+</span>
+            Thêm tài khoản
+          </Link>
+        ) : null}
       </div>
 
       {/* Search Input */}
@@ -137,23 +143,27 @@ export function AccountList() {
                     {account.createdAt}
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    <div className="flex justify-end gap-1">
-                      <Link
-                        href={`/tai-khoan/them-moi?id=${account.id}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors"
-                        title={`Sửa tài khoản ${account.username}`}
-                      >
-                        <EditIcon className="h-3.5 w-3.5" />
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => setAccountToDelete(account)}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
-                        title={`Xóa tài khoản ${account.username}`}
-                      >
-                        <TrashIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                    {canManage ? (
+                      <div className="flex justify-end gap-1">
+                        <Link
+                          href={`/tai-khoan/them-moi?id=${account.id}`}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors"
+                          title={`Sửa tài khoản ${account.username}`}
+                        >
+                          <EditIcon className="h-3.5 w-3.5" />
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setAccountToDelete(account)}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
+                          title={`Xóa tài khoản ${account.username}`}
+                        >
+                          <TrashIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">Chỉ xem</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -205,7 +215,9 @@ export function AccountList() {
           i
         </span>
         <p className="leading-relaxed">
-          <strong className="font-semibold">Phân quyền bảo mật:</strong> Chỉ có tài khoản với vai trò Quản trị viên mới có quyền tạo mới, chỉnh sửa thông tin dự án và quản lý tài khoản người dùng khác trong hệ thống.
+          <strong className="font-semibold">Phân quyền User:</strong> Quản trị viên quản lý người dùng và dự án.
+          Quản lý dự án chỉnh sửa dự án/hệ số phát thải. Kỹ sư vận hành dùng Gateway và thiết bị.
+          Nhân viên kỹ thuật chủ yếu xem và theo dõi vận hành.
         </p>
       </div>
 

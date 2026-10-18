@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { useAuth } from "@/components/auth/useAuth";
 import {
   ACCOUNT_ROLES,
   hydrateAccounts,
@@ -13,9 +14,12 @@ import {
   type AccountRole,
 } from "@/lib/accounts";
 import { DEFAULT_PASSWORD } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 
 export function AddAccountForm() {
   const router = useRouter();
+  const { session } = useAuth();
+  const canManage = hasPermission(session, "manageUsers");
   const searchParams = useSearchParams();
   const editingId = searchParams.get("id");
 
@@ -56,6 +60,7 @@ export function AddAccountForm() {
   }, [editingId]);
 
   function handleSubmit() {
+    if (!canManage) return;
     const name = username.trim();
     const mail = email.trim();
     if (!name || !mail) return;
@@ -71,13 +76,28 @@ export function AddAccountForm() {
     router.push("/tai-khoan");
   }
 
+  if (!canManage) {
+    return (
+      <div className="mx-auto max-w-[640px] p-6 lg:p-8">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
+          Chỉ Quản trị viên được thêm hoặc sửa tài khoản người dùng.
+          <div className="mt-4">
+            <Link href="/" className="font-semibold text-emerald-700 hover:underline">
+              Về danh sách dự án
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-[980px] p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">
           {isEdit ? "Cập nhật tài khoản" : "Thêm tài khoản"}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">Quản lý các tài khoản đăng nhập hệ thống</p>
+        <p className="mt-1 text-sm text-slate-500">Quản trị người dùng — đăng nhập và phân quyền theo vai trò</p>
       </div>
 
       <form

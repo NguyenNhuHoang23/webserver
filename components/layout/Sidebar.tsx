@@ -6,10 +6,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { logout } from "@/lib/auth";
 import { useAuth } from "@/components/auth/useAuth";
 import { useSidebar } from "@/components/layout/SidebarContext";
+import { hasPermission, type Permission } from "@/lib/permissions";
 import { matchProjectConfig, projectConfigPath, type ProjectConfigModule } from "@/lib/project-config";
 import { getProject, hydrateProjects, type Project } from "@/lib/projects";
 
-const navGroups = [
+const navGroups: {
+  group: string;
+  items: { href: string; label: string; icon: typeof ChartIcon; permission?: Permission }[];
+}[] = [
   {
     group: "VẬN HÀNH & GIÁM SÁT",
     items: [
@@ -22,11 +26,13 @@ const navGroups = [
         href: "/thiet-bi",
         label: "Thư viện loại đồng hồ",
         icon: DeviceIcon,
+        permission: "manageDevices",
       },
       {
         href: "/gateway",
         label: "Gateway Server",
         icon: GatewayIcon,
+        permission: "manageGateway",
       },
     ],
   },
@@ -37,11 +43,13 @@ const navGroups = [
         href: "/he-so-phat-thai",
         label: "Hệ số phát thải",
         icon: EmissionIcon,
+        permission: "manageEmissionFactors",
       },
       {
         href: "/tai-khoan",
-        label: "Quản lý tài khoản",
+        label: "Quản trị người dùng",
         icon: AccountIcon,
+        permission: "manageUsers",
       },
     ],
   },
@@ -258,7 +266,12 @@ function SidebarBody({
             </nav>
           </div>
         ) : (
-          navGroups.map((group) => (
+          navGroups.map((group) => {
+            const items = group.items.filter(
+              (item) => !item.permission || hasPermission(session, item.permission),
+            );
+            if (!items.length) return null;
+            return (
             <div key={group.group}>
               {!collapsed && (
                 <p className="px-2.5 mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -266,7 +279,7 @@ function SidebarBody({
                 </p>
               )}
               <nav className="flex flex-col gap-1">
-                {group.items.map((item) => {
+                {items.map((item) => {
                   const active =
                     item.href === "/"
                       ? pathname === "/" || pathname.startsWith("/tao-du-an")
@@ -296,7 +309,8 @@ function SidebarBody({
                 })}
               </nav>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
