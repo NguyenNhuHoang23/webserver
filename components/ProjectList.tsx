@@ -6,6 +6,11 @@ import { useAuth } from "@/components/auth/useAuth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { customerPassword, ensureCustomerAccount } from "@/lib/customer-accounts";
 import { hasPermission } from "@/lib/permissions";
+import {
+  emptyTelemetry,
+  loadProjectsTelemetry,
+  type ProjectTelemetry,
+} from "@/lib/project-telemetry";
 import { hydrateProjects, loadProjects, removeProject, type Project, type ProjectStatus } from "@/lib/projects";
 
 const statusMeta: Record<
@@ -29,17 +34,6 @@ const statusMeta: Record<
   },
 };
 
-// Dữ liệu mô phỏng phụ tải & phát thải realtime theo từng dự án
-const PROJECT_TELEMETRY: Record<string, { loadKw: number; meterCount: number; co2Day: number; solarPct: number }> = {
-  "PRJ-2401": { loadKw: 2840, meterCount: 24, co2Day: 8.4, solarPct: 34 },
-  "PRJ-2402": { loadKw: 1950, meterCount: 18, co2Day: 5.6, solarPct: 42 },
-  "PRJ-2403": { loadKw: 5600, meterCount: 48, co2Day: 19.2, solarPct: 20 },
-  "PRJ-2404": { loadKw: 1420, meterCount: 16, co2Day: 4.1, solarPct: 55 },
-  "PRJ-2405": { loadKw: 8900, meterCount: 64, co2Day: 32.5, solarPct: 15 },
-  "PRJ-2406": { loadKw: 7400, meterCount: 52, co2Day: 28.0, solarPct: 18 },
-  "PRJ-2407": { loadKw: 1680, meterCount: 14, co2Day: 4.9, solarPct: 48 },
-};
-
 const PAGE_SIZE = 10;
 
 export function ProjectList() {
@@ -47,6 +41,7 @@ export function ProjectList() {
   const canManageProjects = hasPermission(session, "manageProjects");
   const canManageDevices = hasPermission(session, "manageDevices");
   const [items, setItems] = useState<Project[]>([]);
+  const [telemetry, setTelemetry] = useState<Record<string, ProjectTelemetry>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [customer, setCustomer] = useState("all");
   const [status, setStatus] = useState<"all" | ProjectStatus>("all");
@@ -64,10 +59,19 @@ export function ProjectList() {
       .catch(() => {
         if (active) setItems(loadProjects());
       });
+    void loadProjectsTelemetry().then((rows) => {
+      if (active) setTelemetry(rows);
+    });
     return () => {
       active = false;
     };
   }, []);
+
+  const loadBarMax = useMemo(() => {
+    const values = Object.values(telemetry).map((item) => item.loadKw).filter((v) => v > 0);
+    if (!values.length) return 100;
+    return Math.max(...values) * 1.15;
+  }, [telemetry]);
 
   const customers = useMemo(
     () => Array.from(new Set(items.map((p) => p.customer))).sort(),
@@ -214,7 +218,21 @@ export function ProjectList() {
                 </tr>
               ) : (
                 rows.map((project) => {
-                  const telem = PROJECT_TELEMETRY[project.id] ?? { loadKw: 2100, meterCount: 16, co2Day: 6.2, solarPct: 25 };
+                  const telem = telemetry[project.id] ?? emptyTelemetry(project.id);
+                  const meterDot =
+                    telem.meterCount === 0
+                      ? "bg-slate-300"
+                      : telem.onlineCount === 0
+                        ? "bg-slate-400"
+                        : telem.onlineCount >= telem.meterCount
+                          ? "bg-emerald-500"
+                          : "bg-amber-500";
+                  const meterLabel =
+                    telem.meterCount === 0
+                      ? "Chưa có điểm đo"
+                      : telem.hasGatewayData
+                        ? `${telem.onlineCount}/${telem.meterCount} online`
+                        : `${telem.meterCount} điểm đo`;
                   return (
                     <tr
                       key={project.id}
@@ -260,14 +278,22 @@ export function ProjectList() {
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-slate-900">
-                            {telem.loadKw.toLocaleString()}
+                            {telem.hasGatewayData
+                              ? telem.loadKw.toLocaleString("vi-VN", {
+                                  maximumFractionDigits: telem.loadKw >= 100 ? 0 : 1,
+                                })
+                              : "—"}
                           </span>
-                          <span className="text-[10px] text-slate-400">kW</span>
+                          {telem.hasGatewayData ? (
+                            <span className="text-[10px] text-slate-400">kW</span>
+                          ) : null}
                         </div>
                         <div className="mt-1 h-1.5 w-24 rounded-full bg-slate-100 overflow-hidden">
                           <div
                             className="h-full rounded-full bg-emerald-500"
-                            style={{ width: `${Math.min(100, (telem.loadKw / 9000) * 100)}%` }}
+                            style={{
+                              width: `${telem.hasGatewayData ? Math.min(100, (telem.loadKw / loadBarMax) * 100) : 0}%`,
+                            }}
                           />
                         </div>
                       </td>
@@ -275,21 +301,25 @@ export function ProjectList() {
                       {/* CO2 Emissions */}
                       <td className="px-5 py-4">
                         <span className="font-mono font-semibold text-slate-800">
-                          {telem.co2Day}
+                          {telem.co2Day > 0
+                            ? telem.co2Day.toLocaleString("vi-VN", {
+                                maximumFractionDigits: 2,
+                                minimumFractionDigits: 0,
+                              })
+                            : "—"}
                         </span>
-                        <span className="text-[10px] text-slate-400 ml-1">tCO₂e</span>
-                        {telem.solarPct > 0 && (
-                          <span className="block text-[10px] text-emerald-600 font-medium">
-                            +{telem.solarPct}% Solar
-                          </span>
+                        {telem.co2Day > 0 ? (
+                          <span className="text-[10px] text-slate-400 ml-1">tCO₂e</span>
+                        ) : (
+                          <span className="block text-[10px] text-slate-400">Chưa cấu hình GHG</span>
                         )}
                       </td>
 
-                      {/* Meters count */}
+                      {/* Meters status */}
                       <td className="px-5 py-4">
                         <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          {telem.meterCount} điểm đo
+                          <span className={`h-1.5 w-1.5 rounded-full ${meterDot}`} />
+                          {meterLabel}
                         </span>
                       </td>
 

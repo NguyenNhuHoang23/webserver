@@ -654,9 +654,9 @@ export function EnergyCharts() {
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2 sm:p-3">
         {isUiChart ? (
-          <section className="rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
+          <section className="w-full min-w-0 rounded-lg border border-slate-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-3">
             <UiWaveform timeFilter={timeFilter} samples={liveSamples} />
           </section>
         ) : isFreqChart ? (
@@ -993,7 +993,7 @@ function MultiConsumptionBarChart({
   unit?: string;
   yMaxHint?: number;
 }) {
-  const W = 980;
+  const W = 1080;
   const H = 360;
   const pad = { l: 48, r: 16, t: 28, b: 32 };
   const innerW = W - pad.l - pad.r;
@@ -1018,7 +1018,7 @@ function MultiConsumptionBarChart({
     <div className="mt-1">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="h-[320px] w-full sm:h-[360px]"
+        className="mx-auto h-[360px] w-full max-w-[1080px]"
         onMouseLeave={() => onHover(null)}
       >
         <text x={pad.l} y="16" className="fill-slate-400" fontSize="12">
@@ -1186,7 +1186,10 @@ function TouConsumptionChart({
   const barW = 28;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 h-[180px] w-full">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="mx-auto mt-1 h-[180px] w-full max-w-[1080px]"
+    >
       {items.map((item, i) => {
         const x = pad.l + i * groupW + (groupW - barW) / 2;
         const h = Math.max(item.value === 0 ? 3 : 0, yAt(0) - yAt(item.value));
@@ -1342,7 +1345,7 @@ function LineChart({
   hover: number | null;
   onHover: (index: number | null) => void;
 }) {
-  const W = 980;
+  const W = 1080;
   const H = 340;
   const pad = { l: 44, r: 36, t: 18, b: 36 };
   const innerW = W - pad.l - pad.r;
@@ -1358,7 +1361,7 @@ function LineChart({
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="h-[340px] w-full"
+      className="mx-auto h-[340px] w-full max-w-[1080px]"
       onMouseLeave={() => onHover(null)}
       onMouseMove={(e) => {
         const box = e.currentTarget.getBoundingClientRect();

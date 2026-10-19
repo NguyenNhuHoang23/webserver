@@ -123,7 +123,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
 
       </div>
 
-      <div className="-mx-1 min-w-0 overflow-hidden rounded-[2px] border border-slate-400 bg-white sm:-mx-2">
+      <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-hidden rounded-[2px] border border-slate-400 bg-white">
         <div className="border-b border-slate-300 px-1">
           <TimeSlider start={window.start} end={window.end} onChange={setWindow} />
         </div>
@@ -287,7 +287,7 @@ function WavePane({
   domain: [number, number];
   axis?: boolean;
 }) {
-  const W = 760;
+  const W = 1080;
   const H = 240;
   const pad = { l: 50, r: 10, t: 14, b: 28 };
   const innerW = W - pad.l - pad.r;

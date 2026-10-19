@@ -118,7 +118,7 @@ export function FrequencyChart({
 
       </div>
 
-      <div className="-mx-1 min-w-0 overflow-hidden rounded-[2px] border border-slate-400 bg-white sm:-mx-2">
+      <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-hidden rounded-[2px] border border-slate-400 bg-white">
         <div className="relative h-4 border-b border-slate-300 bg-slate-50">
           <div
             className="absolute inset-y-0 bg-[#d7e2ef]"
@@ -200,7 +200,7 @@ function FreqPane({
   onHover: (index: number | null) => void;
   domain?: [number, number];
 }) {
-  const W = 820;
+  const W = 1080;
   const H = 340;
   const pad = { l: 58, r: 12, t: 12, b: 42 };
   const innerW = W - pad.l - pad.r;

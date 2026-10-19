@@ -314,7 +314,7 @@ export function GatewayConsole() {
         <InfoCard title="Server = 1" text="Đã lưu bản tin." />
         <InfoCard title="Server = 2" text="Lỗi CRC hoặc HMAC. Không dùng số liệu." />
         <InfoCard title="Server = 3" text="Lỗi format JSON hoặc thiếu trường." />
-        <InfoCard title="Server = 4" text="Bỏ qua: trùng readingTime, lệch giờ quá 20 giây, hoặc Error khác 0. Vẫn trả giờ server để gateway chỉnh đồng hồ." />
+        <InfoCard title="Server = 4" text="Bỏ qua: trùng meterModel+meterId+readingTime, phát lại (isReplay) có readingTime vượt giờ server >20s, Error≠0, hoặc đồng hồ chưa đăng ký. Realtime lệch giờ vẫn được lưu + log; ACK luôn kèm SeverTime (Unix) để gateway sync." />
       </section>
 
       <section className="mb-6 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
@@ -362,7 +362,7 @@ export function GatewayConsole() {
         </div>
         {data && (
           <p className="mt-3 text-[11px] text-slate-400">
-            Giờ server lúc tải: {data.serverTime}. Thống kê đếm mọi bản tin đúng format trong khoảng này, gồm cả bản bị bỏ qua.
+            Giờ server lúc tải: {formatUnixSeverTime(data.serverTime)}. Thống kê đếm mọi bản tin đúng format trong khoảng này, gồm cả bản bị bỏ qua.
           </p>
         )}
       </section>
@@ -857,6 +857,14 @@ function formatValue(value: unknown) {
 function formatStamp(value: string | null) {
   if (!value) return null;
   return formatStoredVietnam(value) ?? value;
+}
+
+/** SeverTime ACK = Unix giây; hiển thị kèm ISO để vận hành đọc được. */
+function formatUnixSeverTime(value: string) {
+  const sec = Number(value);
+  if (!Number.isFinite(sec) || sec <= 0) return value;
+  const iso = new Date(sec * 1000).toISOString();
+  return `${value} (${formatStoredVietnam(iso) ?? iso})`;
 }
 
 function localInput(date: Date) {

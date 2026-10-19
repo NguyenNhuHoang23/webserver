@@ -14,9 +14,12 @@ export const METER_TYPE_LABEL: Record<string, string> = {
   F: "Lưu lượng (Flow)",
 };
 
-/** Mã số firmware gửi trong MT. 1 = đồng hồ điện. */
+/** Mã số firmware gửi trong MT: 1 điện, 2 nước, 3 áp suất, 4 lưu lượng. */
 export const METER_TYPE_BY_CODE: Record<number, "E" | "W" | "P" | "F"> = {
   1: "E",
+  2: "W",
+  3: "P",
+  4: "F",
 };
 
 /** Mã số firmware gửi trong MM. 0 = PM2230. */
@@ -27,7 +30,7 @@ export const METER_MODEL_BY_CODE: Record<number, string> = {
 export const DISPOSITION_LABEL: Record<string, string> = {
   accepted: "Đã lưu",
   duplicate: "Bỏ qua: trùng meterModel + meterId + readingTime",
-  clock_realtime: "Bỏ qua: realtime lệch giờ server quá 20 giây",
+  clock_realtime: "Đã lưu + log: realtime lệch giờ server quá 20 giây (gateway sẽ sync bằng SeverTime)",
   clock_replay: "Bỏ qua: bản phát lại có readingTime vượt giờ server quá 20 giây",
   gateway_error: "Bỏ qua: Error khác 0",
   checksum: "Bỏ qua: lỗi checksum",
@@ -94,22 +97,32 @@ export function replayLabel(isReplay: boolean) {
   return isReplay ? "Phát lại (T / true)" : "Realtime (F / fail)";
 }
 
+/** Unix time (giây) — đúng đặc tả SeverTime Uint32 để gateway đồng bộ giờ. */
 export function serverTimeNow() {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return String(Math.floor(Date.now() / 1000));
 }
+
+/** CRC16 Modbus — cùng thuật toán bảng `MODBUS_CRC16_v3` trên firmware gateway. */
+const MODBUS_CRC16_TABLE = (() => {
+  const table = new Uint16Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let crc = i;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0xa001 : crc >>> 1;
+    }
+    table[i] = crc;
+  }
+  return table;
+})();
 
 export function crc16Modbus(input: string) {
   const bytes = new TextEncoder().encode(input);
   let crc = 0xffff;
   for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      const lsb = crc & 1;
-      crc = (crc >>> 1) & 0xffff;
-      if (lsb) crc ^= 0xa001;
-    }
+    const xor = (byte ^ crc) & 0xff;
+    crc = (crc >>> 8) ^ MODBUS_CRC16_TABLE[xor];
   }
-  return crc.toString(16).toUpperCase().padStart(4, "0");
+  return (crc & 0xffff).toString(16).toUpperCase().padStart(4, "0");
 }
 
 export function crc32(input: string) {
@@ -162,16 +175,17 @@ export function buildAck(input: {
   passWifi: string | null;
   shortKeys: boolean;
 }) {
+  // ACK theo đặc tả (SeverTime = Unix giây). Short keys khi uplink dùng PV/IT/...
   if (input.shortKeys) {
     const body: Record<string, unknown> = {
       Server: input.server,
-      PV: PROTOCOL_VERSION,
+      PV: Number(PROTOCOL_VERSION) || PROTOCOL_VERSION,
       PN: input.packetNumber,
-      GID: input.gatewayId,
-      ST: input.serverTime,
-      TUD: input.timeUpdate,
+      GID: /^\d+$/.test(input.gatewayId) ? Number(input.gatewayId) : input.gatewayId,
+      SeverTime: Number(input.serverTime) || input.serverTime,
+      TimeUpdate: Number(input.timeUpdate) || input.timeUpdate,
       Wifi: input.wifi,
-      PASS: input.passWifi,
+      PassWifi: input.passWifi,
     };
     body.CRC = crc16Modbus(JSON.stringify(body));
     return body;
@@ -179,11 +193,11 @@ export function buildAck(input: {
 
   const body: Record<string, unknown> = {
     Server: input.server,
-    protocolVersion: PROTOCOL_VERSION,
+    protocolVersion: Number(PROTOCOL_VERSION) || PROTOCOL_VERSION,
     Packetnumber: input.packetNumber,
     gatewayId: input.gatewayId,
-    SeverTime: input.serverTime,
-    TimeUpdate: input.timeUpdate,
+    SeverTime: Number(input.serverTime) || input.serverTime,
+    TimeUpdate: Number(input.timeUpdate) || input.timeUpdate,
     Wifi: input.wifi,
     PassWifi: input.passWifi,
   };

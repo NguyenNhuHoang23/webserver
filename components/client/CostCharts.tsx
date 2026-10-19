@@ -744,7 +744,7 @@ function MultiCostBarChart({
   hover: number | null;
   onHover: (index: number | null) => void;
 }) {
-  const W = 760;
+  const W = 1080;
   const H = 360;
   const pad = { l: 52, r: 16, t: 28, b: 32 };
   const innerW = W - pad.l - pad.r;
@@ -767,7 +767,7 @@ function MultiCostBarChart({
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="mt-2 h-[340px] w-full"
+      className="mx-auto mt-2 h-[360px] w-full max-w-[1080px]"
       onMouseLeave={() => onHover(null)}
     >
       <text x={pad.l} y="16" className="fill-slate-400" fontSize="12">
@@ -949,7 +949,10 @@ function TouChart({ values }: { values: { peak: number; normal: number; off: num
   const barW = 28;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 h-[180px] w-full">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="mx-auto mt-1 h-[180px] w-full max-w-[1080px]"
+    >
       {items.map((item, i) => {
         const x = pad.l + i * groupW + (groupW - barW) / 2;
         const h = Math.max(item.value === 0 ? 3 : 0, yAt(0) - yAt(item.value));

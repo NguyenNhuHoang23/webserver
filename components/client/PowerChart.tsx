@@ -171,7 +171,7 @@ export function PowerChart({
 
       </div>
 
-      <div className="-mx-1 min-w-0 overflow-hidden rounded-[2px] border border-slate-400 bg-white sm:-mx-2">
+      <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-hidden rounded-[2px] border border-slate-400 bg-white">
         <div className="relative h-4 border-b border-slate-300 bg-slate-50">
           <div
             className="absolute inset-y-0 bg-[#d7e2ef]"
@@ -290,7 +290,7 @@ function PowerPane({
   formatTick: (value: number) => string;
   axis?: boolean;
 }) {
-  const W = 820;
+  const W = 1080;
   const H = 240;
   const pad = { l: 58, r: 10, t: 12, b: axis ? 40 : 28 };
   const innerW = W - pad.l - pad.r;
@@ -445,34 +445,6 @@ function PowerPane({
         </text>
       ))}
     </svg>
-  );
-}
-
-function Legend({
-  series,
-  hover,
-  digits,
-}: {
-  series: { key: string; name: string; color: string; values: number[] }[];
-  hover: number | null;
-  digits: number;
-}) {
-  return (
-    <ul>
-      {series.map((s) => (
-        <li key={s.key} className="flex items-center gap-1.5">
-          <span className="h-0.5 w-5" style={{ backgroundColor: s.color }} />
-          <span style={{ color: s.color }}>{s.name}</span>
-        </li>
-      ))}
-      {hover != null
-        ? series.map((s) => (
-            <li key={`${s.key}-v`} className="pl-[26px] text-slate-500">
-              {s.values[hover].toFixed(digits)}
-            </li>
-          ))
-        : null}
-    </ul>
   );
 }
 

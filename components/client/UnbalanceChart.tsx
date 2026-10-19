@@ -130,66 +130,60 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
         </div>
       </div>
 
-      <div className="flex items-stretch gap-3">
-        <div className="min-w-0 flex-1 overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-          <div className="relative h-4 border-b border-slate-300 bg-slate-50">
-            <div
-              className="absolute inset-y-0 bg-[#d7e2ef]"
-              style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
-            />
-            <input
-              type="range"
-              min={0}
-              max={N - 21}
-              value={viewWin.start}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                setViewWin({ start: next, end: Math.min(N - 1, next + span) });
-              }}
-              className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
-            />
-            <span
-              className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
-              style={{ left: `calc(${left}% - 5px)` }}
-            >
-              ▼
-            </span>
-            <span
-              className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
-              style={{ left: `calc(${left + width}% - 5px)` }}
-            >
-              ▲
-            </span>
-          </div>
-          <UnbPane
-            title={`${topQty} [%]`}
-            series={uSeries}
-            samples={samples}
-            viewWin={viewWin}
-            hover={crosshair ? hover : null}
-            onHover={setHover}
-            domain={uDomain}
-            ticks={uTicks}
-            formatTick={(v) => (v === 0 ? "0" : v.toFixed(1))}
+      <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-hidden rounded-[2px] border border-slate-400 bg-white">
+        <div className="relative h-4 border-b border-slate-300 bg-slate-50">
+          <div
+            className="absolute inset-y-0 bg-[#d7e2ef]"
+            style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
           />
-          <div className="h-px bg-slate-400" />
-          <UnbPane
-            title={`${botQty} [%]`}
-            series={iSeries}
-            samples={samples}
-            viewWin={viewWin}
-            hover={crosshair ? hover : null}
-            onHover={setHover}
-            domain={iDomain}
-            ticks={iTicks}
-            formatTick={(v) => String(v)}
-            axis
+          <input
+            type="range"
+            min={0}
+            max={N - 21}
+            value={viewWin.start}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setViewWin({ start: next, end: Math.min(N - 1, next + span) });
+            }}
+            className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
           />
+          <span
+            className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
+            style={{ left: `calc(${left}% - 5px)` }}
+          >
+            ▼
+          </span>
+          <span
+            className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
+            style={{ left: `calc(${left + width}% - 5px)` }}
+          >
+            ▲
+          </span>
         </div>
-        <div className="flex w-[118px] shrink-0 flex-col justify-around py-8 text-[11px] leading-5">
-          <Legend series={uSeries} hover={crosshair ? hover : null} />
-          <Legend series={iSeries} hover={crosshair ? hover : null} />
-        </div>
+        <UnbPane
+          title={`${topQty} [%]`}
+          series={uSeries}
+          samples={samples}
+          viewWin={viewWin}
+          hover={crosshair ? hover : null}
+          onHover={setHover}
+          domain={uDomain}
+          ticks={uTicks}
+          formatTick={(v) => (v === 0 ? "0" : v.toFixed(1))}
+        />
+        <div className="h-px bg-slate-400" />
+        <UnbPane
+          title={`${botQty} [%]`}
+          series={iSeries}
+          samples={samples}
+          viewWin={viewWin}
+          hover={crosshair ? hover : null}
+          onHover={setHover}
+          domain={iDomain}
+          ticks={iTicks}
+          formatTick={(v) => String(v)}
+          axis
+        />
       </div>
 
       <div className="mt-2 flex w-[68px] flex-wrap gap-1">
@@ -233,7 +227,7 @@ function UnbPane({
   formatTick: (value: number) => string;
   axis?: boolean;
 }) {
-  const W = 820;
+  const W = 1080;
   const H = 240;
   const pad = { l: 52, r: 10, t: 12, b: axis ? 40 : 28 };
   const innerW = W - pad.l - pad.r;
@@ -387,26 +381,6 @@ function UnbPane({
         </text>
       ))}
     </svg>
-  );
-}
-
-function Legend({ series, hover }: { series: Series[]; hover: number | null }) {
-  return (
-    <ul>
-      {series.map((s) => (
-        <li key={s.key} className="flex items-center gap-1.5">
-          <span className="h-0.5 w-5" style={{ backgroundColor: s.color }} />
-          <span style={{ color: s.color }}>{s.name}</span>
-        </li>
-      ))}
-      {hover != null
-        ? series.map((s) => (
-            <li key={`${s.key}-v`} className="pl-[26px] text-slate-500">
-              {s.values[hover].toFixed(3)}
-            </li>
-          ))
-        : null}
-    </ul>
   );
 }
 

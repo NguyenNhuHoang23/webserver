@@ -376,14 +376,15 @@ export async function ingestGateway(rawText: string, headers?: Headers) {
       });
     } else {
       const delta = packet.readingDate.getTime() - Date.now();
+      // Spec: isReplay=0 + lệch >20s → vẫn GIỮ data + log (gateway sync giờ qua ACK SeverTime).
       if (!packet.isReplay && Math.abs(delta) > CLOCK_SKEW_MS) {
-        disposition = "clock_realtime";
-        server = 4;
         notes.push({
           level: "log",
-          reason: "Gateway sai Time: isReplay=fail và readingTime lệch quá 20 giây so với giờ server.",
+          reason:
+            "Gateway sai Time: isReplay=0/fail và readingTime lệch quá 20 giây so với giờ server. Bản tin vẫn được giữ; gateway sẽ cập nhật giờ từ SeverTime trong ACK.",
         });
       } else if (packet.isReplay && delta > CLOCK_SKEW_MS) {
+        // Spec: isReplay=true + readingTime > giờ server +20s → bỏ qua + log.
         disposition = "clock_replay";
         server = 4;
         notes.push({
@@ -1416,6 +1417,147 @@ function modelCodeForCategory(category: string) {
     if (label.toLowerCase() === name) return Number(code);
   }
   return null;
+}
+
+/** Điểm đo còn “online” nếu bản tin gần nhất trong cửa sổ này. */
+const METER_ONLINE_MS = 15 * 60 * 1000;
+
+export type ProjectListTelemetry = {
+  projectId: string;
+  loadKw: number;
+  co2Day: number;
+  meterCount: number;
+  onlineCount: number;
+  hasGatewayData: boolean;
+};
+
+function powerKwFromValues(values: Record<string, number>) {
+  if (Number.isFinite(values.Papt)) return Math.max(0, values.Papt);
+  const phases = [values.Papa, values.Papb, values.Papc].filter((v) => Number.isFinite(v));
+  if (phases.length) return Math.max(0, phases.reduce((sum, v) => sum + v, 0));
+  return 0;
+}
+
+/** Telemetry cho danh sách dự án: phụ tải (Papt), GHG, trạng thái điểm đo. */
+export async function getProjectsListTelemetry(): Promise<ProjectListTelemetry[]> {
+  await ensureGatewaySchema();
+
+  const meterRows = await queryRows<{
+    projectId: string;
+    pointId: string;
+    serialNumber: string | null;
+    category: string | null;
+    deviceSerial: string | null;
+  }>(
+    `SELECT mp.project_id AS projectId, mp.id AS pointId,
+            mp.serial_number AS serialNumber, d.category AS category,
+            d.serial_number AS deviceSerial
+       FROM meter_points mp
+       LEFT JOIN devices d ON d.id = mp.device_id`,
+  ).catch(() => []);
+
+  const ghgRows = await queryRows<{ projectId: string; tons: number | string | null }>(
+    `SELECT project_id AS projectId, tons_co2e AS tons
+       FROM ghg_emission_sources`,
+  ).catch(() => []);
+
+  const byProject = new Map<
+    string,
+    {
+      meterCount: number;
+      /** gatewayKey → số điểm đo gắn serial đó trong dự án */
+      gatewayKeys: Map<string, { model: number; meterId: string; pointCount: number }>;
+    }
+  >();
+
+  for (const row of meterRows) {
+    const projectId = String(row.projectId);
+    let bucket = byProject.get(projectId);
+    if (!bucket) {
+      bucket = { meterCount: 0, gatewayKeys: new Map() };
+      byProject.set(projectId, bucket);
+    }
+    bucket.meterCount += 1;
+    const model = modelCodeForCategory(row.category ?? "");
+    const meterId = serialToMeterId(row.serialNumber || row.deviceSerial || "");
+    if (model == null || !meterId) continue;
+    const key = `${model}:${meterId}`;
+    const existing = bucket.gatewayKeys.get(key);
+    if (existing) existing.pointCount += 1;
+    else bucket.gatewayKeys.set(key, { model, meterId, pointCount: 1 });
+  }
+
+  const co2ByProject = new Map<string, number>();
+  for (const row of ghgRows) {
+    const projectId = String(row.projectId);
+    const tons = Number(row.tons);
+    if (!Number.isFinite(tons)) continue;
+    co2ByProject.set(projectId, (co2ByProject.get(projectId) ?? 0) + tons);
+  }
+
+  const latestCache = new Map<string, { values: Record<string, number>; receivedAtMs: number }>();
+  const uniqueKeys = new Map<string, { model: number; meterId: string }>();
+  for (const bucket of byProject.values()) {
+    for (const [key, pair] of bucket.gatewayKeys) {
+      uniqueKeys.set(key, { model: pair.model, meterId: pair.meterId });
+    }
+  }
+
+  await Promise.all(
+    [...uniqueKeys.entries()].map(async ([key, pair]) => {
+      const rows = await queryRows<RowDataPacket>(
+        `SELECT received_at, values_json
+           FROM gateway_meter_latest
+          WHERE meter_model = ? AND meter_id = ?
+          LIMIT 1`,
+        [pair.model, pair.meterId],
+      ).catch(() => []);
+      const row = rows[0];
+      if (!row) return;
+      const at = receivedAtText(row.received_at);
+      const ms = Date.parse(at.endsWith("Z") ? at : `${at}Z`);
+      latestCache.set(key, {
+        values: numericValues(row.values_json),
+        receivedAtMs: Number.isFinite(ms) ? ms : 0,
+      });
+    }),
+  );
+
+  const now = Date.now();
+  const projectIds = new Set<string>([
+    ...byProject.keys(),
+    ...co2ByProject.keys(),
+  ]);
+
+  // Đảm bảo mọi dự án trong bảng projects đều có dòng (kể cả chưa có điểm đo).
+  const projectIdRows = await queryRows<{ id: string }>(`SELECT id FROM projects`).catch(() => []);
+  for (const row of projectIdRows) projectIds.add(String(row.id));
+
+  return [...projectIds].map((projectId) => {
+    const bucket = byProject.get(projectId);
+    let loadKw = 0;
+    let onlineCount = 0;
+    let hasGatewayData = false;
+    if (bucket) {
+      for (const [key, pair] of bucket.gatewayKeys) {
+        const latest = latestCache.get(key);
+        if (!latest) continue;
+        hasGatewayData = true;
+        loadKw += powerKwFromValues(latest.values);
+        if (latest.receivedAtMs > 0 && now - latest.receivedAtMs <= METER_ONLINE_MS) {
+          onlineCount += pair.pointCount;
+        }
+      }
+    }
+    return {
+      projectId,
+      loadKw: Math.round(loadKw * 10) / 10,
+      co2Day: Math.round((co2ByProject.get(projectId) ?? 0) * 100) / 100,
+      meterCount: bucket?.meterCount ?? 0,
+      onlineCount,
+      hasGatewayData,
+    };
+  });
 }
 
 function serialToMeterId(serial: string) {

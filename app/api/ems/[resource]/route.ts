@@ -1,5 +1,6 @@
 import type { PoolConnection } from "mysql2/promise";
 import { NextRequest } from "next/server";
+import { getProjectsListTelemetry } from "@/lib/gateway-store";
 import { requirePermission } from "@/lib/server-auth";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
 
@@ -19,6 +20,7 @@ const RESOURCE_NAMES = new Set([
   "meter-readings",
   "diagram-states",
   "project-settings",
+  "project-telemetry",
 ]);
 
 function badRequest(message: string) {
@@ -188,6 +190,7 @@ async function getResource(resource: string, request: NextRequest) {
     );
   }
   if (resource === "projects") return getProjects(projectId);
+  if (resource === "project-telemetry") return getProjectsListTelemetry();
   if (resource === "devices") {
     await ensureDeviceColumns();
     const rows = await queryRows<Row>(

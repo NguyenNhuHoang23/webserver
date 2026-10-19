@@ -145,7 +145,6 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
     [thdiChannels, aggs, samples],
   );
 
-  const legend = [...thduSeries, ...thdiSeries];
   const thduBase = harmDomain("u");
   const thdiBase = harmDomain("i");
   const thduLiveDomain = samples?.length ? paddedDomain(thduSeries, thduBase.domain) : thduBase.domain;
@@ -283,77 +282,60 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
       </div>
 
       {tab === "trend" ? (
-        <div className="flex items-stretch gap-2">
-          <div className="min-w-0 flex-1 overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-            <div className="relative h-4 border-b border-slate-300 bg-slate-50">
-              <div
-                className="absolute inset-y-0 bg-[#d7e2ef]"
-                style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
-              />
-              <input
-                type="range"
-                min={0}
-                max={N - 21}
-                value={viewWin.start}
-                onChange={(e) => {
-                  const next = Number(e.target.value);
-                  setViewWin({ start: next, end: Math.min(N - 1, next + span) });
-                }}
-                className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
-              />
-              <span
-                className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
-                style={{ left: `calc(${left}% - 5px)` }}
-              >
-                ▼
-              </span>
-              <span
-                className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
-                style={{ left: `calc(${left + width}% - 5px)` }}
-              >
-                ▲
-              </span>
-            </div>
-            <HarmPane
-              title={`THDu ${thduScale.unit}`}
-              series={thduSeries}
-              samples={samples}
-              viewWin={viewWin}
-              hover={crosshair ? hover : null}
-              onHover={setHover}
-              domain={thduScale.domain}
-              ticks={thduScale.ticks}
-              formatTick={(v) => String(v)}
+        <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-hidden rounded-[2px] border border-slate-400 bg-white">
+          <div className="relative h-4 border-b border-slate-300 bg-slate-50">
+            <div
+              className="absolute inset-y-0 bg-[#d7e2ef]"
+              style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
             />
-            <div className="h-px bg-slate-400" />
-            <HarmPane
-              title={`THDi ${thdiScale.unit}`}
-              series={thdiSeries}
-              samples={samples}
-              viewWin={viewWin}
-              hover={crosshair ? hover : null}
-              onHover={setHover}
-              domain={thdiScale.domain}
-              ticks={thdiScale.ticks}
-              formatTick={(v) => String(v)}
-              axis
+            <input
+              type="range"
+              min={0}
+              max={N - 21}
+              value={viewWin.start}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setViewWin({ start: next, end: Math.min(N - 1, next + span) });
+              }}
+              className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
             />
+            <span
+              className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
+              style={{ left: `calc(${left}% - 5px)` }}
+            >
+              ▼
+            </span>
+            <span
+              className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
+              style={{ left: `calc(${left + width}% - 5px)` }}
+            >
+              ▲
+            </span>
           </div>
-          <ul className="h-[364px] w-[132px] shrink-0 overflow-y-auto py-2 text-[11px] leading-5">
-            {legend.map((s) => (
-              <li key={s.key} className="flex items-center gap-1.5">
-                <span className="h-0.5 w-5 shrink-0" style={{ backgroundColor: s.color }} />
-                <span style={{ color: s.color }}>{s.name}</span>
-              </li>
-            ))}
-            {hover != null
-              ? legend.map((s) => (
-                  <li key={`${s.key}-v`} className="pl-[26px] text-slate-500">
-                    {s.values[hover].toFixed(2)}
-                  </li>
-                ))
-              : null}
-          </ul>
+          <HarmPane
+            title={`THDu ${thduScale.unit}`}
+            series={thduSeries}
+            samples={samples}
+            viewWin={viewWin}
+            hover={crosshair ? hover : null}
+            onHover={setHover}
+            domain={thduScale.domain}
+            ticks={thduScale.ticks}
+            formatTick={(v) => String(v)}
+          />
+          <div className="h-px bg-slate-400" />
+          <HarmPane
+            title={`THDi ${thdiScale.unit}`}
+            series={thdiSeries}
+            samples={samples}
+            viewWin={viewWin}
+            hover={crosshair ? hover : null}
+            onHover={setHover}
+            domain={thdiScale.domain}
+            ticks={thdiScale.ticks}
+            formatTick={(v) => String(v)}
+            axis
+          />
         </div>
       ) : (
         <PeakOrderView
@@ -426,7 +408,7 @@ function HarmPane({
   formatTick: (value: number) => string;
   axis?: boolean;
 }) {
-  const W = 820;
+  const W = 1080;
   const H = 176;
   const pad = { l: 58, r: 10, t: 10, b: axis ? 40 : 10 };
   const innerW = W - pad.l - pad.r;
@@ -577,7 +559,7 @@ function PeakPane({
   kind: "u" | "i";
   axis?: boolean;
 }) {
-  const W = 820;
+  const W = 1080;
   const H = 220;
   const pad = { l: 58, r: 16, t: 12, b: axis ? 36 : 12 };
   const innerW = W - pad.l - pad.r;
@@ -588,7 +570,10 @@ function PeakPane({
   const barW = Math.max(4, (groupW * 0.62) / Math.max(1, channels.length));
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="block h-[220px] w-full">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="block h-[220px] w-full"
+    >
       <rect x={pad.l} y={pad.t} width={innerW} height={innerH} fill="white" stroke="#6b7280" />
       <text x="14" y={H / 2} className="fill-slate-600" fontSize="11" transform={`rotate(-90 14 ${H / 2})`}>
         {title}
