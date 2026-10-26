@@ -1,5 +1,5 @@
-POST /api/gateway HTTP/1.1
-Host: webserver.demopage.top
+POST / HTTP/1.1
+Host: 14.225.206.40
 Content-Type: application/json
 Content-Length: 1228
 Connection: close
