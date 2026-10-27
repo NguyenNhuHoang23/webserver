@@ -30,6 +30,7 @@ export const METER_MODEL_BY_CODE: Record<number, string> = {
 export const DISPOSITION_LABEL: Record<string, string> = {
   accepted: "Đã lưu",
   duplicate: "Bỏ qua: trùng meterModel + meterId + readingTime",
+  replay: "Bỏ qua: bản phát lại RE=1, không lưu số liệu",
   clock_replay: "Bỏ qua: bản phát lại (RE=1) có readingTime vượt giờ server quá 20 giây",
   replay_time: "Bỏ qua: bản phát lại (RE=1) có readingTime không chuẩn (0 hoặc chưa đồng bộ)",
   replay_energy: "Bỏ qua: bản phát lại (RE=1) có EPaed không khớp mẫu realtime trước/sau",

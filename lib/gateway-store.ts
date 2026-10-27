@@ -8,13 +8,11 @@ import {
   verifyGatewayHmac,
 } from "@/lib/gateway-hmac";
 import {
-  CLOCK_SKEW_MS,
   DEFAULT_TIME_UPDATE_SECONDS,
   METER_MODEL_BY_CODE,
   alarmName,
   buildAck,
   finiteNumber,
-  gatewayErrorText,
   parseGatewayPacket,
   serverTimeNow,
   type NormalizedPacket,
@@ -367,41 +365,15 @@ export async function ingestGateway(rawText: string, headers?: Headers) {
     }
   } else if (disposition === "accepted") {
     if (packet.isReplay) {
-      // RE=1: gói phát lại khi gateway tưởng server chưa ACK. Lọc kỹ.
-      if (!packet.timeSynced || packet.readingTime === "0") {
-        disposition = "replay_time";
-        server = 4;
-        notes.push({
-          level: "log",
-          reason: "Bỏ qua RE=1: readingTime=0 hoặc chưa đồng bộ. Không dùng số liệu phát lại này.",
-        });
-      } else if (await readingTimeTaken(packet)) {
-        disposition = "duplicate";
-        server = 4;
-        notes.push({
-          level: "log",
-          reason: "Bỏ qua RE=1: đã có cùng meterModel, meterId và readingTime.",
-        });
-      } else {
-        const delta = packet.readingDate.getTime() - Date.now();
-        if (delta > CLOCK_SKEW_MS) {
-          disposition = "clock_replay";
-          server = 4;
-          notes.push({
-            level: "log",
-            reason: "Bỏ qua RE=1: readingTime lớn hơn giờ server quá 20 giây.",
-          });
-        } else {
-          const energyReason = await replayEnergyInvalid(packet);
-          if (energyReason) {
-            disposition = "replay_energy";
-            server = 4;
-            notes.push({ level: "log", reason: energyReason });
-          }
-        }
-      }
+      // RE=1: không lưu số liệu. Vẫn ACK để gateway xóa buffer, không phát lại nữa.
+      disposition = "replay";
+      server = 4;
+      notes.push({
+        level: "log",
+        reason: "Bỏ qua RE=1: bản phát lại, không lưu. Chỉ nhận bản realtime RE=0.",
+      });
     } else if (packet.timeSynced) {
-      // RE=0: checksum đúng là nhận, kể cả readingTime=0. Chỉ chặn trùng mốc giờ đã lưu.
+      // RE=0: checksum đúng là lưu, kể cả readingTime=0. Chỉ chặn trùng mốc giờ đã lưu.
       const duplicate = await readingTimeTaken(packet);
       if (duplicate) {
         disposition = "duplicate";
@@ -422,18 +394,6 @@ export async function ingestGateway(rawText: string, headers?: Headers) {
     });
     if (disposition === "accepted") {
       disposition = "unknown_meter";
-      server = 4;
-    }
-  }
-
-  // Error≠0 chỉ loại bản phát lại. RE=0 checksum đúng thì vẫn nhận.
-  if (packet.isReplay && packet.error !== 0) {
-    notes.push({
-      level: "warning",
-      reason: `Error=${packet.error} (${gatewayErrorText(packet.error)}). Bản phát lại bị bỏ qua.`,
-    });
-    if (disposition === "accepted") {
-      disposition = "gateway_error";
       server = 4;
     }
   }
@@ -823,102 +783,6 @@ async function readingTimeTaken(packet: NormalizedPacket) {
     [sample.meterId, sample.meterModel, unix],
   );
   return rows.length > 0;
-}
-
-function readEpaed(values: Record<string, unknown>) {
-  return finiteNumber(values.EPaed);
-}
-
-function epaedOutOfRange(epaed: number, before: number | null, after: number | null) {
-  const eps = 1e-6;
-  if (before != null && after != null) {
-    const lo = Math.min(before, after);
-    const hi = Math.max(before, after);
-    if (epaed + eps < lo || epaed - eps > hi) {
-      return `Bỏ qua RE=1: EPaed=${epaed} không nằm giữa mẫu realtime trước (${before}) và sau (${after}).`;
-    }
-    return null;
-  }
-  if (before != null && epaed + eps < before) {
-    return `Bỏ qua RE=1: EPaed=${epaed} nhỏ hơn mẫu realtime trước (${before}).`;
-  }
-  if (after != null && epaed - eps > after) {
-    return `Bỏ qua RE=1: EPaed=${epaed} lớn hơn mẫu realtime sau (${after}).`;
-  }
-  return null;
-}
-
-async function replayEnergyInvalid(packet: NormalizedPacket) {
-  const epaed = readEpaed(packet.values);
-  if (epaed == null) return null;
-  const unix = Math.trunc(packet.readingDate.getTime() / 1000);
-  if (!Number.isFinite(unix) || unix <= 0) return null;
-
-  const sample = compactSample(packet);
-  let before: number | null = null;
-  let after: number | null = null;
-
-  if (sample) {
-    const beforeRows = await queryRows<RowDataPacket>(
-      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
-         FROM gateway_samples
-        WHERE meter_id = ? AND meter_model = ?
-          AND is_replay = 0
-          AND sampled_unix IS NOT NULL
-          AND sampled_unix < ?
-          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
-        ORDER BY sampled_unix DESC
-        LIMIT 1`,
-      [sample.meterId, sample.meterModel, unix],
-    );
-    const afterRows = await queryRows<RowDataPacket>(
-      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
-         FROM gateway_samples
-        WHERE meter_id = ? AND meter_model = ?
-          AND is_replay = 0
-          AND sampled_unix IS NOT NULL
-          AND sampled_unix > ?
-          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
-        ORDER BY sampled_unix ASC
-        LIMIT 1`,
-      [sample.meterId, sample.meterModel, unix],
-    );
-    before = beforeRows[0] == null ? null : Number(beforeRows[0].epaed);
-    after = afterRows[0] == null ? null : Number(afterRows[0].epaed);
-  } else {
-    const beforeRows = await queryRows<RowDataPacket>(
-      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
-         FROM gateway_packets
-        WHERE meter_id = ? AND meter_model = ?
-          AND disposition = 'accepted'
-          AND is_replay = 0
-          AND reading_time_raw REGEXP '^[1-9][0-9]*$'
-          AND CAST(reading_time_raw AS UNSIGNED) < ?
-          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
-        ORDER BY CAST(reading_time_raw AS UNSIGNED) DESC
-        LIMIT 1`,
-      [packet.meterId, packet.meterModel, unix],
-    );
-    const afterRows = await queryRows<RowDataPacket>(
-      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
-         FROM gateway_packets
-        WHERE meter_id = ? AND meter_model = ?
-          AND disposition = 'accepted'
-          AND is_replay = 0
-          AND reading_time_raw REGEXP '^[1-9][0-9]*$'
-          AND CAST(reading_time_raw AS UNSIGNED) > ?
-          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
-        ORDER BY CAST(reading_time_raw AS UNSIGNED) ASC
-        LIMIT 1`,
-      [packet.meterId, packet.meterModel, unix],
-    );
-    before = beforeRows[0] == null ? null : Number(beforeRows[0].epaed);
-    after = afterRows[0] == null ? null : Number(afterRows[0].epaed);
-  }
-
-  if (before != null && Number.isNaN(before)) before = null;
-  if (after != null && Number.isNaN(after)) after = null;
-  return epaedOutOfRange(epaed, before, after);
 }
 
 async function loadConfig(gatewayId: string) {
