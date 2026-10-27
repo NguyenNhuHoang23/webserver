@@ -30,9 +30,10 @@ export const METER_MODEL_BY_CODE: Record<number, string> = {
 export const DISPOSITION_LABEL: Record<string, string> = {
   accepted: "Đã lưu",
   duplicate: "Bỏ qua: trùng meterModel + meterId + readingTime",
-  clock_realtime: "Đã lưu + log: realtime lệch giờ server quá 20 giây (gateway sẽ sync bằng SeverTime)",
-  clock_replay: "Bỏ qua: bản phát lại có readingTime vượt giờ server quá 20 giây",
-  gateway_error: "Bỏ qua: Error khác 0",
+  clock_replay: "Bỏ qua: bản phát lại (RE=1) có readingTime vượt giờ server quá 20 giây",
+  replay_time: "Bỏ qua: bản phát lại (RE=1) có readingTime không chuẩn (0 hoặc chưa đồng bộ)",
+  replay_energy: "Bỏ qua: bản phát lại (RE=1) có EPaed không khớp mẫu realtime trước/sau",
+  gateway_error: "Bỏ qua: Error khác 0 (chỉ áp dụng bản phát lại RE=1)",
   checksum: "Bỏ qua: lỗi checksum",
   hmac_invalid: "Bỏ qua: HMAC không khớp hoặc thiếu chữ ký",
   unknown_meter: "Bỏ qua: chưa có đồng hồ trùng serial và category",

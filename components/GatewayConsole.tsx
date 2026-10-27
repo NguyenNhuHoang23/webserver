@@ -305,16 +305,17 @@ export function GatewayConsole() {
         </div>
         <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">
           Gateway bắn JSON đầy đủ hoặc dạng viết tắt (PV, IT, PN, GID, GT, GH, MT, MM, MID, TIM, RE, ER, VAL, CRC, HMAC).
-          Server lưu nguyên văn bản tin, toàn bộ values kể cả Null, rồi trả ACK kèm SeverTime, TimeUpdate, Wifi và PassWifi.
-          CRC kiểm lỗi truyền. HMAC-SHA256 (khi đã cấp secretKey) chống giả mạo thiết bị: ký trên JSON sau khi bỏ CRC/HMAC.
+          Server luôn trả ACK (kèm SeverTime) để gateway không nhầm là chưa nhận rồi phát lại với RE=1.
+          RE=0 (realtime): checksum đúng là nhận, kể cả readingTime=0. RE=1 (phát lại): bỏ nếu TIM không chuẩn
+          hoặc EPaed không nằm giữa mẫu realtime trước/sau cùng đồng hồ.
         </p>
       </div>
 
       <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <InfoCard title="Server = 1" text="Đã lưu bản tin." />
+        <InfoCard title="Server = 1" text="Checksum đúng, đã nhận. RE=0 được lưu cả khi TIM=0." />
         <InfoCard title="Server = 2" text="Lỗi CRC hoặc HMAC. Không dùng số liệu." />
         <InfoCard title="Server = 3" text="Lỗi format JSON hoặc thiếu trường." />
-        <InfoCard title="Server = 4" text="Bỏ qua: trùng meterModel+meterId+readingTime, phát lại (isReplay) có readingTime vượt giờ server >20s, Error≠0, hoặc đồng hồ chưa đăng ký. Realtime lệch giờ vẫn được lưu + log; ACK luôn kèm SeverTime (Unix) để gateway sync." />
+        <InfoCard title="Server = 4" text="Bỏ qua: trùng mốc giờ, RE=1 TIM=0/lệch giờ/EPaed sai, hoặc đồng hồ chưa đăng ký. ACK vẫn gửi để gateway xóa buffer." />
       </section>
 
       <section className="mb-6 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">

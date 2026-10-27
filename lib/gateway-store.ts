@@ -365,31 +365,50 @@ export async function ingestGateway(rawText: string, headers?: Headers) {
     if (parsed.packet?.meterModelCode == null) {
       notes.push({ level: "log", reason: parsed.reason });
     }
-  } else if (disposition === "accepted" && packet.timeSynced) {
-    const duplicate = await readingExists(packet);
-    if (duplicate) {
-      disposition = "duplicate";
-      server = 4;
-      notes.push({
-        level: "log",
-        reason: "Sai readingTime: đã tồn tại cùng meterModel, meterId và readingTime.",
-      });
-    } else {
-      const delta = packet.readingDate.getTime() - Date.now();
-      // Spec: isReplay=0 + lệch >20s → vẫn GIỮ data + log (gateway sync giờ qua ACK SeverTime).
-      if (!packet.isReplay && Math.abs(delta) > CLOCK_SKEW_MS) {
-        notes.push({
-          level: "log",
-          reason:
-            "Gateway sai Time: isReplay=0/fail và readingTime lệch quá 20 giây so với giờ server. Bản tin vẫn được giữ; gateway sẽ cập nhật giờ từ SeverTime trong ACK.",
-        });
-      } else if (packet.isReplay && delta > CLOCK_SKEW_MS) {
-        // Spec: isReplay=true + readingTime > giờ server +20s → bỏ qua + log.
-        disposition = "clock_replay";
+  } else if (disposition === "accepted") {
+    if (packet.isReplay) {
+      // RE=1: gói phát lại khi gateway tưởng server chưa ACK. Lọc kỹ.
+      if (!packet.timeSynced || packet.readingTime === "0") {
+        disposition = "replay_time";
         server = 4;
         notes.push({
           level: "log",
-          reason: "Gateway sai Time khi mất mạng: isReplay=true và readingTime lớn hơn giờ server quá 20 giây.",
+          reason: "Bỏ qua RE=1: readingTime=0 hoặc chưa đồng bộ. Không dùng số liệu phát lại này.",
+        });
+      } else if (await readingTimeTaken(packet)) {
+        disposition = "duplicate";
+        server = 4;
+        notes.push({
+          level: "log",
+          reason: "Bỏ qua RE=1: đã có cùng meterModel, meterId và readingTime.",
+        });
+      } else {
+        const delta = packet.readingDate.getTime() - Date.now();
+        if (delta > CLOCK_SKEW_MS) {
+          disposition = "clock_replay";
+          server = 4;
+          notes.push({
+            level: "log",
+            reason: "Bỏ qua RE=1: readingTime lớn hơn giờ server quá 20 giây.",
+          });
+        } else {
+          const energyReason = await replayEnergyInvalid(packet);
+          if (energyReason) {
+            disposition = "replay_energy";
+            server = 4;
+            notes.push({ level: "log", reason: energyReason });
+          }
+        }
+      }
+    } else if (packet.timeSynced) {
+      // RE=0: checksum đúng là nhận, kể cả readingTime=0. Chỉ chặn trùng mốc giờ đã lưu.
+      const duplicate = await readingTimeTaken(packet);
+      if (duplicate) {
+        disposition = "duplicate";
+        server = 4;
+        notes.push({
+          level: "log",
+          reason: "Sai readingTime: đã tồn tại cùng meterModel, meterId và readingTime.",
         });
       }
     }
@@ -407,10 +426,11 @@ export async function ingestGateway(rawText: string, headers?: Headers) {
     }
   }
 
-  if (packet.error !== 0) {
+  // Error≠0 chỉ loại bản phát lại. RE=0 checksum đúng thì vẫn nhận.
+  if (packet.isReplay && packet.error !== 0) {
     notes.push({
       level: "warning",
-      reason: `Error=${packet.error} (${gatewayErrorText(packet.error)}). Bản tin bị bỏ qua.`,
+      reason: `Error=${packet.error} (${gatewayErrorText(packet.error)}). Bản phát lại bị bỏ qua.`,
     });
     if (disposition === "accepted") {
       disposition = "gateway_error";
@@ -422,7 +442,7 @@ export async function ingestGateway(rawText: string, headers?: Headers) {
   try {
     await connection.beginTransaction();
     const sample = compactSample(packet);
-    if (disposition === "accepted" && !sample) {
+    if (disposition === "accepted" && !sample && packet.timeSynced) {
       try {
         await connection.execute(
           `INSERT INTO gateway_reading_keys (meter_model, meter_id, reading_time_raw) VALUES (?, ?, ?)`,
@@ -789,6 +809,116 @@ async function readingExists(packet: NormalizedPacket) {
     [packet.meterModel, packet.meterId, packet.readingTime],
   );
   return rows.length > 0;
+}
+
+async function readingTimeTaken(packet: NormalizedPacket) {
+  if (await readingExists(packet)) return true;
+  const sample = compactSample(packet);
+  if (!sample || !packet.timeSynced) return false;
+  const unix = Math.trunc(packet.readingDate.getTime() / 1000);
+  if (!Number.isFinite(unix) || unix <= 0) return false;
+  const rows = await queryRows<RowDataPacket>(
+    `SELECT 1 AS ok FROM gateway_samples
+      WHERE meter_id = ? AND meter_model = ? AND sampled_unix = ? LIMIT 1`,
+    [sample.meterId, sample.meterModel, unix],
+  );
+  return rows.length > 0;
+}
+
+function readEpaed(values: Record<string, unknown>) {
+  return finiteNumber(values.EPaed);
+}
+
+function epaedOutOfRange(epaed: number, before: number | null, after: number | null) {
+  const eps = 1e-6;
+  if (before != null && after != null) {
+    const lo = Math.min(before, after);
+    const hi = Math.max(before, after);
+    if (epaed + eps < lo || epaed - eps > hi) {
+      return `Bỏ qua RE=1: EPaed=${epaed} không nằm giữa mẫu realtime trước (${before}) và sau (${after}).`;
+    }
+    return null;
+  }
+  if (before != null && epaed + eps < before) {
+    return `Bỏ qua RE=1: EPaed=${epaed} nhỏ hơn mẫu realtime trước (${before}).`;
+  }
+  if (after != null && epaed - eps > after) {
+    return `Bỏ qua RE=1: EPaed=${epaed} lớn hơn mẫu realtime sau (${after}).`;
+  }
+  return null;
+}
+
+async function replayEnergyInvalid(packet: NormalizedPacket) {
+  const epaed = readEpaed(packet.values);
+  if (epaed == null) return null;
+  const unix = Math.trunc(packet.readingDate.getTime() / 1000);
+  if (!Number.isFinite(unix) || unix <= 0) return null;
+
+  const sample = compactSample(packet);
+  let before: number | null = null;
+  let after: number | null = null;
+
+  if (sample) {
+    const beforeRows = await queryRows<RowDataPacket>(
+      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
+         FROM gateway_samples
+        WHERE meter_id = ? AND meter_model = ?
+          AND is_replay = 0
+          AND sampled_unix IS NOT NULL
+          AND sampled_unix < ?
+          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
+        ORDER BY sampled_unix DESC
+        LIMIT 1`,
+      [sample.meterId, sample.meterModel, unix],
+    );
+    const afterRows = await queryRows<RowDataPacket>(
+      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
+         FROM gateway_samples
+        WHERE meter_id = ? AND meter_model = ?
+          AND is_replay = 0
+          AND sampled_unix IS NOT NULL
+          AND sampled_unix > ?
+          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
+        ORDER BY sampled_unix ASC
+        LIMIT 1`,
+      [sample.meterId, sample.meterModel, unix],
+    );
+    before = beforeRows[0] == null ? null : Number(beforeRows[0].epaed);
+    after = afterRows[0] == null ? null : Number(afterRows[0].epaed);
+  } else {
+    const beforeRows = await queryRows<RowDataPacket>(
+      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
+         FROM gateway_packets
+        WHERE meter_id = ? AND meter_model = ?
+          AND disposition = 'accepted'
+          AND is_replay = 0
+          AND reading_time_raw REGEXP '^[1-9][0-9]*$'
+          AND CAST(reading_time_raw AS UNSIGNED) < ?
+          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
+        ORDER BY CAST(reading_time_raw AS UNSIGNED) DESC
+        LIMIT 1`,
+      [packet.meterId, packet.meterModel, unix],
+    );
+    const afterRows = await queryRows<RowDataPacket>(
+      `SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(values_json, '$.EPaed')) AS DECIMAL(18,6)) AS epaed
+         FROM gateway_packets
+        WHERE meter_id = ? AND meter_model = ?
+          AND disposition = 'accepted'
+          AND is_replay = 0
+          AND reading_time_raw REGEXP '^[1-9][0-9]*$'
+          AND CAST(reading_time_raw AS UNSIGNED) > ?
+          AND JSON_EXTRACT(values_json, '$.EPaed') IS NOT NULL
+        ORDER BY CAST(reading_time_raw AS UNSIGNED) ASC
+        LIMIT 1`,
+      [packet.meterId, packet.meterModel, unix],
+    );
+    before = beforeRows[0] == null ? null : Number(beforeRows[0].epaed);
+    after = afterRows[0] == null ? null : Number(afterRows[0].epaed);
+  }
+
+  if (before != null && Number.isNaN(before)) before = null;
+  if (after != null && Number.isNaN(after)) after = null;
+  return epaedOutOfRange(epaed, before, after);
 }
 
 async function loadConfig(gatewayId: string) {
