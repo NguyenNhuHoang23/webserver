@@ -63,10 +63,17 @@ export async function queryRows<T = Record<string, unknown>>(
 
 export function jsonField<T>(value: unknown, fallback: T): T {
   if (value == null) return fallback;
-  if (typeof value !== "string") return value as T;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
+  let current: unknown = value;
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(current)) {
+    current = current.toString("utf8");
   }
+  for (let step = 0; step < 2 && typeof current === "string"; step += 1) {
+    try {
+      current = JSON.parse(current);
+    } catch {
+      return fallback;
+    }
+  }
+  if (current == null || typeof current !== "object") return fallback;
+  return current as T;
 }

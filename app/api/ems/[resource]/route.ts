@@ -56,19 +56,34 @@ function ensureDeviceColumns() {
 }
 
 function ensureProjectSettingsTable() {
-  projectSettingsReady ??= emsDb
-    .execute(
+  projectSettingsReady ??= (async () => {
+    await emsDb.execute(
       `CREATE TABLE IF NOT EXISTS project_settings (
          project_id VARCHAR(64) NOT NULL,
          payload JSON NOT NULL,
          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-         PRIMARY KEY (project_id),
-         CONSTRAINT fk_project_settings_project
-           FOREIGN KEY (project_id) REFERENCES projects (id)
-           ON DELETE CASCADE ON UPDATE CASCADE
+         PRIMARY KEY (project_id)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-    )
-    .then(() => undefined);
+    );
+    const duplicates = await queryRows<{ project_id: string }>(
+      `SELECT project_id FROM project_settings GROUP BY project_id HAVING COUNT(*) > 1`,
+    );
+    for (const row of duplicates) {
+      const copies = await queryRows<{ payload: unknown; updated_at: string }>(
+        `SELECT payload, updated_at FROM project_settings
+          WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1`,
+        [row.project_id],
+      );
+      const keep = copies[0];
+      if (!keep) continue;
+      await emsDb.execute("DELETE FROM project_settings WHERE project_id = ?", [row.project_id]);
+      await emsDb.execute(
+        `INSERT INTO project_settings (project_id, payload, updated_at) VALUES (?, CAST(? AS JSON), ?)`,
+        [row.project_id, JSON.stringify(jsonField(keep.payload, {})), keep.updated_at],
+      );
+    }
+    await emsDb.execute("ALTER TABLE project_settings ADD PRIMARY KEY (project_id)").catch(() => undefined);
+  })();
   return projectSettingsReady;
 }
 
@@ -324,7 +339,9 @@ async function getResource(resource: string, request: NextRequest) {
     if (!projectId) throw new Error("projectId is required");
     await ensureProjectSettingsTable();
     const rows = await queryRows<Row>(
-      "SELECT project_id AS projectId, payload, updated_at AS updatedAt FROM project_settings WHERE project_id = ?",
+      `SELECT project_id AS projectId, payload, updated_at AS updatedAt
+         FROM project_settings WHERE project_id = ?
+         ORDER BY updated_at DESC LIMIT 1`,
       [projectId],
     );
     if (!rows[0]) return [];
@@ -575,10 +592,17 @@ async function saveResource(resource: string, body: Row) {
     const projectId = asString(body.projectId);
     if (!projectId) throw new Error("projectId is required");
     await ensureProjectSettingsTable();
-    const payload = JSON.stringify(body.payload ?? {});
+    const existing = await queryRows<Row>(
+      `SELECT payload FROM project_settings WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1`,
+      [projectId],
+    );
+    const current = jsonField<Row>(existing[0]?.payload, {});
+    const incoming = jsonField<Row>(body.payload, {});
+    const merged = { ...current, ...incoming };
+    const payload = JSON.stringify(merged);
     await emsDb.execute(
-      `INSERT INTO project_settings (project_id, payload) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE payload = ?`,
+      `INSERT INTO project_settings (project_id, payload) VALUES (?, CAST(? AS JSON))
+       ON DUPLICATE KEY UPDATE payload = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP`,
       [projectId, payload, payload],
     );
     return getResource(resource, new NextRequest(`http://localhost/api/ems/project-settings?projectId=${encodeURIComponent(projectId)}`));

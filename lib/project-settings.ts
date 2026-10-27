@@ -9,14 +9,17 @@ export function loadProjectSettings(projectId: string): ProjectSettingsPayload |
   return cache[projectId];
 }
 
-export function hydrateProjectSettings(projectId: string) {
+export function hydrateProjectSettings(projectId: string, options?: { force?: boolean }) {
   if (typeof window === "undefined") return Promise.resolve(loadProjectSettings(projectId) ?? {});
+  if (options?.force) hydration[projectId] = undefined;
   if (!hydration[projectId]) {
     hydration[projectId] = dbFetch<Array<{ payload?: ProjectSettingsPayload }>>("project-settings", {
       query: { projectId },
     })
       .then((rows) => {
-        cache[projectId] = rows[0]?.payload ?? {};
+        const payload = rows[0]?.payload;
+        cache[projectId] =
+          payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
         return cache[projectId]!;
       })
       .finally(() => {
@@ -27,12 +30,15 @@ export function hydrateProjectSettings(projectId: string) {
 }
 
 export async function saveProjectSettings(projectId: string, payload: ProjectSettingsPayload) {
-  cache[projectId] = payload;
   const rows = await dbFetch<Array<{ payload?: ProjectSettingsPayload }>>("project-settings", {
     method: "POST",
     body: JSON.stringify({ projectId, payload }),
   });
-  cache[projectId] = rows[0]?.payload ?? payload;
+  const next =
+    rows[0]?.payload && typeof rows[0].payload === "object" && !Array.isArray(rows[0].payload)
+      ? rows[0].payload
+      : { ...(cache[projectId] ?? {}), ...payload };
+  cache[projectId] = next;
   emitDbChange("project-settings");
   return cache[projectId]!;
 }

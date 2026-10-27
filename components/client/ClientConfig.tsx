@@ -21,10 +21,11 @@ import {
   INDUSTRIAL_TARIFF_DECISION,
   INDUSTRIAL_VOLTAGE_LEVELS,
   pricesForLevel,
+  resolveTouPrices,
   type TouBand,
   type VoltageLevelId,
 } from "@/lib/industrial-electricity";
-import { hydrateProjectSettings, saveProjectSettings } from "@/lib/project-settings";
+import { hydrateProjectSettings, saveProjectSettings, type ProjectSettingsPayload } from "@/lib/project-settings";
 
 type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
 type Utility = string;
@@ -79,6 +80,7 @@ export function ClientConfig() {
   const [tab, setTab] = useState<TabId>("meters");
   const [openParams, setOpenParams] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [utilities, setUtilities] = useState<string[]>(FALLBACK_UTILITIES);
   const [utility, setUtility] = useState<Utility>("Điện");
@@ -108,36 +110,49 @@ export function ClientConfig() {
   const [dailyLimit, setDailyLimit] = useState(0);
   const [peakWarn, setPeakWarn] = useState(true);
 
+  function applyCostSettings(settings: ProjectSettingsPayload, types: string[] = utilities) {
+    const savedCost = settings.costConfig as SavedCostConfig | undefined;
+    if (!savedCost) {
+      setApplyDate("");
+      setSlots([]);
+      setFlatPrices({});
+      setVoltageLevel(DEFAULT_VOLTAGE_LEVEL);
+      setTouPrices(tariffInputs(DEFAULT_VOLTAGE_LEVEL));
+      return;
+    }
+    setApplyDate(savedCost.applyDate ?? "");
+    setSlots(savedCost.slots?.length ? savedCost.slots.map((slot) => ({ ...slot })) : []);
+    setFlatPrices(savedCost.flatPrices ? { ...savedCost.flatPrices } : {});
+    const tariff = resolveTouPrices(savedCost.electricity?.voltageLevel, savedCost.electricity?.prices);
+    setVoltageLevel(tariff.levelId);
+    setTouPrices({
+      normal: formatTariffPrice(tariff.prices.normal),
+      off: formatTariffPrice(tariff.prices.off),
+      peak: formatTariffPrice(tariff.prices.peak),
+    });
+    if (savedCost.utility && types.includes(savedCost.utility)) setUtility(savedCost.utility);
+  }
+
   useEffect(() => {
     const project = loadProjects().find((item) => item.id === projectId);
     const types = resolveMeterTypes(project);
     setUtilities(types.length ? types : FALLBACK_UTILITIES);
     setUtility((current) => (types.includes(current) ? current : types[0] ?? "Điện"));
-    void Promise.all([hydrateClientMeters(projectId), hydrateProjectSettings(projectId)])
-      .then(([rows, settings]) => {
-        setMeters(rows);
-        const saved = settings.costConfig as SavedCostConfig | undefined;
-        if (saved?.applyDate) setApplyDate(saved.applyDate);
-        if (saved?.slots?.length) setSlots(saved.slots.map((slot) => ({ ...slot })));
-        if (saved?.flatPrices) setFlatPrices({ ...saved.flatPrices });
-        if (saved?.electricity?.voltageLevel) setVoltageLevel(saved.electricity.voltageLevel);
-        setTouPrices({
-          ...tariffInputs(saved?.electricity?.voltageLevel ?? DEFAULT_VOLTAGE_LEVEL),
-          ...saved?.electricity?.prices,
-        });
-        if (saved?.utility && types.includes(saved.utility)) setUtility(saved.utility);
-      })
+    void hydrateClientMeters(projectId)
+      .then(setMeters)
       .catch(() => setMeters(loadClientMeters(projectId)));
+    void hydrateProjectSettings(projectId, { force: true })
+      .then((settings) => applyCostSettings(settings, types))
+      .catch(() => undefined);
     setDevices(loadDevices());
   }, [projectId]);
 
   const markSaved = async () => {
     setSaveError("");
+    setSaving(true);
     try {
       if (tab === "cost") {
-        const settings = await hydrateProjectSettings(projectId);
-        await saveProjectSettings(projectId, {
-          ...settings,
+        const stored = await saveProjectSettings(projectId, {
           costConfig: {
             utility,
             applyDate,
@@ -149,6 +164,7 @@ export function ClientConfig() {
             },
           },
         });
+        applyCostSettings(stored);
       } else {
         await saveClientMeters(projectId, meters);
       }
@@ -157,6 +173,8 @@ export function ClientConfig() {
     } catch (error) {
       setSaved(false);
       setSaveError(error instanceof Error ? error.message : "Không thể lưu cấu hình. Vui lòng thử lại.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -219,8 +237,9 @@ export function ClientConfig() {
             <button
               type="button"
               title="Lưu"
-              onClick={markSaved}
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs transition-colors"
+              onClick={() => void markSaved()}
+              disabled={saving}
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs transition-colors disabled:opacity-60"
             >
               {tab === "accounts" ? <FileIcon /> : <SaveIcon />}
             </button>
@@ -328,16 +347,8 @@ export function ClientConfig() {
                 type="button"
                 onClick={() => {
                   setMeters(loadClientMeters(projectId));
-                  void hydrateProjectSettings(projectId).then((settings) => {
-                    const saved = settings.costConfig as SavedCostConfig | undefined;
-                    setSlots(saved?.slots?.map((slot) => ({ ...slot })) ?? []);
-                    setApplyDate(saved?.applyDate ?? "");
-                    setFlatPrices(saved?.flatPrices ? { ...saved.flatPrices } : {});
-                    setVoltageLevel(saved?.electricity?.voltageLevel ?? DEFAULT_VOLTAGE_LEVEL);
-                    setTouPrices({
-                      ...tariffInputs(saved?.electricity?.voltageLevel ?? DEFAULT_VOLTAGE_LEVEL),
-                      ...saved?.electricity?.prices,
-                    });
+                  void hydrateProjectSettings(projectId, { force: true }).then((settings) => {
+                    applyCostSettings(settings);
                   });
                   setAccounts([]);
                 }}
@@ -347,10 +358,11 @@ export function ClientConfig() {
               </button>
               <button
                 type="button"
-                onClick={markSaved}
-                className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors"
+                onClick={() => void markSaved()}
+                disabled={saving}
+                className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors disabled:opacity-60"
               >
-                Lưu cấu hình
+                {saving ? "Đang lưu..." : "Lưu cấu hình"}
               </button>
             </div>
           ) : null}
