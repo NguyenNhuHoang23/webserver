@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { useChartSize } from "@/components/client/useChartSize";
 import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
@@ -796,8 +797,7 @@ function MultiCostBarChart({
   hover: number | null;
   onHover: (index: number | null) => void;
 }) {
-  const W = 1080;
-  const H = 360;
+  const { ref, width: W, height: H } = useChartSize();
   const pad = { l: 52, r: 16, t: 28, b: 32 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
@@ -822,9 +822,11 @@ function MultiCostBarChart({
   const ticks = Array.from({ length: tickCount + 1 }, (_, i) => (yMax * i) / tickCount);
 
   return (
+    <div ref={ref} className="mt-2 h-[240px] w-full min-w-0 sm:h-[360px] lg:h-[420px]">
+    {W > 0 && H > 0 ? (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="mt-2 h-[280px] w-full sm:h-[360px] lg:h-[420px]"
+      className="h-full w-full"
       onMouseLeave={() => onHover(null)}
     >
       <text x={pad.l} y="16" className="fill-slate-400" fontSize="12">
@@ -942,6 +944,8 @@ function MultiCostBarChart({
         </g>
       ) : null}
     </svg>
+    ) : null}
+    </div>
   );
 }
 

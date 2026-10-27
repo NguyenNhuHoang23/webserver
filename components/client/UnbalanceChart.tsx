@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, domainTicks, paddedDomain, valuesForKeysAverage, type ChartSample } from "@/lib/gateway-series";
 
 const N = 160;
@@ -97,7 +98,7 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
   const timelineValues = uSeries[0]?.values ?? Array.from({ length: N }, () => 0);
 
   return (
-    <section className="mt-4 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-4">
+    <section className="mt-4 w-full min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <select
@@ -206,8 +207,7 @@ function UnbPane({
   formatTick: (value: number) => string;
   axis?: boolean;
 }) {
-  const W = 1080;
-  const H = 240;
+  const { ref, width: W, height: H } = useChartSize();
   const pad = { l: 52, r: 10, t: 12, b: axis ? 40 : 28 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
@@ -224,9 +224,11 @@ function UnbPane({
     chartTimeLabel(samples, index, N, kind);
 
   return (
+    <div ref={ref} className="h-[200px] w-full min-w-0 sm:h-[240px]">
+    {W > 0 && H > 0 ? (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="block h-[240px] w-full"
+      className="block h-full w-full"
       onMouseLeave={() => onHover(null)}
       onMouseMove={(e) => {
         const box = e.currentTarget.getBoundingClientRect();
@@ -360,6 +362,8 @@ function UnbPane({
         </text>
       ))}
     </svg>
+    ) : null}
+    </div>
   );
 }
 

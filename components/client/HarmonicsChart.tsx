@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, domainTicks, latestValue, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 
 const N = 160;
@@ -180,7 +181,7 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
   const timelineValues = thduSeries[0]?.values ?? Array.from({ length: N }, () => 0);
 
   return (
-    <section className="mt-4 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-4">
+    <section className="mt-4 w-full min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-4">
       <div className="mb-2.5 inline-flex overflow-hidden rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 text-[12px] font-medium shadow-2xs">
         <button
           type="button"
@@ -388,8 +389,7 @@ function HarmPane({
   formatTick: (value: number) => string;
   axis?: boolean;
 }) {
-  const W = 1080;
-  const H = 176;
+  const { ref, width: W, height: H } = useChartSize();
   const pad = { l: 58, r: 10, t: 10, b: axis ? 40 : 10 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
@@ -403,9 +403,11 @@ function HarmPane({
     chartTimeLabel(samples, index, N, kind);
 
   return (
+    <div ref={ref} className="h-[160px] w-full min-w-0 sm:h-[176px]">
+    {W > 0 && H > 0 ? (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="block h-[176px] w-full"
+      className="block h-full w-full"
       onMouseLeave={() => onHover(null)}
       onMouseMove={(e) => {
         const box = e.currentTarget.getBoundingClientRect();
@@ -465,6 +467,8 @@ function HarmPane({
         </text>
       ))}
     </svg>
+    ) : null}
+    </div>
   );
 }
 
@@ -539,8 +543,7 @@ function PeakPane({
   kind: "u" | "i";
   axis?: boolean;
 }) {
-  const W = 1080;
-  const H = 220;
+  const { ref, width: W, height: H } = useChartSize();
   const pad = { l: 58, r: 16, t: 12, b: axis ? 36 : 12 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
@@ -550,9 +553,11 @@ function PeakPane({
   const barW = Math.max(4, (groupW * 0.62) / Math.max(1, channels.length));
 
   return (
+    <div ref={ref} className="h-[180px] w-full min-w-0 sm:h-[220px]">
+    {W > 0 && H > 0 ? (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="block h-[220px] w-full"
+      className="block h-full w-full"
     >
       <rect x={pad.l} y={pad.t} width={innerW} height={innerH} fill="white" stroke="#6b7280" />
       <text x="14" y={H / 2} className="fill-slate-600" fontSize="11" transform={`rotate(-90 14 ${H / 2})`}>
@@ -601,6 +606,8 @@ function PeakPane({
         );
       })}
     </svg>
+    ) : null}
+    </div>
   );
 }
 

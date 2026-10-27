@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, domainTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
@@ -129,7 +130,7 @@ export function PowerChart({
       : "P/S/Q [kW, kVA, kVAR]";
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
+    <section className="w-full min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-slate-600">
           {/* Nhóm Công suất */}
@@ -269,8 +270,7 @@ function PowerPane({
   formatTick: (value: number) => string;
   axis?: boolean;
 }) {
-  const W = 1080;
-  const H = 240;
+  const { ref, width: W, height: H } = useChartSize();
   const pad = { l: 58, r: 10, t: 12, b: axis ? 40 : 28 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
@@ -288,9 +288,11 @@ function PowerPane({
     chartTimeLabel(samples, index, N, kind);
 
   return (
+    <div ref={ref} className="h-[200px] w-full min-w-0 sm:h-[240px]">
+    {W > 0 && H > 0 ? (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="block h-[240px] w-full"
+      className="block h-full w-full"
       onMouseLeave={() => onHover(null)}
       onMouseMove={(e) => {
         const box = e.currentTarget.getBoundingClientRect();
@@ -424,6 +426,8 @@ function PowerPane({
         </text>
       ))}
     </svg>
+    ) : null}
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
@@ -107,7 +108,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
   const timelineValues = uSeries[0]?.values ?? iSeries[0]?.values ?? Array.from({ length: N }, () => 0);
 
   return (
-    <div className="font-sans">
+    <div className="w-full min-w-0 font-sans">
       {/* Top bar: thông số U/I; bộ lọc thời gian dùng thanh chung của trang */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
         <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
@@ -249,8 +250,7 @@ function WavePane({
   domain: [number, number];
   axis?: boolean;
 }) {
-  const W = 1080;
-  const H = 240;
+  const { ref, width: W, height: H } = useChartSize();
   const pad = { l: 50, r: 10, t: 14, b: 28 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
@@ -278,9 +278,11 @@ function WavePane({
     chartTimeLabel(samples, index, N, kind);
 
   return (
+    <div ref={ref} className="h-[220px] w-full min-w-0 sm:h-[240px]">
+    {W > 0 && H > 0 ? (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="block h-[240px] w-full"
+      className="block h-full w-full"
       onMouseLeave={() => onHover(null)}
       onMouseMove={(e) => {
         const box = e.currentTarget.getBoundingClientRect();
@@ -407,6 +409,8 @@ function WavePane({
           ))
         : null}
     </svg>
+    ) : null}
+    </div>
   );
 }
 
