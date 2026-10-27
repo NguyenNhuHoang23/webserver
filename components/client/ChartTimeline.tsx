@@ -9,18 +9,22 @@ export function ChartTimeline({
   values,
   range,
   onRange,
+  compact = false,
 }: {
   labels: string[];
   values: number[];
   range: ChartRange;
   onRange: (range: ChartRange) => void;
+  compact?: boolean;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const drag = useRef<"start" | "end" | "move" | null>(null);
   const origin = useRef({ x: 0, start: 0, end: 0 });
   const last = Math.max(labels.length - 1, 0);
   const minSpan = last <= 0 ? 0 : Math.max(1, Math.min(3, last));
-  const maxVal = Math.max(1, ...values);
+  const minVal = values.length ? Math.min(...values) : 0;
+  const maxVal = values.length ? Math.max(...values) : 1;
+  const spanVal = Math.max(1e-9, maxVal - minVal);
   const left = last === 0 ? 0 : range.start / last;
   const right = last === 0 ? 1 : range.end / last;
   const startLabel = labels[range.start] ?? labels[0] ?? "--";
@@ -59,41 +63,53 @@ export function ChartTimeline({
   const spark = values
     .map((value, index) => {
       const x = last === 0 ? 0 : (index / last) * 100;
-      const y = 100 - (value / maxVal) * 86 - 7;
+      const y = 100 - ((value - minVal) / spanVal) * 86 - 7;
       return `${index === 0 ? "M" : "L"} ${x} ${y}`;
     })
     .join(" ");
 
+  const btnClass = compact
+    ? "inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+    : "inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100";
+
   return (
-    <div className="w-full rounded-xl border border-slate-200 bg-slate-50/80 px-2.5 py-2 sm:px-3">
-      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold tracking-wide text-slate-500">
-          KÉO THANH ĐỂ CHỌN KHOẢNG THỜI GIAN
-        </p>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            aria-label="Lùi khoảng xem"
-            onClick={() => shiftWindow(-minSpan)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-          >
+    <div
+      className={
+        compact
+          ? "w-full rounded-lg border border-slate-200 bg-slate-50/80 px-2 py-1.5"
+          : "w-full rounded-xl border border-slate-200 bg-slate-50/80 px-2.5 py-2 sm:px-3"
+      }
+    >
+      <div className={`flex flex-wrap items-center justify-between gap-2 ${compact ? "mb-1" : "mb-1.5"}`}>
+        {compact ? (
+          <p className="text-[10px] font-semibold text-slate-600">
+            {startLabel || "Bắt đầu"} → {endLabel || "Kết thúc"}
+          </p>
+        ) : (
+          <p className="text-[11px] font-semibold tracking-wide text-slate-500">
+            KÉO THANH ĐỂ CHỌN KHOẢNG THỜI GIAN
+          </p>
+        )}
+        <div className="flex items-center gap-1">
+          <button type="button" aria-label="Lùi khoảng xem" onClick={() => shiftWindow(-Math.max(minSpan, 1))} className={btnClass}>
             ‹
           </button>
-          <span className="min-w-[9.5rem] text-center text-[12px] font-semibold text-slate-800">
-            {startLabel} → {endLabel}
-          </span>
-          <button
-            type="button"
-            aria-label="Tới khoảng xem"
-            onClick={() => shiftWindow(minSpan)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-          >
+          {compact ? null : (
+            <span className="min-w-[9.5rem] text-center text-[12px] font-semibold text-slate-800">
+              {startLabel} → {endLabel}
+            </span>
+          )}
+          <button type="button" aria-label="Tới khoảng xem" onClick={() => shiftWindow(Math.max(minSpan, 1))} className={btnClass}>
             ›
           </button>
           <button
             type="button"
             onClick={() => onRange({ start: 0, end: last })}
-            className="ml-1 h-7 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+            className={
+              compact
+                ? "ml-1 h-6 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
+                : "ml-1 h-7 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+            }
           >
             Toàn bộ
           </button>
@@ -102,13 +118,17 @@ export function ChartTimeline({
 
       <div
         ref={trackRef}
-        className="relative h-14 w-full touch-none select-none overflow-hidden rounded-lg bg-white ring-1 ring-slate-200"
+        className={
+          compact
+            ? "relative h-8 w-full touch-none select-none overflow-hidden rounded-md bg-white ring-1 ring-slate-200"
+            : "relative h-14 w-full touch-none select-none overflow-hidden rounded-lg bg-white ring-1 ring-slate-200"
+        }
         onPointerDown={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
           const x = event.clientX - box.left;
           const leftX = left * box.width;
           const rightX = right * box.width;
-          const edge = 16;
+          const edge = compact ? 10 : 16;
           if (Math.abs(x - leftX) <= edge) drag.current = "start";
           else if (Math.abs(x - rightX) <= edge) drag.current = "end";
           else if (x > leftX && x < rightX) drag.current = "move";
@@ -141,11 +161,13 @@ export function ChartTimeline({
           className="absolute inset-y-0 border-y-2 border-emerald-500 bg-emerald-500/15"
           style={{ left: `${left * 100}%`, width: `${Math.max((right - left) * 100, 2)}%` }}
         >
-          <span className="absolute top-0 bottom-0 left-0 w-3 cursor-ew-resize rounded-l-md bg-emerald-600" />
-          <span className="absolute top-0 bottom-0 right-0 w-3 cursor-ew-resize rounded-r-md bg-emerald-600" />
-          <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-emerald-900/80">
-            Kéo
-          </span>
+          <span className={`absolute top-0 bottom-0 left-0 cursor-ew-resize rounded-l-md bg-emerald-600 ${compact ? "w-1.5" : "w-3"}`} />
+          <span className={`absolute top-0 bottom-0 right-0 cursor-ew-resize rounded-r-md bg-emerald-600 ${compact ? "w-1.5" : "w-3"}`} />
+          {compact ? null : (
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-emerald-900/80">
+              Kéo
+            </span>
+          )}
         </div>
       </div>
     </div>

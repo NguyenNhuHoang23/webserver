@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartTimeline } from "@/components/client/ChartTimeline";
 import { chartTimeLabel, chartTimeTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
@@ -75,8 +76,11 @@ export function FrequencyChart({
     setViewWin({ start, end: Math.min(N - 1, start + next) });
   };
 
-  const left = (viewWin.start / (N - 1)) * 100;
-  const width = ((viewWin.end - viewWin.start) / (N - 1)) * 100;
+  const timelineLabels = useMemo(
+    () => Array.from({ length: N }, (_, index) => chartTimeLabel(samples, index, N, "full") || ""),
+    [samples],
+  );
+  const timelineValues = series[0]?.values ?? Array.from({ length: N }, () => 0);
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
@@ -118,36 +122,11 @@ export function FrequencyChart({
 
       </div>
 
+      <div className="mb-2">
+        <ChartTimeline compact labels={timelineLabels} values={timelineValues} range={viewWin} onRange={setViewWin} />
+      </div>
+
       <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-        <div className="relative h-4 border-b border-slate-300 bg-slate-50">
-          <div
-            className="absolute inset-y-0 bg-[#d7e2ef]"
-            style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
-          />
-          <input
-            type="range"
-            min={0}
-            max={N - 21}
-            value={viewWin.start}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              setViewWin({ start: next, end: Math.min(N - 1, next + span) });
-            }}
-            className="absolute inset-0 z-10 w-full cursor-ew-resize appearance-none bg-transparent"
-          />
-          <span
-            className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
-            style={{ left: `calc(${left}% - 5px)` }}
-          >
-            ▼
-          </span>
-          <span
-            className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
-            style={{ left: `calc(${left + width}% - 5px)` }}
-          >
-            ▲
-          </span>
-        </div>
         <FreqPane
           qty={qty}
           series={series}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartTimeline } from "@/components/client/ChartTimeline";
 import { chartTimeLabel, chartTimeTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 
@@ -99,6 +100,11 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
 
   const uDomain = samples?.length ? paddedDomain(uSeries, [397, 401]) : ([397, 401] as [number, number]);
   const iDomain = samples?.length ? paddedDomain(iSeries, [450, 650]) : ([450, 650] as [number, number]);
+  const timelineLabels = useMemo(
+    () => Array.from({ length: N }, (_, index) => chartTimeLabel(samples, index, N, "full") || ""),
+    [samples],
+  );
+  const timelineValues = uSeries[0]?.values ?? iSeries[0]?.values ?? Array.from({ length: N }, () => 0);
 
   return (
     <div className="font-sans">
@@ -123,10 +129,11 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
 
       </div>
 
+      <div className="mb-2">
+        <ChartTimeline compact labels={timelineLabels} values={timelineValues} range={window} onRange={setWindow} />
+      </div>
+
       <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-        <div className="border-b border-slate-300 px-1">
-          <TimeSlider start={window.start} end={window.end} onChange={setWindow} />
-        </div>
         <WavePane
           title={`${uQty} [V]`}
           series={uSeries}
@@ -220,51 +227,6 @@ function Check({
       <input type="checkbox" checked={checked} onChange={onChange} className="accent-emerald-600" />
       {children}
     </label>
-  );
-}
-
-function TimeSlider({
-  start,
-  end,
-  onChange,
-}: {
-  start: number;
-  end: number;
-  onChange: (range: { start: number; end: number }) => void;
-}) {
-  const left = (start / (N - 1)) * 100;
-  const width = ((end - start) / (N - 1)) * 100;
-  return (
-    <div className="relative h-4 bg-slate-50">
-      <div
-        className="absolute inset-y-0 bg-[#d7e2ef]"
-        style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
-      />
-      <input
-        type="range"
-        min={0}
-        max={N - 21}
-        value={start}
-        onChange={(e) => {
-          const next = Number(e.target.value);
-          const span = end - start;
-          onChange({ start: next, end: Math.min(N - 1, next + span) });
-        }}
-        className="absolute inset-x-0 top-0 z-10 h-full w-full cursor-ew-resize appearance-none bg-transparent"
-      />
-      <span
-        className="pointer-events-none absolute -top-px text-[10px] leading-none text-emerald-600"
-        style={{ left: `calc(${left}% - 5px)` }}
-      >
-        ▼
-      </span>
-      <span
-        className="pointer-events-none absolute -bottom-px text-[10px] leading-none text-slate-400"
-        style={{ left: `calc(${left + width}% - 5px)` }}
-      >
-        ▲
-      </span>
-    </div>
   );
 }
 
