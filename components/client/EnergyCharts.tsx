@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChartTimeline } from "@/components/client/ChartTimeline";
 import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
@@ -222,6 +223,7 @@ export function EnergyCharts() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pointQuery, setPointQuery] = useState("");
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
+  const [pointsOpen, setPointsOpen] = useState(false);
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [gatewaySamples, setGatewaySamples] = useState<ProjectGatewaySample[]>([]);
   const [dailyRows, setDailyRows] = useState<GatewayDailyPoint[]>([]);
@@ -508,12 +510,36 @@ export function EnergyCharts() {
 
   return (
     <div className="flex h-full min-h-0 bg-[#f4f6f9]">
-      <aside className="flex w-[280px] shrink-0 flex-col border-r border-slate-200 bg-white">
+      {pointsOpen ? (
+        <button
+          type="button"
+          aria-label="Đóng danh sách điểm đo"
+          className="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
+          onClick={() => setPointsOpen(false)}
+        />
+      ) : null}
+      <aside
+        className={`${
+          pointsOpen ? "fixed inset-y-0 left-0 z-40 flex" : "hidden"
+        } w-[min(280px,85vw)] shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl md:relative md:z-0 md:flex md:w-[240px] md:shadow-none lg:w-[280px]`}
+      >
         <div className="border-b border-slate-100 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-800">Điểm đo trên sơ đồ</h2>
-          <p className="mt-0.5 text-[11px] leading-4 text-slate-400">
-            Tick chọn vị trí điểm đo (cùng danh sách Cấu hình / Sơ đồ) để hiển thị trên biểu đồ
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Điểm đo trên sơ đồ</h2>
+              <p className="mt-0.5 text-[11px] leading-4 text-slate-400">
+                Tick chọn vị trí điểm đo (cùng danh sách Cấu hình / Sơ đồ) để hiển thị trên biểu đồ
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPointsOpen(false)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 md:hidden"
+              aria-label="Đóng"
+            >
+              ×
+            </button>
+          </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
           <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">
@@ -605,8 +631,15 @@ export function EnergyCharts() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col gap-2.5">
             <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPointsOpen(true)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[13px] font-medium text-slate-700 md:hidden"
+              >
+                Điểm đo ({selectedPoints.length})
+              </button>
               {energyKinds.map((item) => (
                 <button
                   key={item}
@@ -627,6 +660,7 @@ export function EnergyCharts() {
               ))}
             </div>
             <TimeFilterBar
+              className="w-full"
               value={timeFilter}
               onChange={(next) => {
                 filterTouched.current = true;
@@ -672,8 +706,8 @@ export function EnergyCharts() {
           <UnbalanceChart samples={liveSamples} />
         ) : isConsumptionChart ? (
           <>
-            <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
-              <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
+            <div className="flex w-full min-w-0 flex-col gap-4">
+              <article className="w-full min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-[15px] font-semibold text-slate-800">
@@ -731,15 +765,22 @@ export function EnergyCharts() {
                     Tick chọn điểm đo bên trái để xem tiêu thụ
                   </p>
                 ) : view === "chart" ? (
-                  <MultiConsumptionBarChart
-                    series={multiBars}
-                    range={range}
-                    onRange={setRange}
-                    hover={hover}
-                    onHover={setHover}
-                    unit={consumptionUnit}
-                    yMaxHint={260}
-                  />
+                  <div className="mt-3 flex w-full min-w-0 flex-col gap-3">
+                    <ChartTimeline
+                      labels={primaryBars.map((item) => item.label)}
+                      values={primaryBars.map((item) => item.kwh)}
+                      range={range}
+                      onRange={setRange}
+                    />
+                    <MultiConsumptionBarChart
+                      series={multiBars}
+                      range={range}
+                      hover={hover}
+                      onHover={setHover}
+                      unit={consumptionUnit}
+                      yMaxHint={260}
+                    />
+                  </div>
                 ) : (
                   <div className="mt-4 overflow-x-auto">
                     <table className="w-full min-w-[480px] text-left text-sm">
@@ -770,7 +811,7 @@ export function EnergyCharts() {
                 )}
               </article>
 
-              <div className="flex min-h-0 flex-col gap-4">
+              <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
                 <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
                   <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
                     TỔNG HỢP TIÊU THỤ THEO ĐIỂM ĐO
@@ -979,7 +1020,6 @@ export function EnergyCharts() {
 function MultiConsumptionBarChart({
   series,
   range,
-  onRange,
   hover,
   onHover,
   unit = "kWh",
@@ -987,7 +1027,6 @@ function MultiConsumptionBarChart({
 }: {
   series: { point: MeterPoint; bars: BarPoint[] }[];
   range: { start: number; end: number };
-  onRange: (range: { start: number; end: number }) => void;
   hover: number | null;
   onHover: (index: number | null) => void;
   unit?: string;
@@ -1018,7 +1057,7 @@ function MultiConsumptionBarChart({
     <div className="mt-1">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="mx-auto h-[360px] w-full max-w-[1080px]"
+        className="h-[280px] w-full sm:h-[360px] lg:h-[420px]"
         onMouseLeave={() => onHover(null)}
       >
         <text x={pad.l} y="16" className="fill-slate-400" fontSize="12">
@@ -1102,11 +1141,6 @@ function MultiConsumptionBarChart({
           </g>
         ) : null}
       </svg>
-      <DataZoom
-        points={base}
-        range={range}
-        onRange={onRange}
-      />
     </div>
   );
 }
@@ -1188,7 +1222,7 @@ function TouConsumptionChart({
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="mx-auto mt-1 h-[180px] w-full max-w-[1080px]"
+      className="mt-1 h-[180px] w-full"
     >
       {items.map((item, i) => {
         const x = pad.l + i * groupW + (groupW - barW) / 2;
@@ -1218,111 +1252,6 @@ function TouConsumptionChart({
         );
       })}
     </svg>
-  );
-}
-
-function DataZoom({
-  points,
-  range,
-  onRange,
-}: {
-  points: BarPoint[];
-  range: { start: number; end: number };
-  onRange: (range: { start: number; end: number }) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const drag = useRef<"start" | "end" | "move" | null>(null);
-  const origin = useRef({ x: 0, start: 0, end: 0 });
-  const max = Math.max(points.map((p) => p.kwh).reduce((a, b) => Math.max(a, b), 0), 1);
-  const W = 500;
-  const H = 46;
-  const path = points
-    .map((p, i) => {
-      const x = (i / (points.length - 1)) * W;
-      const y = H - (p.kwh / max) * (H - 4) - 2;
-      return `${i === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
-  const area = `${path} L ${W} ${H} L 0 ${H} Z`;
-  const left = range.start / (points.length - 1);
-  const right = range.end / (points.length - 1);
-
-  const toIndex = (clientX: number) => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return 0;
-    const t = (clientX - box.left) / box.width;
-    return Math.round(Math.max(0, Math.min(1, t)) * (points.length - 1));
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!drag.current) return;
-    const idx = toIndex(e.clientX);
-    if (drag.current === "start") {
-      onRange({ start: Math.min(idx, range.end - 4), end: range.end });
-    } else if (drag.current === "end") {
-      onRange({ start: range.start, end: Math.max(idx, range.start + 4) });
-    } else {
-      const delta = idx - toIndex(origin.current.x);
-      const span = origin.current.end - origin.current.start;
-      let start = origin.current.start + delta;
-      start = Math.max(0, Math.min(points.length - 1 - span, start));
-      onRange({ start, end: start + span });
-    }
-  };
-
-  return (
-    <div
-      ref={ref}
-      className="relative mt-1 h-14 cursor-ew-resize select-none overflow-hidden rounded-sm bg-[#f7f9fc]"
-      onPointerMove={onPointerMove}
-      onPointerUp={() => {
-        drag.current = null;
-      }}
-      onPointerLeave={() => {
-        drag.current = null;
-      }}
-    >
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" preserveAspectRatio="none">
-        <path d={area} fill="#c5d9f2" />
-        <path d={path} fill="none" stroke="#8fb4e3" strokeWidth="1.2" />
-      </svg>
-      <div className="pointer-events-none absolute inset-y-0 bg-white/70" style={{ left: 0, width: `${left * 100}%` }} />
-      <div className="pointer-events-none absolute inset-y-0 bg-white/70" style={{ left: `${right * 100}%`, right: 0 }} />
-      <div
-        className="absolute inset-y-0 border border-[#7aa3d6] bg-[#4f89d8]/15"
-        style={{ left: `${left * 100}%`, width: `${(right - left) * 100}%` }}
-        onPointerDown={(e) => {
-          drag.current = "move";
-          origin.current = { x: e.clientX, start: range.start, end: range.end };
-          e.currentTarget.setPointerCapture(e.pointerId);
-        }}
-        onPointerMove={onPointerMove}
-        onPointerUp={() => {
-          drag.current = null;
-        }}
-      >
-        <button
-          type="button"
-          aria-label="Kéo đầu khoảng"
-          className="absolute top-0 bottom-0 left-0 w-2 cursor-ew-resize bg-[#7aa3d6]"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            drag.current = "start";
-            e.currentTarget.setPointerCapture(e.pointerId);
-          }}
-        />
-        <button
-          type="button"
-          aria-label="Kéo cuối khoảng"
-          className="absolute top-0 bottom-0 right-0 w-2 cursor-ew-resize bg-[#7aa3d6]"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            drag.current = "end";
-            e.currentTarget.setPointerCapture(e.pointerId);
-          }}
-        />
-      </div>
-    </div>
   );
 }
 
@@ -1361,7 +1290,7 @@ function LineChart({
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="mx-auto h-[340px] w-full max-w-[1080px]"
+      className="h-[280px] w-full sm:h-[340px] lg:h-[400px]"
       onMouseLeave={() => onHover(null)}
       onMouseMove={(e) => {
         const box = e.currentTarget.getBoundingClientRect();

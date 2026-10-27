@@ -123,7 +123,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
 
       </div>
 
-      <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-hidden rounded-[2px] border border-slate-400 bg-white">
+      <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
         <div className="border-b border-slate-300 px-1">
           <TimeSlider start={window.start} end={window.end} onChange={setWindow} />
         </div>

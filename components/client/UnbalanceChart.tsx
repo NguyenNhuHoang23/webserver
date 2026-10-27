@@ -130,7 +130,7 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
         </div>
       </div>
 
-      <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-hidden rounded-[2px] border border-slate-400 bg-white">
+      <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
         <div className="relative h-4 border-b border-slate-300 bg-slate-50">
           <div
             className="absolute inset-y-0 bg-[#d7e2ef]"

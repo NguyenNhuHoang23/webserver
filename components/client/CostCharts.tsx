@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChartTimeline } from "@/components/client/ChartTimeline";
 import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
@@ -174,6 +175,8 @@ export function CostCharts() {
   const [touPrices, setTouPrices] = useState<TouPrices>(() => resolveTouPrices("kv-under-6").prices);
   const [flatPrices, setFlatPrices] = useState<Record<string, number>>({});
   const [reloadKey, setReloadKey] = useState(0);
+  const [pointsOpen, setPointsOpen] = useState(false);
+  const [range, setRange] = useState({ start: 0, end: 30 });
   const monthAligned = useRef(false);
   const filterTouched = useRef(false);
   const selectionTouched = useRef(false);
@@ -342,6 +345,11 @@ export function CostCharts() {
   );
 
   const primaryBars = series[0]?.bars ?? costSeriesForFilter(timeFilter);
+  const barCount = primaryBars.length;
+
+  useEffect(() => {
+    setRange({ start: 0, end: Math.max(barCount - 1, 0) });
+  }, [timeFilter, barCount]);
   const grandTotal = series.reduce(
     (sum, item) => sum + item.bars.reduce((s, b) => s + b.dark, 0),
     0,
@@ -420,12 +428,36 @@ export function CostCharts() {
 
   return (
     <div className="flex h-full min-h-0 bg-[#f4f6f9]">
-      <aside className="flex w-[270px] shrink-0 flex-col border-r border-slate-200 bg-white">
+      {pointsOpen ? (
+        <button
+          type="button"
+          aria-label="Đóng danh sách điểm đo"
+          className="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
+          onClick={() => setPointsOpen(false)}
+        />
+      ) : null}
+      <aside
+        className={`${
+          pointsOpen ? "fixed inset-y-0 left-0 z-40 flex" : "hidden"
+        } w-[min(270px,85vw)] shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl md:relative md:z-0 md:flex md:w-[240px] md:shadow-none lg:w-[270px]`}
+      >
         <div className="border-b border-slate-100 px-5 py-4">
-          <h1 className="text-[18px] font-bold text-slate-800">Biểu Đồ Chi Phí</h1>
-          <p className="mt-1 text-[10px] font-semibold tracking-[0.14em] text-slate-400">
-            ANALYSIS CATEGORIES
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h1 className="text-[18px] font-bold text-slate-800">Biểu Đồ Chi Phí</h1>
+              <p className="mt-1 text-[10px] font-semibold tracking-[0.14em] text-slate-400">
+                ANALYSIS CATEGORIES
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPointsOpen(false)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 md:hidden"
+              aria-label="Đóng"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         <div className="px-4 py-3">
@@ -537,9 +569,17 @@ export function CostCharts() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xs">
+      <div className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-5">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPointsOpen(true)}
+              className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 md:hidden"
+            >
+              Điểm đo ({selectedPoints.length})
+            </button>
+            <div className="inline-flex overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xs">
             {energyKinds.map((item) => {
               const active = energy === item;
               return (
@@ -556,8 +596,10 @@ export function CostCharts() {
                 </button>
               );
             })}
+            </div>
           </div>
           <TimeFilterBar
+            className="w-full"
             value={timeFilter}
             onChange={(next) => {
               filterTouched.current = true;
@@ -566,8 +608,8 @@ export function CostCharts() {
           />
         </div>
 
-        <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)]">
-          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="mt-4 flex w-full min-w-0 flex-col gap-4">
+          <article className="w-full min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-[15px] font-semibold text-slate-800">Chi tiết chi phí</h2>
@@ -627,12 +669,20 @@ export function CostCharts() {
                     nên sản lượng từng ngày = 0 kWh và cột chi phí = 0 VND. Khi công tơ tăng, cột sẽ hiện đúng theo từng ngày.
                   </div>
                 ) : null}
-                <MultiCostBarChart series={series} hover={hover} onHover={setHover} />
+                <div className="mt-3 flex w-full min-w-0 flex-col gap-3">
+                  <ChartTimeline
+                    labels={primaryBars.map((item) => item.label)}
+                    values={primaryBars.map((item) => item.dark)}
+                    range={range}
+                    onRange={setRange}
+                  />
+                  <MultiCostBarChart series={series} range={range} hover={hover} onHover={setHover} />
+                </div>
               </>
             )}
           </article>
 
-          <div className="flex min-h-0 flex-col gap-4">
+          <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
             <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
               <h2 className="text-center text-[13px] font-bold tracking-wide text-slate-700">
                 TỔNG HỢP CHI PHÍ THEO ĐIỂM ĐO
@@ -734,6 +784,7 @@ export function CostCharts() {
 
 function MultiCostBarChart({
   series,
+  range,
   hover,
   onHover,
 }: {
@@ -741,6 +792,7 @@ function MultiCostBarChart({
     point: CostPoint;
     bars: CostBar[];
   }[];
+  range: { start: number; end: number };
   hover: number | null;
   onHover: (index: number | null) => void;
 }) {
@@ -749,25 +801,30 @@ function MultiCostBarChart({
   const pad = { l: 52, r: 16, t: 28, b: 32 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
-  const base = series[0]?.bars ?? [];
-  const maxValue = Math.max(...series.flatMap((s) => s.bars.map((b) => b.dark)), 0);
+  const all = series[0]?.bars ?? [];
+  const visibleLen = Math.max(range.end - range.start + 1, 1);
+  const base = all.slice(range.start, range.end + 1);
+  const maxValue = Math.max(
+    0,
+    ...series.flatMap((s) => s.bars.slice(range.start, range.end + 1).map((b) => b.dark)),
+  );
   const yMax = maxValue <= 0
     ? 1000
     : maxValue < 1000
       ? Math.ceil(maxValue / 100) * 100
       : Math.ceil(maxValue / 2000) * 2000;
   const yAt = (v: number) => pad.t + ((yMax - v) / yMax) * innerH;
-  const groupW = innerW / Math.max(base.length, 1);
+  const groupW = innerW / visibleLen;
   const barCount = Math.max(series.length, 1);
   const barW = Math.max(4, groupW / (barCount + 0.8));
-  const labelStep = Math.max(1, Math.ceil(base.length / 12));
+  const labelStep = Math.max(1, Math.ceil(visibleLen / 12));
   const tickCount = 5;
   const ticks = Array.from({ length: tickCount + 1 }, (_, i) => (yMax * i) / tickCount);
 
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="mx-auto mt-2 h-[360px] w-full max-w-[1080px]"
+      className="mt-2 h-[280px] w-full sm:h-[360px] lg:h-[420px]"
       onMouseLeave={() => onHover(null)}
     >
       <text x={pad.l} y="16" className="fill-slate-400" fontSize="12">
@@ -785,10 +842,11 @@ function MultiCostBarChart({
         );
       })}
       {base.map((bar, i) => {
+        const globalIndex = range.start + i;
         const gx = pad.l + i * groupW;
-        const hasSamples = series.some((item) => (item.bars[i]?.light ?? 0) > 0);
+        const hasSamples = series.some((item) => (item.bars[globalIndex]?.light ?? 0) > 0);
         return (
-          <g key={bar.key} onMouseEnter={() => onHover(i)}>
+          <g key={bar.key} onMouseEnter={() => onHover(globalIndex)}>
             {hasSamples ? (
               <rect
                 x={gx + 2}
@@ -796,12 +854,12 @@ function MultiCostBarChart({
                 width={Math.max(groupW - 4, 2)}
                 height={innerH}
                 fill="#ecfdf5"
-                opacity={hover == null || hover === i ? 0.85 : 0.35}
+                opacity={hover == null || hover === globalIndex ? 0.85 : 0.35}
               />
             ) : null}
             {series.map((item, sIdx) => {
-              const value = item.bars[i]?.dark ?? 0;
-              const samples = item.bars[i]?.light ?? 0;
+              const value = item.bars[globalIndex]?.dark ?? 0;
+              const samples = item.bars[globalIndex]?.light ?? 0;
               const x = gx + groupW * 0.15 + sIdx * barW;
               const width = Math.max(3, barW * 0.85);
               if (value > 0) {
@@ -813,7 +871,7 @@ function MultiCostBarChart({
                     width={width}
                     height={Math.max(0, yAt(0) - yAt(value))}
                     fill={item.point.color}
-                    opacity={hover == null || hover === i ? 1 : 0.4}
+                    opacity={hover == null || hover === globalIndex ? 1 : 0.4}
                   />
                 );
               }
@@ -827,14 +885,14 @@ function MultiCostBarChart({
                       y2={yAt(0) - 1}
                       stroke={item.point.color}
                       strokeWidth="3"
-                      opacity={hover == null || hover === i ? 1 : 0.4}
+                      opacity={hover == null || hover === globalIndex ? 1 : 0.4}
                     />
                     <circle
                       cx={x + width / 2}
                       cy={yAt(0) - 6}
                       r="3.5"
                       fill={item.point.color}
-                      opacity={hover == null || hover === i ? 1 : 0.4}
+                      opacity={hover == null || hover === globalIndex ? 1 : 0.4}
                     />
                   </g>
                 );
@@ -855,8 +913,8 @@ function MultiCostBarChart({
           </g>
         );
       })}
-      {hover != null && base[hover] ? (
-        <g transform={`translate(${Math.min(pad.l + hover * groupW + 12, W - 200)}, ${pad.t + 6})`}>
+      {hover != null && all[hover] ? (
+        <g transform={`translate(${Math.min(pad.l + (hover - range.start) * groupW + 12, W - 200)}, ${pad.t + 6})`}>
           <rect
             width="188"
             height={28 + series.length * 28}
@@ -865,7 +923,7 @@ function MultiCostBarChart({
             stroke="#e2e8f0"
           />
           <text x="10" y="16" className="fill-slate-500" fontSize="11">
-            {base[hover].label}
+            {all[hover].label}
           </text>
           {series.map((item, i) => {
             const samples = item.bars[hover]?.light ?? 0;
@@ -951,7 +1009,7 @@ function TouChart({ values }: { values: { peak: number; normal: number; off: num
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      className="mx-auto mt-1 h-[180px] w-full max-w-[1080px]"
+      className="mt-1 h-[180px] w-full"
     >
       {items.map((item, i) => {
         const x = pad.l + i * groupW + (groupW - barW) / 2;

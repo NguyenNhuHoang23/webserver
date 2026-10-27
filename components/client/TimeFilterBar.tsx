@@ -163,6 +163,28 @@ export function timeFilterSpan(value: TimeFilterValue): { from: string; to: stri
   return { from: value.customDate, to: value.customDate, hourly: true };
 }
 
+export function shiftTimeFilter(value: TimeFilterValue, step: number): TimeFilterValue {
+  if (value.mode === "day") return withCivilDate(value, shiftCivilDate(value.date, step));
+  if (value.mode === "year") return { ...value, year: value.year + step };
+  if (value.mode === "month") {
+    const [year, month] = (/^\d{4}-\d{2}$/.test(value.month) ? value.month : vietnamNow().monthKey)
+      .split("-")
+      .map(Number);
+    const next = new Date(Date.UTC(year, month - 1 + step, 1));
+    const key = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+    return { ...value, month: key, year: next.getUTCFullYear() };
+  }
+  if (value.customDateMode === "range") {
+    const from = value.startDate <= value.endDate ? value.startDate : value.endDate;
+    const to = value.startDate <= value.endDate ? value.endDate : value.startDate;
+    const days = Math.max(1, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1);
+    const startDate = shiftCivilDate(from, step * days);
+    const endDate = shiftCivilDate(to, step * days);
+    return { ...value, startDate, endDate, date: startDate, customDate: startDate, month: startDate.slice(0, 7), year: Number(startDate.slice(0, 4)) };
+  }
+  return withCivilDate(value, shiftCivilDate(value.customDate, step));
+}
+
 function shiftCivilDate(value: string, days: number) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   const base = match
@@ -200,9 +222,8 @@ export function TimeFilterBar({
   const years = useMemo(() => [2023, 2024, 2025, 2026, 2027], []);
 
   return (
-    <div className={`flex flex-wrap items-center gap-2.5 font-sans ${className}`}>
-      {/* Segmented Mode Tabs */}
-      <div className="inline-flex rounded-xl border border-slate-200/90 bg-white p-1 shadow-xs">
+    <div className={`flex w-full flex-wrap items-center gap-2 font-sans sm:gap-2.5 ${className}`}>
+      <div className="inline-flex max-w-full overflow-x-auto rounded-xl border border-slate-200/90 bg-white p-1 shadow-xs">
         {modes.map((item) => {
           const active = value.mode === item.id;
           return (
@@ -222,8 +243,15 @@ export function TimeFilterBar({
         })}
       </div>
 
-      {/* Dynamic Selector Input based on active mode */}
-      <div className="inline-flex items-center">
+      <div className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          aria-label="Kỳ trước"
+          onClick={() => onChange(shiftTimeFilter(value, -1))}
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-xs hover:bg-slate-50"
+        >
+          ‹
+        </button>
         {value.mode === "day" && (
           <div className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-700 shadow-xs">
             <StepButton label="Ngày trước" onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, -1)))} />
@@ -274,6 +302,14 @@ export function TimeFilterBar({
             onEndDateChange={(endDate) => onChange({ ...value, endDate })}
           />
         )}
+        <button
+          type="button"
+          aria-label="Kỳ sau"
+          onClick={() => onChange(shiftTimeFilter(value, 1))}
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-xs hover:bg-slate-50"
+        >
+          ›
+        </button>
       </div>
     </div>
   );
@@ -376,7 +412,7 @@ function MonthField({ month, onChange }: { month: string; onChange: (month: stri
         Tháng {String(monthIndex).padStart(2, "0")}/{year}
       </button>
       {open ? (
-        <div className="absolute right-0 z-40 mt-1 w-[232px] rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+        <div className="absolute left-0 z-40 mt-1 w-[232px] rounded-xl border border-slate-200 bg-white p-3 shadow-lg sm:left-auto sm:right-0">
           <div className="mb-2 flex items-center justify-between">
             <StepButton label="Năm trước" onClick={() => choose(year - 1, monthIndex)} />
             <span className="text-sm font-semibold text-slate-900">{year}</span>
