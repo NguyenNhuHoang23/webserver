@@ -32,14 +32,21 @@ function forbidden(message = "Không có quyền thực hiện thao tác này.")
 }
 
 function serverError(error: unknown) {
-  console.error("EMS API error", error);
+  const sqlMessage =
+    typeof error === "object" && error && "sqlMessage" in error
+      ? String((error as { sqlMessage?: string }).sqlMessage ?? "")
+      : "";
   const code = typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code) : "";
   const message = error instanceof Error ? error.message : "";
+  console.error("EMS API error", { code, message, sqlMessage, error });
   if (code === "ER_DUP_ENTRY" || message.includes("uq_devices_serial_number")) {
     return Response.json({ error: "Serial này đã được dùng cho loại thiết bị khác." }, { status: 400 });
   }
   if (code === "ER_DATA_TOO_LONG" || message.includes("Data too long")) {
     return Response.json({ error: "Dữ liệu quá dài, không lưu được vào database." }, { status: 400 });
+  }
+  if (code === "ER_NO_REFERENCED_ROW_2" || code === "ER_NO_REFERENCED_ROW") {
+    return Response.json({ error: "Mã dự án không tồn tại trên database, không lưu được cấu hình." }, { status: 400 });
   }
   return Response.json({ error: "Không thể xử lý dữ liệu trên database." }, { status: 500 });
 }
@@ -56,35 +63,32 @@ function ensureDeviceColumns() {
 }
 
 function ensureProjectSettingsTable() {
-  projectSettingsReady ??= (async () => {
-    await emsDb.execute(
-      `CREATE TABLE IF NOT EXISTS project_settings (
-         project_id VARCHAR(64) NOT NULL,
-         payload JSON NOT NULL,
-         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-         PRIMARY KEY (project_id)
-       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-    );
-    const duplicates = await queryRows<{ project_id: string }>(
-      `SELECT project_id FROM project_settings GROUP BY project_id HAVING COUNT(*) > 1`,
-    );
-    for (const row of duplicates) {
-      const copies = await queryRows<{ payload: unknown; updated_at: string }>(
-        `SELECT payload, updated_at FROM project_settings
-          WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1`,
-        [row.project_id],
-      );
-      const keep = copies[0];
-      if (!keep) continue;
-      await emsDb.execute("DELETE FROM project_settings WHERE project_id = ?", [row.project_id]);
-      await emsDb.execute(
-        `INSERT INTO project_settings (project_id, payload, updated_at) VALUES (?, CAST(? AS JSON), ?)`,
-        [row.project_id, JSON.stringify(jsonField(keep.payload, {})), keep.updated_at],
-      );
-    }
-    await emsDb.execute("ALTER TABLE project_settings ADD PRIMARY KEY (project_id)").catch(() => undefined);
-  })();
+  if (!projectSettingsReady) {
+    projectSettingsReady = migrateProjectSettings().catch((error) => {
+      projectSettingsReady = null;
+      console.error("project_settings migrate failed", error);
+      throw error;
+    });
+  }
   return projectSettingsReady;
+}
+
+async function migrateProjectSettings() {
+  await emsDb.query(
+    `CREATE TABLE IF NOT EXISTS project_settings (
+       project_id VARCHAR(64) NOT NULL,
+       payload JSON NOT NULL,
+       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       PRIMARY KEY (project_id)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  );
+  await emsDb
+    .query(
+      `ALTER TABLE project_settings
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    )
+    .catch(() => undefined);
+  await emsDb.query("ALTER TABLE project_settings ADD PRIMARY KEY (project_id)").catch(() => undefined);
 }
 
 function ensureGhgColumns() {
@@ -597,13 +601,16 @@ async function saveResource(resource: string, body: Row) {
       [projectId],
     );
     const current = jsonField<Row>(existing[0]?.payload, {});
-    const incoming = jsonField<Row>(body.payload, {});
+    const incoming =
+      body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)
+        ? (body.payload as Row)
+        : jsonField<Row>(body.payload, {});
     const merged = { ...current, ...incoming };
     const payload = JSON.stringify(merged);
     await emsDb.execute(
-      `INSERT INTO project_settings (project_id, payload) VALUES (?, CAST(? AS JSON))
-       ON DUPLICATE KEY UPDATE payload = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP`,
-      [projectId, payload, payload],
+      `INSERT INTO project_settings (project_id, payload) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE payload = VALUES(payload), updated_at = CURRENT_TIMESTAMP`,
+      [projectId, payload],
     );
     return getResource(resource, new NextRequest(`http://localhost/api/ems/project-settings?projectId=${encodeURIComponent(projectId)}`));
   }
