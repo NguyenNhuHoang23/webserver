@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartDataTable, ChartTableToggle } from "@/components/client/ChartDataTable";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { ChartZoomSurface, CHART_ZOOM_HINT } from "@/components/client/ChartZoomSurface";
+import { zoomAround } from "@/components/client/chartZoom";
 import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, domainTicks, paddedDomain, valuesForKeysAverage, type ChartSample } from "@/lib/gateway-series";
 
@@ -47,6 +50,7 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
+  const [showTable, setShowTable] = useState(false);
 
   const uSeries = useMemo<Series[]>(
     () =>
@@ -77,19 +81,8 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
   const uTicks = samples?.length ? domainTicks(uDomain) : [0, 0.5, 1, 1.5, 2];
   const iTicks = samples?.length ? domainTicks(iDomain) : [1, 2, 3, 4, 5];
 
-  const span = viewWin.end - viewWin.start;
-  const zoomIn = () => {
-    const next = Math.max(32, Math.floor(span * 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
-  const zoomOut = () => {
-    const next = Math.min(N - 1, Math.floor(span / 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
+  const zoomIn = () => setViewWin((range) => zoomAround(range, hover, 0.7, N - 1, 32));
+  const zoomOut = () => setViewWin((range) => zoomAround(range, hover, 1 / 0.7, N - 1, 32));
 
   const timelineLabels = useMemo(
     () => Array.from({ length: N }, (_, index) => chartTimeLabel(samples, index, N, "full") || ""),
@@ -120,18 +113,21 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
             <option>Izero</option>
           </select>
         </div>
-        <div className="flex items-center gap-3 rounded border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600">
-          {AGGS.map((agg) => (
-            <label key={agg} className="inline-flex cursor-pointer items-center gap-1">
-              <input
-                type="checkbox"
-                checked={aggs.includes(agg)}
-                onChange={() => setAggs((list) => toggleIn(list, agg))}
-                className="accent-emerald-600"
-              />
-              {agg}
-            </label>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 rounded border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600">
+            {AGGS.map((agg) => (
+              <label key={agg} className="inline-flex cursor-pointer items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={aggs.includes(agg)}
+                  onChange={() => setAggs((list) => toggleIn(list, agg))}
+                  className="accent-emerald-600"
+                />
+                {agg}
+              </label>
+            ))}
+          </div>
+          <ChartTableToggle active={showTable} onClick={() => setShowTable((v) => !v)} />
         </div>
       </div>
 
@@ -139,46 +135,71 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
         <ChartTimeline compact labels={timelineLabels} values={timelineValues} range={viewWin} onRange={setViewWin} />
       </div>
 
-      <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-        <UnbPane
-          title={`${topQty} [%]`}
-          series={uSeries}
-          samples={samples}
-          viewWin={viewWin}
-          hover={crosshair ? hover : null}
-          onHover={setHover}
-          domain={uDomain}
-          ticks={uTicks}
-          formatTick={(v) => (v === 0 ? "0" : v.toFixed(1))}
-        />
-        <div className="h-px bg-slate-400" />
-        <UnbPane
-          title={`${botQty} [%]`}
-          series={iSeries}
-          samples={samples}
-          viewWin={viewWin}
-          hover={crosshair ? hover : null}
-          onHover={setHover}
-          domain={iDomain}
-          ticks={iTicks}
-          formatTick={(v) => String(v)}
-          axis
-        />
+      <div className="min-w-0 w-full">
+        {showTable ? (
+          <ChartDataTable
+            samples={samples}
+            length={N}
+            range={viewWin}
+            series={[
+              ...uSeries.map((item) => ({ ...item, digits: 3 })),
+              ...iSeries.map((item) => ({ ...item, digits: 3 })),
+            ]}
+          />
+        ) : (
+          <ChartZoomSurface
+            className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white"
+            range={viewWin}
+            onRange={setViewWin}
+            lastIndex={N - 1}
+            minSpan={32}
+          >
+            <UnbPane
+              title={`${topQty} [%]`}
+              series={uSeries}
+              samples={samples}
+              viewWin={viewWin}
+              hover={crosshair ? hover : null}
+              onHover={setHover}
+              domain={uDomain}
+              ticks={uTicks}
+              formatTick={(v) => (v === 0 ? "0" : v.toFixed(1))}
+            />
+            <div className="h-px bg-slate-400" />
+            <UnbPane
+              title={`${botQty} [%]`}
+              series={iSeries}
+              samples={samples}
+              viewWin={viewWin}
+              hover={crosshair ? hover : null}
+              onHover={setHover}
+              domain={iDomain}
+              ticks={iTicks}
+              formatTick={(v) => String(v)}
+              axis
+            />
+          </ChartZoomSurface>
+        )}
       </div>
 
-      <div className="mt-2 flex w-[68px] flex-wrap gap-1">
-        <ToolBtn label="Phóng to" onClick={zoomIn}>
-          <ZoomIcon plus />
-        </ToolBtn>
-        <ToolBtn label="Thu nhỏ" onClick={zoomOut}>
-          <ZoomIcon plus={false} />
-        </ToolBtn>
-        <ToolBtn label="Vừa khung" onClick={() => setViewWin({ start: 0, end: N - 1 })}>
-          <FitIcon />
-        </ToolBtn>
-        <ToolBtn label="Con trỏ" active={crosshair} onClick={() => setCrosshair((v) => !v)}>
-          <CursorIcon />
-        </ToolBtn>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1">
+          <ToolBtn label="Phóng to" onClick={zoomIn}>
+            <ZoomIcon plus />
+          </ToolBtn>
+          <ToolBtn label="Thu nhỏ" onClick={zoomOut}>
+            <ZoomIcon plus={false} />
+          </ToolBtn>
+          <ToolBtn label="Vừa khung" onClick={() => setViewWin({ start: 0, end: N - 1 })}>
+            <FitIcon />
+          </ToolBtn>
+          <ToolBtn label="Con trỏ" active={crosshair} onClick={() => setCrosshair((v) => !v)}>
+            <CursorIcon />
+          </ToolBtn>
+        </div>
+        <span className="text-[11px] text-slate-400">
+          {showTable ? "Bảng ngày giờ · giá trị" : CHART_ZOOM_HINT}
+        </span>
       </div>
     </section>
   );

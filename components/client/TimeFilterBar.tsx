@@ -1,36 +1,63 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatCivilDate, vietnamFromStored, vietnamNow } from "@/lib/vietnam-time";
+import {
+  civilDatePart,
+  civilTimePart,
+  formatCivilDate,
+  formatCivilDateTime,
+  toCivilDateTime,
+  vietnamFromStored,
+  vietnamNow,
+} from "@/lib/vietnam-time";
 
 export type TimeFilterMode = "day" | "month" | "year" | "custom_date";
 export type CustomDateMode = "single" | "range";
 
 export type TimeFilterValue = {
   mode: TimeFilterMode;
-  date: string;       // YYYY-MM-DD
-  month: string;      // YYYY-MM
-  year: number;       // YYYY
+  date: string; // YYYY-MM-DD
+  month: string; // YYYY-MM
+  year: number; // YYYY
   customDateMode: CustomDateMode;
-  customDate: string; // YYYY-MM-DD
-  startDate: string;  // YYYY-MM-DD
-  endDate: string;    // YYYY-MM-DD
+  /** YYYY-MM-DD hoặc YYYY-MM-DDTHH:mm */
+  customDate: string;
+  /** YYYY-MM-DD hoặc YYYY-MM-DDTHH:mm */
+  startDate: string;
+  /** YYYY-MM-DD hoặc YYYY-MM-DDTHH:mm */
+  endDate: string;
 };
 
 export function createTimeFilter(now = vietnamNow()): TimeFilterValue {
+  const noon = `${now.date}T00:00`;
   return {
     mode: "month",
     date: now.date,
     month: now.monthKey,
     year: now.year,
-    customDateMode: "single",
-    customDate: now.date,
-    startDate: `${now.monthKey}-01`,
-    endDate: now.date,
+    customDateMode: "range",
+    customDate: noon,
+    startDate: `${now.monthKey}-01T00:00`,
+    endDate: `${now.date}T23:59`,
   };
 }
 
 export const DEFAULT_TIME_FILTER: TimeFilterValue = createTimeFilter();
+
+function filterInstantMs(value: string) {
+  const date = civilDatePart(value);
+  const time = civilTimePart(value, "00:00");
+  return Date.parse(`${date}T${time}:00+07:00`);
+}
+
+function orderedRange(value: TimeFilterValue) {
+  const startMs = filterInstantMs(value.startDate);
+  const endMs = filterInstantMs(value.endDate);
+  if (startMs <= endMs) {
+    return { from: value.startDate, to: value.endDate, fromMs: startMs, toMs: endMs };
+  }
+  return { from: value.endDate, to: value.startDate, fromMs: endMs, toMs: startMs };
+}
 
 export function periodIndexForInstant(value: TimeFilterValue, at: string, length: number) {
   const parts = vietnamFromStored(at);
@@ -42,12 +69,20 @@ export function periodIndexForInstant(value: TimeFilterValue, at: string, length
     if (parts.year === value.year) index = parts.month - 1;
   } else if (value.mode === "day" && parts.date === value.date) {
     index = parts.hour;
-  } else if (value.mode === "custom_date" && value.customDateMode !== "range" && parts.date === value.customDate) {
-    index = parts.hour;
+  } else if (value.mode === "custom_date" && value.customDateMode !== "range") {
+    if (parts.date === civilDatePart(value.customDate)) index = parts.hour;
   } else if (value.mode === "custom_date" && value.customDateMode === "range") {
-    const start = Date.parse(`${value.startDate}T00:00:00Z`);
-    const current = Date.parse(`${parts.date}T00:00:00Z`);
-    index = Math.round((current - start) / (24 * 60 * 60 * 1000));
+    const { fromMs, toMs } = orderedRange(value);
+    const currentMs = filterInstantMs(`${parts.date}T${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`);
+    if (currentMs < fromMs || currentMs > toMs) return -1;
+    const span = timeFilterSpan(value);
+    if (span.hourly) {
+      index = Math.floor((currentMs - fromMs) / (60 * 60 * 1000));
+    } else {
+      const startDay = Date.parse(`${civilDatePart(span.from)}T00:00:00+07:00`);
+      const currentDay = Date.parse(`${parts.date}T00:00:00+07:00`);
+      index = Math.round((currentDay - startDay) / (24 * 60 * 60 * 1000));
+    }
   }
   return index >= 0 && index < length ? index : -1;
 }
@@ -60,8 +95,8 @@ export function getTimeFilterLabel(value: TimeFilterValue): string {
         : formatCivilDate(value.date);
     case "custom_date":
       return value.customDateMode === "range"
-        ? `${formatCivilDate(value.startDate)} đến ${formatCivilDate(value.endDate)}`
-        : `Ngày ${formatCivilDate(value.customDate)}`;
+        ? `${formatCivilDateTime(value.startDate)} → ${formatCivilDateTime(value.endDate)}`
+        : formatCivilDateTime(value.customDate);
     case "month": {
       const [y, m] = value.month.split("-");
       return `Tháng ${m}/${y}`;
@@ -98,19 +133,35 @@ export function getTimeFilterPeriods(value: TimeFilterValue): { key: string | nu
   }
 
   if (value.mode === "custom_date" && value.customDateMode === "range") {
-    const start = new Date(value.startDate);
-    const end = new Date(value.endDate);
-    const diffMs = Math.max(0, end.getTime() - start.getTime());
-    const diffDays = Math.min(31, Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1));
-    
+    const span = timeFilterSpan(value);
+    const { fromMs, toMs } = orderedRange(value);
+    if (span.hourly) {
+      const hours = Math.max(1, Math.min(168, Math.floor((toMs - fromMs) / (60 * 60 * 1000)) + 1));
+      return Array.from({ length: hours }, (_, i) => {
+        const t = new Date(fromMs + i * 60 * 60 * 1000);
+        const label = new Intl.DateTimeFormat("vi-VN", {
+          timeZone: "Asia/Ho_Chi_Minh",
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        }).format(t);
+        return { key: i, label };
+      });
+    }
+
+    const startDay = Date.parse(`${civilDatePart(span.from)}T00:00:00+07:00`);
+    const endDay = Date.parse(`${civilDatePart(span.to)}T00:00:00+07:00`);
+    const diffDays = Math.min(366, Math.max(1, Math.round((endDay - startDay) / (24 * 60 * 60 * 1000)) + 1));
     return Array.from({ length: diffDays }, (_, i) => {
-      const d = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
-      const dayStr = String(d.getDate()).padStart(2, "0");
-      const monStr = String(d.getMonth() + 1).padStart(2, "0");
-      return {
-        key: i,
-        label: `${dayStr}/${monStr}`,
-      };
+      const d = new Date(startDay + i * 24 * 60 * 60 * 1000);
+      const label = new Intl.DateTimeFormat("vi-VN", {
+        timeZone: "Asia/Ho_Chi_Minh",
+        day: "2-digit",
+        month: "2-digit",
+      }).format(d);
+      return { key: i, label };
     });
   }
 
@@ -127,10 +178,8 @@ export function getTimeFilterScaleFactor(value: TimeFilterValue): number {
       return 1 / 365;
     case "custom_date": {
       if (value.customDateMode !== "range") return 1 / 365;
-      const start = new Date(value.startDate);
-      const end = new Date(value.endDate);
-      const diffMs = Math.max(0, end.getTime() - start.getTime());
-      const diffDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1);
+      const { fromMs, toMs } = orderedRange(value);
+      const diffDays = Math.max(1, (toMs - fromMs) / (1000 * 60 * 60 * 24));
       return diffDays / 365;
     }
     default:
@@ -156,11 +205,19 @@ export function timeFilterSpan(value: TimeFilterValue): { from: string; to: stri
   }
   if (value.mode === "year") return { from: `${value.year}-01-01`, to: `${value.year}-12-31`, hourly: false };
   if (value.mode === "custom_date" && value.customDateMode === "range") {
-    const from = value.startDate <= value.endDate ? value.startDate : value.endDate;
-    const to = value.startDate <= value.endDate ? value.endDate : value.startDate;
-    return { from, to, hourly: from === to };
+    const { from, to, fromMs, toMs } = orderedRange(value);
+    const hours = (toMs - fromMs) / (60 * 60 * 1000);
+    return {
+      from: civilDatePart(from),
+      to: civilDatePart(to),
+      hourly: hours <= 48,
+    };
   }
-  return { from: value.customDate, to: value.customDate, hourly: true };
+  return {
+    from: civilDatePart(value.customDate),
+    to: civilDatePart(value.customDate),
+    hourly: true,
+  };
 }
 
 export function shiftTimeFilter(value: TimeFilterValue, step: number): TimeFilterValue {
@@ -175,18 +232,34 @@ export function shiftTimeFilter(value: TimeFilterValue, step: number): TimeFilte
     return { ...value, month: key, year: next.getUTCFullYear() };
   }
   if (value.customDateMode === "range") {
-    const from = value.startDate <= value.endDate ? value.startDate : value.endDate;
-    const to = value.startDate <= value.endDate ? value.endDate : value.startDate;
-    const days = Math.max(1, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1);
-    const startDate = shiftCivilDate(from, step * days);
-    const endDate = shiftCivilDate(to, step * days);
-    return { ...value, startDate, endDate, date: startDate, customDate: startDate, month: startDate.slice(0, 7), year: Number(startDate.slice(0, 4)) };
+    const { from, to, fromMs, toMs } = orderedRange(value);
+    const spanMs = Math.max(60 * 60 * 1000, toMs - fromMs);
+    const nextFromMs = fromMs + step * spanMs;
+    const nextToMs = toMs + step * spanMs;
+    const startDate = toCivilDateTime(
+      new Date(nextFromMs).toLocaleString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" }).replace(" ", "T").slice(0, 16),
+    );
+    const endDate = toCivilDateTime(
+      new Date(nextToMs).toLocaleString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" }).replace(" ", "T").slice(0, 16),
+    );
+    const startDay = civilDatePart(startDate);
+    return {
+      ...value,
+      startDate,
+      endDate,
+      date: startDay,
+      customDate: startDate,
+      month: startDay.slice(0, 7),
+      year: Number(startDay.slice(0, 4)),
+    };
   }
-  return withCivilDate(value, shiftCivilDate(value.customDate, step));
+  const shifted = shiftCivilDate(civilDatePart(value.customDate), step);
+  const customDate = toCivilDateTime(shifted, civilTimePart(value.customDate));
+  return withCivilDate({ ...value, customDate }, shifted);
 }
 
 function shiftCivilDate(value: string, days: number) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(civilDatePart(value));
   const base = match
     ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
     : Date.parse(`${vietnamNow().date}T00:00:00Z`);
@@ -194,12 +267,13 @@ function shiftCivilDate(value: string, days: number) {
 }
 
 function withCivilDate(value: TimeFilterValue, date: string): TimeFilterValue {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return value;
+  const day = civilDatePart(date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return value;
   return {
     ...value,
-    date,
-    month: date.slice(0, 7),
-    year: Number(date.slice(0, 4)),
+    date: day,
+    month: day.slice(0, 7),
+    year: Number(day.slice(0, 4)),
   };
 }
 
@@ -216,7 +290,7 @@ export function TimeFilterBar({
     { id: "day", label: "Ngày" },
     { id: "month", label: "Tháng" },
     { id: "year", label: "Năm" },
-    { id: "custom_date", label: "Ngày tự chọn" },
+    { id: "custom_date", label: "Tùy chọn" },
   ];
 
   const years = useMemo(() => [2023, 2024, 2025, 2026, 2027], []);
@@ -234,7 +308,7 @@ export function TimeFilterBar({
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
                 active
                   ? "bg-slate-900 text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}
             >
               {item.label}
@@ -254,13 +328,19 @@ export function TimeFilterBar({
         </button>
         {value.mode === "day" && (
           <div className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-700 shadow-xs">
-            <StepButton label="Ngày trước" onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, -1)))} />
+            <StepButton
+              label="Ngày trước"
+              onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, -1)))}
+            />
             <VietnamDateInput
               value={value.date}
               onChange={(date) => onChange(withCivilDate(value, date))}
               className="min-w-[4.5rem] border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none"
             />
-            <StepButton label="Ngày sau" onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, 1)))} />
+            <StepButton
+              label="Ngày sau"
+              onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, 1)))}
+            />
           </div>
         )}
 
@@ -276,7 +356,7 @@ export function TimeFilterBar({
             <select
               value={value.year}
               onChange={(e) => onChange({ ...value, year: Number(e.target.value) })}
-              className="h-9 appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-xs font-semibold text-slate-900 shadow-xs outline-none hover:border-slate-300 focus:border-emerald-500 cursor-pointer transition-colors"
+              className="h-9 cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white pr-8 pl-3 text-xs font-semibold text-slate-900 shadow-xs outline-none transition-colors hover:border-slate-300 focus:border-emerald-500"
             >
               {years.map((y) => (
                 <option key={y} value={y}>
@@ -284,7 +364,7 @@ export function TimeFilterBar({
                 </option>
               ))}
             </select>
-            <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+            <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-slate-400">
               ▾
             </span>
           </div>
@@ -295,11 +375,17 @@ export function TimeFilterBar({
             mode={value.customDateMode}
             onModeChange={(customDateMode) => onChange({ ...value, customDateMode })}
             date={value.customDate}
-            onDateChange={(customDate) => onChange(withCivilDate({ ...value, customDate }, customDate))}
+            onDateChange={(customDate) =>
+              onChange(withCivilDate({ ...value, customDate }, civilDatePart(customDate)))
+            }
             startDate={value.startDate}
             endDate={value.endDate}
-            onStartDateChange={(startDate) => onChange({ ...value, startDate })}
-            onEndDateChange={(endDate) => onChange({ ...value, endDate })}
+            onStartDateChange={(startDate) =>
+              onChange(withCivilDate({ ...value, startDate }, civilDatePart(startDate)))
+            }
+            onEndDateChange={(endDate) =>
+              onChange(withCivilDate({ ...value, endDate }, civilDatePart(endDate)))
+            }
           />
         )}
         <button
@@ -345,26 +431,36 @@ export function DateSelectionControl({
     <div
       className={`inline-flex min-h-9 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 ${textClass} font-medium text-slate-700 shadow-xs transition-colors hover:border-slate-300`}
     >
-      <CalendarSmallIcon className={`${compact ? "h-3.5 w-3.5" : "h-3.5 w-3.5"} shrink-0 text-emerald-600`} />
-      <span className="whitespace-nowrap text-slate-500">Ngày tự chọn:</span>
+      <CalendarSmallIcon className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+      <span className="whitespace-nowrap text-slate-500">Tùy chọn:</span>
       <select
         value={mode}
         onChange={(e) => onModeChange(e.target.value as CustomDateMode)}
         className={`${textClass} cursor-pointer border-0 bg-transparent font-semibold text-slate-900 outline-none`}
       >
-        <option value="single">Một ngày</option>
-        <option value="range">Khoảng ngày</option>
+        <option value="single">Một mốc giờ</option>
+        <option value="range">Khoảng giờ → ngày</option>
       </select>
 
       {mode === "single" ? (
-        <VietnamDateInput value={date} onChange={onDateChange} className={inputClass} />
+        <VietnamDateTimeInput value={date} onChange={onDateChange} className={inputClass} />
       ) : (
         <>
           <span className="text-slate-400">Từ</span>
-          <VietnamDateInput value={startDate} max={endDate || undefined} onChange={onStartDateChange} className={inputClass} />
+          <VietnamDateTimeInput
+            value={startDate}
+            max={endDate || undefined}
+            onChange={onStartDateChange}
+            className={inputClass}
+          />
           <span className="text-slate-400">→</span>
           <span className="text-slate-400">Đến</span>
-          <VietnamDateInput value={endDate} min={startDate || undefined} onChange={onEndDateChange} className={inputClass} />
+          <VietnamDateTimeInput
+            value={endDate}
+            min={startDate || undefined}
+            onChange={onEndDateChange}
+            className={inputClass}
+          />
         </>
       )}
     </div>
@@ -472,6 +568,7 @@ function VietnamDateInput({
   className?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const day = civilDatePart(value);
   return (
     <label
       className="relative inline-flex cursor-pointer items-center"
@@ -486,17 +583,66 @@ function VietnamDateInput({
         }
       }}
     >
-      <span className={className}>{formatCivilDate(value) || "Chọn ngày"}</span>
+      <span className={className}>{formatCivilDate(day) || "Chọn ngày"}</span>
       <input
         ref={inputRef}
         type="date"
-        value={value}
-        min={min}
-        max={max}
+        value={day}
+        min={min ? civilDatePart(min) : undefined}
+        max={max ? civilDatePart(max) : undefined}
         aria-label="Chọn ngày"
         onChange={(event) => {
           if (!/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) return;
           onChange(event.target.value);
+        }}
+        className="absolute inset-0 cursor-pointer opacity-0"
+      />
+    </label>
+  );
+}
+
+function VietnamDateTimeInput({
+  value,
+  onChange,
+  min,
+  max,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  min?: string;
+  max?: string;
+  className?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const local = toCivilDateTime(value, civilTimePart(value, "00:00"));
+  return (
+    <label
+      className="relative inline-flex cursor-pointer items-center"
+      onClick={(event) => {
+        event.preventDefault();
+        const input = inputRef.current;
+        if (!input) return;
+        try {
+          input.showPicker();
+        } catch {
+          input.focus();
+        }
+      }}
+    >
+      <span className={className}>{formatCivilDateTime(local)}</span>
+      <input
+        ref={inputRef}
+        type="datetime-local"
+        value={local}
+        min={min ? toCivilDateTime(min) : undefined}
+        max={max ? toCivilDateTime(max) : undefined}
+        step={60}
+        aria-label="Chọn ngày giờ"
+        onChange={(event) => {
+          const next = event.target.value;
+          if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(next)) return;
+          onChange(next.slice(0, 16));
         }}
         className="absolute inset-0 cursor-pointer opacity-0"
       />

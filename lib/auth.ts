@@ -12,6 +12,8 @@ export type AuthSession = {
   email: string;
   role: string;
   projectId?: string;
+  /** Các dự án tài khoản khách được quản trị. */
+  projectIds?: string[];
 };
 
 export type AuthResult =
@@ -114,7 +116,18 @@ export function clientProjectId(pathname: string) {
 export function canViewClientProject(session: AuthSession | null, projectId?: string) {
   if (!session || !projectId) return false;
   if (session.portal === "admin") return true;
-  return session.portal === "customer" && session.projectId === projectId;
+  if (session.portal !== "customer") return false;
+  if (session.role === "Admin") return true;
+  if (session.projectIds?.includes(projectId)) return true;
+  return session.projectId === projectId;
+}
+
+/** Khách hàng được chỉnh sửa cấu hình dự án (Admin / Edit). */
+export function canEditCustomerConfig(session: AuthSession | null | undefined) {
+  if (!session) return false;
+  if (session.portal === "admin") return true;
+  if (session.portal !== "customer") return false;
+  return session.role === "Admin" || session.role === "Edit" || session.role === "Manage";
 }
 
 export function getAuthRedirect(session: AuthSession | null, pathname: string): string | null {

@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/useAuth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { customerPassword, ensureCustomerAccount } from "@/lib/customer-accounts";
+import {
+  adminAccountsForProject,
+  customerPassword,
+  ensureCustomerAccount,
+  hydrateCustomerAccounts,
+  type CustomerAccount,
+} from "@/lib/customer-accounts";
 import { hasPermission } from "@/lib/permissions";
 import {
   emptyTelemetry,
@@ -41,6 +47,7 @@ export function ProjectList() {
   const canManageProjects = hasPermission(session, "manageProjects");
   const canManageDevices = hasPermission(session, "manageDevices");
   const [items, setItems] = useState<Project[]>([]);
+  const [accounts, setAccounts] = useState<CustomerAccount[]>([]);
   const [telemetry, setTelemetry] = useState<Record<string, ProjectTelemetry>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [customer, setCustomer] = useState("all");
@@ -59,6 +66,13 @@ export function ProjectList() {
       .catch(() => {
         if (active) setItems(loadProjects());
       });
+    void hydrateCustomerAccounts()
+      .then((rows) => {
+        if (active) setAccounts(rows);
+      })
+      .catch(() => {
+        if (active) setAccounts([]);
+      });
     void loadProjectsTelemetry().then((rows) => {
       if (active) setTelemetry(rows);
     });
@@ -66,6 +80,14 @@ export function ProjectList() {
       active = false;
     };
   }, []);
+
+  const adminsByProject = useMemo(() => {
+    const map = new Map<string, CustomerAccount[]>();
+    for (const project of items) {
+      map.set(project.id, adminAccountsForProject(project, accounts, items));
+    }
+    return map;
+  }, [accounts, items]);
 
   const loadBarMax = useMemo(() => {
     const values = Object.values(telemetry).map((item) => item.loadKw).filter((v) => v > 0);
@@ -79,17 +101,24 @@ export function ProjectList() {
   );
 
   const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return items.filter((p) => {
+      const admins = adminsByProject.get(p.id) ?? [];
       const matchCustomer = customer === "all" || p.customer === customer;
       const matchStatus = status === "all" || p.status === status;
       const matchSearch =
-        !searchQuery.trim() ||
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.customer.toLowerCase().includes(searchQuery.toLowerCase());
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q) ||
+        admins.some(
+          (account) =>
+            account.username.toLowerCase().includes(q) ||
+            account.displayName.toLowerCase().includes(q) ||
+            account.email.toLowerCase().includes(q),
+        );
       return matchCustomer && matchStatus && matchSearch;
     });
-  }, [customer, status, searchQuery, items]);
+  }, [customer, status, searchQuery, items, adminsByProject]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -156,7 +185,7 @@ export function ProjectList() {
                   setSearchQuery(e.target.value);
                   setPage(1);
                 }}
-                placeholder="Tìm kiếm dự án, khách hàng hoặc mã PRJ..."
+                placeholder="Tìm kiếm dự án, tài khoản Admin hoặc mã PRJ..."
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 transition-all shadow-xs"
               />
             </div>
@@ -201,7 +230,7 @@ export function ProjectList() {
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
                 <th className="px-5 py-3.5">Cơ sở / Dự án</th>
-                <th className="px-5 py-3.5">Doanh nghiệp quản lý</th>
+                <th className="px-5 py-3.5">Tài khoản quản lý</th>
                 <th className="px-5 py-3.5">Phụ tải hiện tại (kW)</th>
                 <th className="px-5 py-3.5">Phát thải / ngày</th>
                 <th className="px-5 py-3.5">Hạ tầng đo</th>
@@ -219,6 +248,7 @@ export function ProjectList() {
               ) : (
                 rows.map((project) => {
                   const telem = telemetry[project.id] ?? emptyTelemetry(project.id);
+                  const admins = adminsByProject.get(project.id) ?? [];
                   const meterDot =
                     telem.meterCount === 0
                       ? "bg-slate-300"
@@ -269,9 +299,20 @@ export function ProjectList() {
                         </div>
                       </td>
 
-                      {/* Customer */}
-                      <td className="px-5 py-4 font-medium text-slate-700">
-                        {project.customer}
+                      {/* Customer Admin account */}
+                      <td className="px-5 py-4">
+                        {!admins.length ? (
+                          <span className="text-slate-400">Chưa gán Admin</span>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {admins.map((account) => (
+                              <div key={account.id}>
+                                <p className="font-medium text-slate-800">{account.username}</p>
+                                <p className="text-[11px] text-slate-400">{account.displayName}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </td>
 
                       {/* Load Demand */}

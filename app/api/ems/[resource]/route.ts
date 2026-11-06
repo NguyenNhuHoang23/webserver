@@ -1,8 +1,16 @@
 import type { PoolConnection } from "mysql2/promise";
 import { NextRequest } from "next/server";
 import { getProjectsListTelemetry } from "@/lib/gateway-store";
-import { requirePermission } from "@/lib/server-auth";
+import { hasPermission } from "@/lib/permissions";
+import { getServerSession, requirePermission } from "@/lib/server-auth";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
+
+function normalizeCustomerAccountRole(role: unknown): "Admin" | "View" | "Edit" {
+  if (role === "Admin") return "Admin";
+  if (role === "View" || role === "Viewer") return "View";
+  if (role === "Edit" || role === "Manage" || role === "Editor") return "Edit";
+  return "View";
+}
 
 type Params = { params: Promise<{ resource: string }> };
 type Row = Record<string, any>;
@@ -54,6 +62,65 @@ function serverError(error: unknown) {
 let deviceColumnsReady: Promise<void> | null = null;
 let ghgColumnsReady: Promise<void> | null = null;
 let projectSettingsReady: Promise<void> | null = null;
+let customerAccountProjectsReady: Promise<void> | null = null;
+let diagramDisplaysReady: Promise<void> | null = null;
+
+function ensureDiagramDisplaysColumn() {
+  if (!diagramDisplaysReady) {
+    diagramDisplaysReady = emsDb
+      .query(
+        `ALTER TABLE diagram_states
+           ADD COLUMN IF NOT EXISTS displays JSON NULL AFTER viewport`,
+      )
+      .then(() => undefined)
+      .catch((error) => {
+        diagramDisplaysReady = null;
+        // Cột có thể đã tồn tại trên MariaDB cũ không hỗ trợ IF NOT EXISTS.
+        console.error("diagram_states.displays migrate failed", error);
+        return undefined;
+      });
+  }
+  return diagramDisplaysReady;
+}
+
+function ensureCustomerAccountProjects() {
+  if (!customerAccountProjectsReady) {
+    customerAccountProjectsReady = migrateCustomerAccountProjects().catch((error) => {
+      customerAccountProjectsReady = null;
+      console.error("customer_account_projects migrate failed", error);
+      throw error;
+    });
+  }
+  return customerAccountProjectsReady;
+}
+
+async function migrateCustomerAccountProjects() {
+  await emsDb.query(
+    `CREATE TABLE IF NOT EXISTS customer_account_projects (
+       account_id VARCHAR(64) NOT NULL,
+       project_id VARCHAR(64) NOT NULL,
+       PRIMARY KEY (account_id, project_id),
+       KEY idx_customer_account_projects_project (project_id),
+       CONSTRAINT fk_customer_account_projects_account
+         FOREIGN KEY (account_id) REFERENCES customer_accounts (id)
+         ON DELETE CASCADE ON UPDATE CASCADE,
+       CONSTRAINT fk_customer_account_projects_project
+         FOREIGN KEY (project_id) REFERENCES projects (id)
+         ON DELETE CASCADE ON UPDATE CASCADE
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  );
+  await emsDb.query("ALTER TABLE customer_accounts DROP INDEX uq_customer_accounts_project").catch(() => undefined);
+  await emsDb
+    .query(
+      `ALTER TABLE customer_accounts
+         ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'Manage' AFTER display_name`,
+    )
+    .catch(() => undefined);
+  await emsDb.query(
+    `INSERT IGNORE INTO customer_account_projects (account_id, project_id)
+     SELECT id, project_id FROM customer_accounts WHERE project_id IS NOT NULL AND project_id <> ''`,
+  );
+}
 
 function ensureDeviceColumns() {
   deviceColumnsReady ??= emsDb
@@ -92,11 +159,26 @@ async function migrateProjectSettings() {
 }
 
 function ensureGhgColumns() {
-  ghgColumnsReady ??= emsDb
-    .execute(
+  ghgColumnsReady ??= Promise.all([
+    emsDb.execute(
       "ALTER TABLE ghg_emission_sources ADD COLUMN IF NOT EXISTS multipliers_json JSON NULL",
-    )
-    .then(() => undefined);
+    ),
+    emsDb.execute(
+      "ALTER TABLE ghg_emission_sources ADD COLUMN IF NOT EXISTS manual_value DECIMAL(18,6) NULL",
+    ),
+    emsDb.execute(
+      "ALTER TABLE ghg_emission_sources ADD COLUMN IF NOT EXISTS manual_unit VARCHAR(40) NULL",
+    ),
+    emsDb
+      .execute("ALTER TABLE ghg_emission_sources DROP FOREIGN KEY fk_ghg_sources_factor")
+      .catch(() => undefined),
+    emsDb
+      .execute("ALTER TABLE ghg_emission_sources MODIFY COLUMN factor_group_id VARCHAR(100) NULL")
+      .catch(() => undefined),
+    emsDb
+      .execute("ALTER TABLE ghg_emission_sources MODIFY COLUMN gas_key VARCHAR(10) NULL")
+      .catch(() => undefined),
+  ]).then(() => undefined);
   return ghgColumnsReady;
 }
 
@@ -201,12 +283,45 @@ async function getResource(resource: string, request: NextRequest) {
     );
   }
   if (resource === "customer-accounts") {
-    return queryRows<Row>(
-      `SELECT id, username, email, display_name AS displayName, project_id AS projectId
-         FROM customer_accounts ${projectId ? "WHERE project_id = ?" : ""}
+    await ensureCustomerAccountProjects();
+    const accounts = await queryRows<Row>(
+      `SELECT id, username, email, display_name AS displayName,
+              COALESCE(role, 'Manage') AS role, project_id AS projectId
+         FROM customer_accounts
         ORDER BY id`,
-      projectId ? [projectId] : [],
     );
+    if (!accounts.length) return [];
+    const links = await queryRows<{ accountId: string; projectId: string }>(
+      `SELECT account_id AS accountId, project_id AS projectId
+         FROM customer_account_projects`,
+    );
+    const byAccount = new Map<string, string[]>();
+    for (const link of links) {
+      const list = byAccount.get(String(link.accountId)) ?? [];
+      list.push(String(link.projectId));
+      byAccount.set(String(link.accountId), list);
+    }
+    const mapped = accounts.map((account) => {
+      const id = String(account.id);
+      const role = normalizeCustomerAccountRole(account.role);
+      const primary = String(account.projectId ?? "");
+      const fromLinks = byAccount.get(id) ?? [];
+      const projectIds = Array.from(new Set([primary, ...fromLinks].filter(Boolean)));
+      return {
+        ...account,
+        role,
+        projectId: projectIds.includes(primary) ? primary : (projectIds[0] ?? primary),
+        projectIds,
+      };
+    });
+    if (!projectId) return mapped;
+    return mapped.filter((account) => {
+      if (account.role === "Admin") return true;
+      return (
+        Array.isArray(account.projectIds) &&
+        (account.projectIds as string[]).includes(projectId)
+      );
+    });
   }
   if (resource === "projects") return getProjects(projectId);
   if (resource === "project-telemetry") return getProjectsListTelemetry();
@@ -265,6 +380,7 @@ async function getResource(resource: string, request: NextRequest) {
               input_method AS method, factor_group_id AS factorGroupId,
               gas_key AS gasKey, factor_value AS factorValue, formula,
               multipliers_json AS multipliers,
+              manual_value AS manualValue, manual_unit AS manualUnit,
               DATE_FORMAT(applied_at, '%Y-%m-%d') AS appliedAt,
               tons_co2e AS tons
          FROM ghg_emission_sources ${projectId ? "WHERE project_id = ?" : ""}
@@ -274,9 +390,14 @@ async function getResource(resource: string, request: NextRequest) {
     return rows.map((row) => ({
       ...row,
       scope: asNumber(row.scope),
-      factorId: `${row.factorGroupId}:${row.gasKey}`,
+      factorId:
+        row.factorGroupId && row.gasKey
+          ? `${row.factorGroupId}:${row.gasKey}`
+          : "none:none",
       factorValue: asNumber(row.factorValue),
       multipliers: asMultipliers(row.multipliers),
+      manualValue: row.manualValue == null ? undefined : asNumber(row.manualValue),
+      manualUnit: asString(row.manualUnit) || undefined,
       tons: row.tons == null ? undefined : asNumber(row.tons),
     }));
   }
@@ -326,9 +447,10 @@ async function getResource(resource: string, request: NextRequest) {
   }
   if (resource === "diagram-states") {
     if (!projectId) throw new Error("projectId is required");
+    await ensureDiagramDisplaysColumn();
     const utility = request.nextUrl.searchParams.get("utility");
     const rows = await queryRows<Row>(
-      `SELECT project_id AS projectId, utility, positions, viewport, updated_at AS updatedAt
+      `SELECT project_id AS projectId, utility, positions, viewport, displays, updated_at AS updatedAt
          FROM diagram_states WHERE project_id = ? ${utility ? "AND utility = ?" : ""}
         ORDER BY utility`,
       utility ? [projectId, utility] : [projectId],
@@ -337,6 +459,7 @@ async function getResource(resource: string, request: NextRequest) {
       ...row,
       positions: jsonField(row.positions, {}),
       viewport: jsonField(row.viewport, undefined),
+      displays: jsonField(row.displays, {}),
     }));
   }
   if (resource === "project-settings") {
@@ -390,15 +513,45 @@ async function saveResource(resource: string, body: Row) {
     return getResource(resource, new NextRequest("http://localhost/api/ems/accounts"));
   }
   if (resource === "customer-accounts") {
+    await ensureCustomerAccountProjects();
     const password = asString(body.password, "123456");
-    await emsDb.execute(
-      `INSERT INTO customer_accounts (id, username, email, display_name, project_id, password_hash)
-       VALUES (?, ?, ?, ?, ?, SHA2(?, 256))
-       ON DUPLICATE KEY UPDATE username=VALUES(username), email=VALUES(email),
-         display_name=VALUES(display_name), project_id=VALUES(project_id),
-         password_hash=IF(? = '', password_hash, SHA2(?, 256))`,
-      [body.id, body.username, body.email, body.displayName, body.projectId, password, password, password],
+    const role = normalizeCustomerAccountRole(body.role ?? "View");
+    const projectIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(body.projectIds) ? body.projectIds.map(String) : []),
+          asString(body.projectId, ""),
+        ]
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
     );
+    if (role !== "Admin" && !projectIds.length) throw new Error("projectIds is required");
+    let primary = projectIds.includes(asString(body.projectId, ""))
+      ? asString(body.projectId, projectIds[0] ?? "")
+      : (projectIds[0] ?? "");
+    if (!primary) {
+      const firstProject = await queryRows<{ id: string }>("SELECT id FROM projects ORDER BY id LIMIT 1");
+      primary = String(firstProject[0]?.id ?? "");
+    }
+    if (!primary) throw new Error("projectId is required");
+    await transaction(async (connection) => {
+      await connection.execute(
+        `INSERT INTO customer_accounts (id, username, email, display_name, role, project_id, password_hash)
+         VALUES (?, ?, ?, ?, ?, ?, SHA2(?, 256))
+         ON DUPLICATE KEY UPDATE username=VALUES(username), email=VALUES(email),
+           display_name=VALUES(display_name), role=VALUES(role), project_id=VALUES(project_id),
+           password_hash=IF(? = '', password_hash, SHA2(?, 256))`,
+        [body.id, body.username, body.email, body.displayName, role, primary, password, password, password],
+      );
+      await connection.execute("DELETE FROM customer_account_projects WHERE account_id = ?", [body.id]);
+      for (const linkedProjectId of projectIds) {
+        await connection.execute(
+          "INSERT INTO customer_account_projects (account_id, project_id) VALUES (?, ?)",
+          [body.id, linkedProjectId],
+        );
+      }
+    });
     return getResource(resource, new NextRequest("http://localhost/api/ems/customer-accounts"));
   }
   if (resource === "projects") {
@@ -547,17 +700,23 @@ async function saveResource(resource: string, body: Row) {
       await connection.execute("DELETE FROM ghg_emission_sources WHERE project_id = ?", [projectId]);
       for (const source of sources) {
         const factorId = asString(source.factorId);
-        const [factorGroupId, gasKey] = factorId.split(":");
+        const [rawGroupId, rawGasKey] = factorId.split(":");
+        const factorGroupId =
+          !rawGroupId || rawGroupId === "none" ? null : rawGroupId;
+        const gasKey = !rawGasKey || rawGasKey === "none" ? null : rawGasKey;
         const multipliers = asMultipliers(source.multipliers);
         await connection.execute(
           `INSERT INTO ghg_emission_sources
             (id, project_id, scope_id, name, input_method, factor_group_id, gas_key,
-             factor_value, formula, multipliers_json, applied_at, meter_point_id, tons_co2e)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             factor_value, formula, multipliers_json, applied_at, meter_point_id,
+             manual_value, manual_unit, tons_co2e)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [source.id, projectId, asNumber(source.scope), source.name, source.method,
-            factorGroupId || "do-industry", gasKey || "co2", asNumber(source.factorValue),
+            factorGroupId, gasKey, asNumber(source.factorValue),
             source.formula || "", multipliers.length ? JSON.stringify(multipliers) : null,
             source.appliedAt, asString(source.meterPointId) || null,
+            source.manualValue == null ? null : asNumber(source.manualValue),
+            asString(source.manualUnit) || null,
             source.tons == null ? null : asNumber(source.tons)],
         );
       }
@@ -584,11 +743,21 @@ async function saveResource(resource: string, body: Row) {
     const projectId = asString(body.projectId);
     const utility = asString(body.utility);
     if (!projectId || !utility) throw new Error("projectId and utility are required");
+    await ensureDiagramDisplaysColumn();
     await emsDb.execute(
-      `INSERT INTO diagram_states (project_id, utility, positions, viewport)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE positions=VALUES(positions), viewport=VALUES(viewport)`,
-      [projectId, utility, JSON.stringify(body.positions ?? {}), body.viewport ? JSON.stringify(body.viewport) : null],
+      `INSERT INTO diagram_states (project_id, utility, positions, viewport, displays)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         positions=VALUES(positions),
+         viewport=VALUES(viewport),
+         displays=VALUES(displays)`,
+      [
+        projectId,
+        utility,
+        JSON.stringify(body.positions ?? {}),
+        body.viewport ? JSON.stringify(body.viewport) : null,
+        body.displays ? JSON.stringify(body.displays) : null,
+      ],
     );
     return getResource(resource, new NextRequest(`http://localhost/api/ems/diagram-states?projectId=${encodeURIComponent(projectId)}&utility=${encodeURIComponent(utility)}`));
   }
@@ -663,15 +832,48 @@ export async function GET(request: NextRequest, context: Params) {
   }
 }
 
+async function canMutateCustomerAccounts(body?: Row, deletingId?: string | null) {
+  const session = await getServerSession();
+  if (!session) return { ok: false as const, message: "Cần đăng nhập." };
+  if (hasPermission(session, "manageUsers")) return { ok: true as const, session };
+  if (session.portal === "customer" && normalizeCustomerAccountRole(session.role) === "Admin") {
+    if (body) {
+      const role = normalizeCustomerAccountRole(body.role);
+      if (role === "Admin") {
+        return { ok: false as const, message: "Admin khách chỉ tạo được tài khoản nhánh (Chỉ xem / Xem & chỉnh sửa)." };
+      }
+    }
+    if (deletingId) {
+      const rows = await queryRows<{ role: string }>(
+        `SELECT COALESCE(role, 'View') AS role FROM customer_accounts WHERE id = ? LIMIT 1`,
+        [deletingId],
+      );
+      if (normalizeCustomerAccountRole(rows[0]?.role) === "Admin") {
+        return { ok: false as const, message: "Không thể xóa tài khoản Admin." };
+      }
+    }
+    return { ok: true as const, session };
+  }
+  return { ok: false as const, message: "Không có quyền quản lý tài khoản khách hàng." };
+}
+
 export async function POST(request: NextRequest, context: Params) {
   try {
     const resource = await resourceName(context);
     if (!RESOURCE_NAMES.has(resource)) return badRequest("Tài nguyên không hợp lệ.");
+    const body = (await request.json()) as Row;
     if (resource === "accounts") {
       const gate = await requirePermission("manageUsers");
-      if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý người dùng.");
+      if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý tài khoản.");
     }
-    const body = (await request.json()) as Row;
+    if (resource === "customer-accounts") {
+      const gate = await canMutateCustomerAccounts(body);
+      if (!gate.ok) return forbidden(gate.message);
+      // Staff EMS chỉ tạo/sửa Admin ban đầu.
+      if (gate.session.portal === "admin") {
+        body.role = "Admin";
+      }
+    }
     return Response.json(await saveResource(resource, body));
   } catch (error) {
     return serverError(error);
@@ -684,7 +886,12 @@ export async function DELETE(request: NextRequest, context: Params) {
     if (!RESOURCE_NAMES.has(resource)) return badRequest("Tài nguyên không hợp lệ.");
     if (resource === "accounts") {
       const gate = await requirePermission("manageUsers");
-      if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý người dùng.");
+      if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý tài khoản.");
+    }
+    if (resource === "customer-accounts") {
+      const id = request.nextUrl.searchParams.get("id");
+      const gate = await canMutateCustomerAccounts(undefined, id);
+      if (!gate.ok) return forbidden(gate.message);
     }
     return Response.json(await deleteResource(resource, request));
   } catch (error) {

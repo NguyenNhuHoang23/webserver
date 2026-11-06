@@ -144,6 +144,8 @@ export function ClientDashboard({ project }: { project: Project }) {
   const [deviceStatus, setDeviceStatus] = useState(EMPTY_STATUS);
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
   const [co2, setCo2] = useState(0);
+  const [ghgSourceCount, setGhgSourceCount] = useState(0);
+  const [prevMonthKwh, setPrevMonthKwh] = useState<number | null>(null);
   const alignedMonth = useRef(false);
 
   useEffect(() => {
@@ -194,6 +196,7 @@ export function ClientDashboard({ project }: { project: Project }) {
             value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
           })),
         );
+        setGhgSourceCount(sources.length);
         setCo2(sources.reduce((sum, source) => sum + (source.tons ?? 0), 0));
       }).catch(() => undefined);
     };
@@ -210,14 +213,20 @@ export function ClientDashboard({ project }: { project: Project }) {
   useEffect(() => {
     let active = true;
     const { from, to } = monthRange(year, month);
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
     void Promise.all([
       loadProjectGatewayDaily(project.id, year, month),
       loadProjectGatewayEnergySlots(project.id, from, to),
-    ]).then(([summary, slots]) => {
+      loadProjectGatewayDaily(project.id, prevYear, prevMonth),
+    ]).then(([summary, slots, prevSummary]) => {
       if (!active) return;
       setDailyRows(summary.days);
       setLatest(summary.latest);
       setMonthSlots(slots.slots);
+      const prevSeries = monthEnergySeries(prevSummary.days, prevYear, prevMonth);
+      const prevTotal = prevSeries.reduce((sum, item) => sum + item.kwh, 0);
+      setPrevMonthKwh(prevSummary.days.length ? prevTotal : null);
     });
     return () => {
       active = false;
@@ -248,6 +257,29 @@ export function ClientDashboard({ project }: { project: Project }) {
   const energyMin = sampledValues.length ? Math.min(...sampledValues) : 0;
   const monthCost = useMemo(() => monthlyCostFromSlots(monthSlots, touPrices), [monthSlots, touPrices]);
   const monthCostThousands = monthCost / 1000;
+  const energyMom = useMemo(() => {
+    if (prevMonthKwh == null || !Number.isFinite(prevMonthKwh)) return null;
+    const delta = consumptionTotal - prevMonthKwh;
+    const pct = prevMonthKwh > 0 ? (delta / prevMonthKwh) * 100 : null;
+    return { delta, pct, prev: prevMonthKwh };
+  }, [consumptionTotal, prevMonthKwh]);
+
+  const energyMomCaption =
+    energyMom == null
+      ? dailyRows.length
+        ? `Tổng tháng ${pad2(month)}/${year}: ${formatKwh(consumptionTotal)} kWh`
+        : `Chưa có số liệu tháng ${pad2(month)}/${year}`
+      : energyMom.pct == null
+        ? `Tháng trước chưa có tiêu thụ · Tháng này ${formatKwh(consumptionTotal)} kWh`
+        : `${energyMom.delta >= 0 ? "Tăng" : "Giảm"} ${formatKwh(Math.abs(energyMom.delta))} kWh (${Math.abs(energyMom.pct).toFixed(1)}%) so với tháng trước (${formatKwh(energyMom.prev)} kWh)`;
+
+  const co2Caption =
+    co2 > 0
+      ? `${ghgSourceCount} nguồn phát thải · Tổng ${co2.toLocaleString("vi-VN", {
+          maximumFractionDigits: 2,
+          minimumFractionDigits: 0,
+        })} tấn CO₂e`
+      : "Chưa có nguồn phát thải trong cấu hình GHG";
 
   return (
     <div className="mx-auto h-full max-w-[1480px] overflow-y-auto px-5 py-5 lg:px-6">
@@ -290,6 +322,14 @@ export function ClientDashboard({ project }: { project: Project }) {
           </div>
           {latest ? <LatestReading sample={latest} /> : null}
           <EnergyChart data={chartSeries} />
+          <p className="mt-2 text-center text-[12px] text-slate-500">
+            {energyMomCaption}
+            {energyMom && energyMom.pct != null ? (
+              <span className={`ml-1 ${energyMom.delta <= 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                {energyMom.delta <= 0 ? "↓" : "↑"}
+              </span>
+            ) : null}
+          </p>
         </DashboardCard>
 
         <DashboardCard title="PHÁT THẢI CO2">
@@ -297,12 +337,7 @@ export function ClientDashboard({ project }: { project: Project }) {
             color="#1e6b45"
             value={co2.toFixed(2)}
             unit="tấn CO2 tđ"
-            caption={
-              <span className="inline-flex items-center gap-1">
-                Giảm thiểu 12% so với tháng trước
-                <span className="text-emerald-600">↓</span>
-              </span>
-            }
+            caption={co2Caption}
           />
         </DashboardCard>
       </div>

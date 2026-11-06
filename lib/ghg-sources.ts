@@ -24,11 +24,40 @@ export type GhgEmissionSource = {
   appliedAt: string;
   /** Điểm đo được chọn làm dữ liệu hoạt động cho nguồn phát thải */
   meterPointId?: string;
+  /** Giá trị hoạt động nhập thủ công (khối lượng nhiên liệu, …) */
+  manualValue?: number;
+  /** Đơn vị của giá trị thủ công (tùy chọn) */
+  manualUnit?: string;
   /** Hệ số nhân riêng của nguồn, ký hiệu được chèn vào công thức */
   multipliers?: GhgMultiplier[];
   /** tấn CO₂e đã lưu — dùng trang tổng quan */
   tons?: number;
 };
+
+/**
+ * Ước tính tấn CO₂e:
+ * - Có hệ số phát thải: thủ công × hệ số × tích hệ số nhân
+ * - Chỉ hệ số nhân: thủ công × tích hệ số nhân
+ */
+export function computeManualTons(
+  source: Pick<GhgEmissionSource, "method" | "manualValue" | "factorValue" | "factorId" | "multipliers" | "tons">,
+) {
+  if (source.method !== "manual") return source.tons;
+  const activity = source.manualValue;
+  if (activity == null || !Number.isFinite(activity)) return source.tons;
+  const hasFactor =
+    Boolean(source.factorId && !source.factorId.startsWith("none:")) &&
+    Number.isFinite(source.factorValue) &&
+    (source.factorValue ?? 0) !== 0;
+  const factor = hasFactor ? (source.factorValue as number) : 1;
+  const mul = (source.multipliers ?? []).reduce(
+    (product, row) => product * (Number.isFinite(row.value) ? row.value : 1),
+    1,
+  );
+  const tons = activity * factor * mul;
+  if (!Number.isFinite(tons)) return source.tons;
+  return Number(tons.toFixed(6));
+}
 
 export const GHG_SCOPES: { id: ScopeId; label: string; color: string }[] = [
   { id: 1, label: "Phạm vi 1", color: "#22c55e" },

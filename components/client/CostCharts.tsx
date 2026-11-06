@@ -256,15 +256,15 @@ export function CostCharts() {
         setTimeFilter((current) =>
           current.mode === "custom_date" &&
           current.customDateMode === "range" &&
-          current.startDate === first &&
-          current.endDate === last
+          current.startDate.slice(0, 10) === first &&
+          current.endDate.slice(0, 10) === last
             ? current
             : {
                 ...current,
                 mode: "custom_date",
                 customDateMode: "range",
-                startDate: first,
-                endDate: last,
+                startDate: `${first}T00:00`,
+                endDate: `${last}T23:59`,
                 date: last,
                 month: last.slice(0, 7),
                 year: Number(last.slice(0, 4)),

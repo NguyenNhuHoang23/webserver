@@ -12,6 +12,7 @@ import {
 } from "@/lib/emission-factors";
 import {
   GHG_SCOPES,
+  computeManualTons,
   hydrateGhgSources,
   loadGhgSources,
   saveGhgSources,
@@ -69,6 +70,7 @@ function gasToken(gas: Pick<GasValue, "key" | "label">) {
 }
 
 function groupIdFromFactor(factorId: string) {
+  if (!factorId || factorId.startsWith("none:")) return "";
   const index = factorId.indexOf(":");
   return index === -1 ? factorId : factorId.slice(0, index);
 }
@@ -105,7 +107,7 @@ type FactorHistoryRow = {
 
 export function GhgConfig({ projectId }: { projectId: string }) {
   const [activeScope, setActiveScope] = useState<ScopeId>(1);
-  const [tableFilter, setTableFilter] = useState<ScopeId>(1);
+  const [tableFilter, setTableFilter] = useState<ScopeId | "all">("all");
   const [query, setQuery] = useState("");
   const [groups, setGroups] = useState<FactorGroup[]>([]);
   const [sources, setSources] = useState<EmissionSource[]>([]);
@@ -121,6 +123,8 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const [name, setName] = useState("");
   const [method, setMethod] = useState<InputMethod>("meter");
   const [meterPointId, setMeterPointId] = useState("");
+  const [manualValue, setManualValue] = useState("");
+  const [manualUnit, setManualUnit] = useState("lít");
   const [factorGroupId, setFactorGroupId] = useState("");
   const [multipliers, setMultipliers] = useState<MultiplierDraft[]>([]);
   const [formula, setFormula] = useState(DEFAULT_METER_FORMULA);
@@ -216,13 +220,15 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setName("");
       setMethod("meter");
       setMeterPointId("");
+      setManualValue("");
+      setManualUnit("lít");
       setFactorGroupId("");
       setMultipliers([]);
       setFormula(DEFAULT_METER_FORMULA);
       setAppliedAt(vietnamNow().date);
       setFormError("");
       setTableFilter((current) => {
-        setActiveScope(current);
+        setActiveScope(current === "all" ? 1 : current);
         return current;
       });
       setFormOpen(true);
@@ -254,7 +260,8 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   }, [groups, query]);
 
   const visibleSources = useMemo(
-    () => sources.filter((item) => item.scope === tableFilter),
+    () =>
+      tableFilter === "all" ? sources : sources.filter((item) => item.scope === tableFilter),
     [sources, tableFilter],
   );
 
@@ -299,6 +306,8 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setName("");
     setMethod("meter");
     setMeterPointId("");
+    setManualValue("");
+    setManualUnit("lít");
     setFactorGroupId("");
     setMultipliers([]);
     setFormula(DEFAULT_METER_FORMULA);
@@ -338,8 +347,10 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setFormError("Vui lòng chọn điểm đo cho nguồn phát thải.");
       return;
     }
-    if (!selectedGroup || selectedGroup.gases.length === 0) {
-      setFormError("Vui lòng chọn hệ số phát thải từ thư viện.");
+    const parsedManual =
+      method === "manual" && manualValue.trim() ? Number(manualValue.replace(",", ".")) : undefined;
+    if (method === "manual" && manualValue.trim() && !Number.isFinite(parsedManual)) {
+      setFormError("Giá trị thủ công không hợp lệ.");
       return;
     }
     const filledMultipliers = multipliers.filter(
@@ -354,27 +365,47 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setFormError("Ký hiệu hệ số nhân không được trùng nhau.");
       return;
     }
-    const primary =
-      selectedGroup.gases.find((gas) => gas.key === "co2") ?? selectedGroup.gases[0];
+    if ((!selectedGroup || selectedGroup.gases.length === 0) && filledMultipliers.length === 0) {
+      setFormError("Chọn hệ số phát thải hoặc thêm ít nhất một hệ số nhân để tính toán.");
+      return;
+    }
+    const primary = selectedGroup
+      ? selectedGroup.gases.find((gas) => gas.key === "co2") ?? selectedGroup.gases[0]
+      : undefined;
     const existing = editingId ? sources.find((item) => item.id === editingId) : undefined;
+    const nextMultipliers = filledMultipliers.map((row) => ({
+      id: row.id,
+      label: row.label.trim(),
+      symbol: row.symbol.trim(),
+      value: parseFactorNumber(row.value),
+      unit: row.unit.trim() || "tấn CO2e",
+    }));
+    const factorId = selectedGroup && primary ? `${selectedGroup.id}:${primary.key}` : "none:none";
+    const factorValue = primary?.value ?? 0;
     const next: EmissionSource = {
       ...existing,
       id: existing?.id ?? `src-${Date.now()}`,
       scope: activeScope,
       name: trimmed,
       method,
-      factorId: `${selectedGroup.id}:${primary?.key ?? "co2"}`,
-      factorValue: primary?.value ?? 0,
-      multipliers: filledMultipliers.map((row) => ({
-        id: row.id,
-        label: row.label.trim(),
-        symbol: row.symbol.trim(),
-        value: parseFactorNumber(row.value),
-        unit: row.unit.trim() || "tấn CO2e",
-      })),
+      factorId,
+      factorValue,
+      multipliers: nextMultipliers,
       formula,
       appliedAt,
       meterPointId: method === "meter" ? meterPointId : undefined,
+      manualValue: method === "manual" ? parsedManual : undefined,
+      manualUnit: method === "manual" ? manualUnit.trim() || undefined : undefined,
+      tons:
+        method === "manual"
+          ? computeManualTons({
+              method: "manual",
+              manualValue: parsedManual,
+              factorId,
+              factorValue,
+              multipliers: nextMultipliers,
+            })
+          : existing?.tons,
     };
     persistSources(
       editingId
@@ -392,6 +423,8 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setName(source.name);
     setMethod(source.method);
     setMeterPointId(source.meterPointId ?? "");
+    setManualValue(source.manualValue == null ? "" : String(source.manualValue));
+    setManualUnit(source.manualUnit ?? "lít");
     setFactorGroupId(groupIdFromFactor(source.factorId));
     setMultipliers(draftsFromMultipliers(source.multipliers));
     setFormula(source.formula);
@@ -572,7 +605,33 @@ export function GhgConfig({ projectId }: { projectId: string }) {
               </Field>
             ) : null}
 
-            <Field label="LỰA CHỌN HỆ SỐ PHÁT THẢI">
+            {method === "manual" ? (
+              <Field label="GIÁ TRỊ THỦ CÔNG (KHỐI LƯỢNG / SỐ LIỆU)">
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px]">
+                  <input
+                    value={manualValue}
+                    onChange={(e) => {
+                      setManualValue(e.target.value);
+                      if (formError) setFormError("");
+                    }}
+                    inputMode="decimal"
+                    placeholder="VD: 1200"
+                    className="input"
+                  />
+                  <input
+                    value={manualUnit}
+                    onChange={(e) => setManualUnit(e.target.value)}
+                    placeholder="Đơn vị (lít, kg...)"
+                    className="input"
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Có thể nhập sẵn tại đây hoặc để trống — người dùng sẽ nhập số liệu trên trang Khí nhà kính của dự án.
+                </p>
+              </Field>
+            ) : null}
+
+            <Field label="LỰA CHỌN HỆ SỐ PHÁT THẢI (TÙY CHỌN)">
               <div className="relative">
                 <select
                   value={factorGroupId}
@@ -583,10 +642,9 @@ export function GhgConfig({ projectId }: { projectId: string }) {
                     else setFactorGroupId("");
                     if (formError) setFormError("");
                   }}
-                  required
                   className="input appearance-none pr-9"
                 >
-                  <option value="">Chọn hệ số từ thư viện</option>
+                  <option value="">Không dùng hệ số phát thải</option>
                   {groups.map((group) => (
                     <option key={group.id} value={group.id}>
                       {group.name}
@@ -611,101 +669,102 @@ export function GhgConfig({ projectId }: { projectId: string }) {
                 </div>
               ) : (
                 <p className="mt-1.5 text-xs text-slate-500">
-                  Mỗi hệ số dùng chung cho nhiều dự án. Mặc định gồm các khí CO2, N2O và CH4.
+                  Có thể bỏ trống nếu nguồn chỉ cần hệ số nhân (vd. nhiệt trị Q) để tính.
                 </p>
               )}
             </Field>
 
-            {selectedGroup ? (
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <span className="text-[11px] font-semibold tracking-wide text-slate-500">
-                    HỆ SỐ NHÂN
-                  </span>
-                  <button
-                    type="button"
-                    onClick={addMultiplier}
-                    className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                  >
-                    <span aria-hidden>+</span>
-                    Thêm hệ số nhân
-                  </button>
-                </div>
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full min-w-[560px] text-left text-xs">
-                    <thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                      <tr>
-                        <th className="px-3 py-2">Hệ số</th>
-                        <th className="px-3 py-2">Ký hiệu</th>
-                        <th className="px-3 py-2">Giá trị</th>
-                        <th className="px-3 py-2">Đơn vị</th>
-                        <th className="w-10 px-2 py-2" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {multipliers.map((row) => (
-                        <tr key={row.id} className="border-b border-slate-50 last:border-0">
-                          <td className="px-2 py-2">
-                            <input
-                              value={row.label}
-                              onChange={(e) => updateMultiplier(row.id, { label: e.target.value })}
-                              placeholder="Hệ số quy đổi CO2"
-                              className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="px-2 py-2">
-                            <input
-                              value={row.symbol}
-                              onChange={(e) =>
-                                updateMultiplier(row.id, {
-                                  symbol: e.target.value.replace(/[{}[\]]/g, ""),
-                                })
-                              }
-                              placeholder="kCO2"
-                              className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="px-2 py-2">
-                            <input
-                              value={row.value}
-                              onChange={(e) => updateMultiplier(row.id, { value: e.target.value })}
-                              inputMode="decimal"
-                              placeholder="2"
-                              className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="px-2 py-2">
-                            <input
-                              value={row.unit}
-                              onChange={(e) => updateMultiplier(row.id, { unit: e.target.value })}
-                              placeholder="tấn CO2e"
-                              className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="px-2 py-2">
-                            <button
-                              type="button"
-                              onClick={() => removeMultiplier(row.id)}
-                              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
-                              aria-label={`Xóa ${row.label || "hệ số nhân"}`}
-                            >
-                              <TrashIcon className="h-4 w-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {multipliers.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="px-3 py-4 text-center text-xs text-slate-400">
-                            Thêm hệ số nhân, ví dụ hệ số quy đổi CO2. Ký hiệu sẽ hiện dưới công thức để chèn vào.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="text-[11px] font-semibold tracking-wide text-slate-500">
+                  HỆ SỐ NHÂN
+                </span>
+                <button
+                  type="button"
+                  onClick={addMultiplier}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                >
+                  <span aria-hidden>+</span>
+                  Thêm hệ số nhân
+                </button>
               </div>
-            ) : null}
+              <p className="mb-2 text-[12px] text-slate-500">
+                Luôn dùng được — kể cả khi không chọn hệ số phát thải. Ký hiệu chèn vào công thức bên dưới.
+              </p>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full min-w-[560px] text-left text-xs">
+                  <thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2">Hệ số</th>
+                      <th className="px-3 py-2">Ký hiệu</th>
+                      <th className="px-3 py-2">Giá trị</th>
+                      <th className="px-3 py-2">Đơn vị</th>
+                      <th className="w-10 px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {multipliers.map((row) => (
+                      <tr key={row.id} className="border-b border-slate-50 last:border-0">
+                        <td className="px-2 py-2">
+                          <input
+                            value={row.label}
+                            onChange={(e) => updateMultiplier(row.id, { label: e.target.value })}
+                            placeholder="VD: Nhiệt trị"
+                            className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            value={row.symbol}
+                            onChange={(e) =>
+                              updateMultiplier(row.id, {
+                                symbol: e.target.value.replace(/[{}[\]]/g, ""),
+                              })
+                            }
+                            placeholder="Q"
+                            className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            value={row.value}
+                            onChange={(e) => updateMultiplier(row.id, { value: e.target.value })}
+                            inputMode="decimal"
+                            placeholder="43.215"
+                            className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            value={row.unit}
+                            onChange={(e) => updateMultiplier(row.id, { unit: e.target.value })}
+                            placeholder="kJ/kg"
+                            className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <button
+                            type="button"
+                            onClick={() => removeMultiplier(row.id)}
+                            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
+                            aria-label={`Xóa ${row.label || "hệ số nhân"}`}
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {multipliers.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-4 text-center text-xs text-slate-400">
+                          Thêm hệ số nhân (vd. nhiệt trị Q). Có thể tính chỉ với hệ số nhân, không cần hệ số phát thải.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
             <Field label="NHẬP CÔNG THỨC TÍNH (KG CO₂E)">
               <div className="overflow-hidden rounded-xl border border-slate-200 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/15 transition-all">
@@ -901,6 +960,12 @@ export function GhgConfig({ projectId }: { projectId: string }) {
             Danh sách nguồn phát thải
           </h2>
           <div className="flex flex-wrap items-center gap-2">
+            <FilterChip
+              active={tableFilter === "all"}
+              onClick={() => setTableFilter("all")}
+            >
+              Tổng các nguồn phát thải
+            </FilterChip>
             {SCOPES.map((scope) => (
               <FilterChip
                 key={scope.id}
@@ -955,7 +1020,11 @@ export function GhgConfig({ projectId }: { projectId: string }) {
                         ? sourceGroup.gases
                             .map((gas) => `${plainGasLabel(gas)} ${formatFactorValue(gas.value)}`)
                             .join(" · ")
-                        : formatFactor(source.factorValue)}
+                        : source.multipliers?.length
+                          ? source.multipliers
+                              .map((row) => `${row.symbol} ${formatFactorValue(row.value)}`)
+                              .join(" · ")
+                          : "—"}
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex justify-end gap-1">
@@ -985,7 +1054,9 @@ export function GhgConfig({ projectId }: { projectId: string }) {
               {visibleSources.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-5 py-10 text-center text-sm text-slate-400">
-                    Chưa có nguồn phát thải trong phạm vi này.
+                    {tableFilter === "all"
+                      ? "Chưa có nguồn phát thải nào."
+                      : "Chưa có nguồn phát thải trong phạm vi này."}
                   </td>
                 </tr>
               )}

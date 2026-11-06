@@ -92,13 +92,11 @@ function energyBarsFromReadings(
     } else if (
       filter.mode === "custom_date" &&
       filter.customDateMode !== "range" &&
-      date === filter.customDate
+      date === filter.customDate.slice(0, 10)
     ) {
       index = Number(row.recordedAt.slice(11, 13));
     } else if (filter.mode === "custom_date" && filter.customDateMode === "range") {
-      const start = new Date(`${filter.startDate}T00:00:00`).getTime();
-      const current = new Date(`${date}T00:00:00`).getTime();
-      index = Math.round((current - start) / (24 * 60 * 60 * 1000));
+      index = periodIndexForInstant(filter, row.recordedAt, periods.length);
     }
     if (index >= 0 && index < periods.length) values.set(index, (values.get(index) ?? 0) + row.value);
   }
@@ -120,12 +118,14 @@ function periodIndex(filter: TimeFilterValue, at: string, length: number) {
     if (Number(date.slice(0, 4)) === filter.year) index = Number(date.slice(5, 7)) - 1;
   } else if (filter.mode === "day" && date === filter.date) {
     index = Number(normalized.slice(11, 13));
-  } else if (filter.mode === "custom_date" && filter.customDateMode !== "range" && date === filter.customDate) {
+  } else if (
+    filter.mode === "custom_date" &&
+    filter.customDateMode !== "range" &&
+    date === filter.customDate.slice(0, 10)
+  ) {
     index = Number(normalized.slice(11, 13));
   } else if (filter.mode === "custom_date" && filter.customDateMode === "range") {
-    const start = new Date(`${filter.startDate}T00:00:00`).getTime();
-    const current = new Date(`${date}T00:00:00`).getTime();
-    index = Math.round((current - start) / (24 * 60 * 60 * 1000));
+    index = periodIndexForInstant(filter, normalized, length);
   }
   return index >= 0 && index < length ? index : -1;
 }

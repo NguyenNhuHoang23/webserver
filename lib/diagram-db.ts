@@ -1,10 +1,18 @@
 import { dbFetch, emitDbChange } from "@/lib/db-client";
 
+export type SavedDiagramDisplay = {
+  title?: string;
+  icon?: string;
+  metricKeys?: string[];
+};
+
 export type SavedDiagramState = {
   projectId: string;
   utility: string;
   positions: Record<string, { x: number; y: number }>;
   viewport?: { x: number; y: number; zoom: number };
+  /** Tên / icon / thông số hiển thị trên từng thẻ điểm đo. */
+  displays?: Record<string, SavedDiagramDisplay>;
 };
 
 const stateCache = new Map<string, SavedDiagramState>();

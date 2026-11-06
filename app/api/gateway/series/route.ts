@@ -3,6 +3,7 @@ import {
   getProjectGatewayDailyEnergy,
   getProjectGatewayDailyRange,
   getProjectGatewayEnergySlots,
+  getProjectGatewayLatest,
   getProjectGatewaySeries,
 } from "@/lib/gateway-store";
 
@@ -23,6 +24,10 @@ export async function GET(request: NextRequest) {
   const limit = limitParam == null ? Number.NaN : Number(limitParam);
   const civilDate = /^\d{4}-\d{2}-\d{2}$/;
   try {
+    if (summary === "latest") {
+      const latest = await getProjectGatewayLatest(projectId);
+      return Response.json(latest);
+    }
     if (Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12) {
       const summary = await getProjectGatewayDailyEnergy(projectId, year, month);
       return Response.json(summary);

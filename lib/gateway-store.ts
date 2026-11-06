@@ -1093,6 +1093,64 @@ export async function getProjectGatewaySeries(
   return samples;
 }
 
+/** Bản tin mới nhất theo từng điểm đo (đọc `gateway_meter_latest`). */
+export async function getProjectGatewayLatest(projectId: string): Promise<ProjectGatewaySample[]> {
+  const id = projectId.trim();
+  if (!id) return [];
+  await ensureGatewaySchema();
+
+  let points: Array<{
+    id: string;
+    serialNumber: string | null;
+    category: string | null;
+    deviceSerial: string | null;
+  }> = [];
+  try {
+    points = await queryRows(
+      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
+         FROM meter_points mp
+         LEFT JOIN devices d ON d.id = mp.device_id
+        WHERE mp.project_id = ?`,
+      [id],
+    );
+  } catch (error) {
+    console.error("Project gateway latest match failed", error);
+    return [];
+  }
+
+  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
+  for (const point of points) {
+    const model = modelCodeForCategory(point.category ?? "");
+    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
+    if (model == null || !meterId) continue;
+    const key = `${model}:${meterId}`;
+    const existing = pairs.get(key);
+    if (existing) existing.pointIds.push(String(point.id));
+    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
+  }
+
+  const samples: ProjectGatewaySample[] = [];
+  await Promise.all(
+    [...pairs.values()].map(async (pair) => {
+      const rows = await queryRows<RowDataPacket>(
+        `SELECT received_at, values_json
+           FROM gateway_meter_latest
+          WHERE meter_model = ? AND meter_id = ?
+          LIMIT 1`,
+        [pair.model, pair.meterId],
+      ).catch(() => []);
+      const row = rows[0];
+      if (!row) return;
+      const values = numericValues(row.values_json);
+      const at = receivedAtText(row.received_at);
+      for (const meterPointId of pair.pointIds) {
+        samples.push({ meterPointId, at, values });
+      }
+    }),
+  );
+  return samples;
+}
+
 export type GatewayDailyEnergy = {
   meterPointId: string;
   day: string;

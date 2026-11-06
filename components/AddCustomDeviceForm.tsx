@@ -8,7 +8,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   hydrateDevices,
   kindFromDeviceType,
-  loadDevices,
   todaySyncLabel,
   typeLabelFromDeviceType,
   upsertDevice,
@@ -21,7 +20,6 @@ type RegisterRow = DeviceRegister;
 
 const protocols = ["Modbus TCP", "Modbus RTU", "M-Bus", "BACnet", "MQTT"];
 const dataTypes = ["UINT16", "UINT32", "INT32", "FLOAT32", "FLOAT64"];
-const deviceCategories = ["PM2230", "PM5100", "iEM3000", "SITRANS F", "MAG 5100", "SensyTemp", "EJX"];
 
 function nextId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
@@ -48,17 +46,25 @@ export function AddCustomDeviceForm() {
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [isEdit, setIsEdit] = useState(false);
+  const [knownCategories, setKnownCategories] = useState<string[]>([]);
   const [extraFields, setExtraFields] = useState<ExtraField[]>([]);
   const [fieldToDelete, setFieldToDelete] = useState<ExtraField | null>(null);
   const [rowToDelete, setRowToDelete] = useState<RegisterRow | null>(null);
   const [rows, setRows] = useState<RegisterRow[]>(emptyRegisterRows());
 
   const lastEdited = useMemo(() => "Vừa xong", []);
+  const categorySuggestions = useMemo(
+    () => Array.from(new Set(knownCategories.map((item) => item.trim()).filter(Boolean))).sort(),
+    [knownCategories],
+  );
 
   useEffect(() => {
     let active = true;
     void hydrateDevices().then((devices) => {
       if (!active) return;
+      setKnownCategories(
+        devices.map((item) => item.category?.trim() || item.name.trim()).filter(Boolean),
+      );
       if (!editingId) {
         setIsEdit(false);
         return;
@@ -120,7 +126,7 @@ export function AddCustomDeviceForm() {
     const serialNumber = serial.trim();
     const categoryName = category.trim();
     if (!categoryName || !serialNumber) {
-      setError("Vui lòng chọn Category và nhập Serial.");
+      setError("Vui lòng nhập Category (trùng meterModel gateway) và Serial thực tế.");
       return;
     }
     setError("");
@@ -178,7 +184,7 @@ export function AddCustomDeviceForm() {
             {isEdit ? "Cập nhật loại đồng hồ" : "Thêm loại đồng hồ"}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Cấu hình chung cho loại đồng hồ nhận dữ liệu từ gateway, dùng lại cho nhiều dự án.
+            Chỉ khai báo loại đồng hồ thực tế đang dùng / sẽ lắp. Category phải trùng <code className="text-[12px]">meterModel</code> gửi từ gateway.
           </p>
         </div>
       </div>
@@ -199,29 +205,26 @@ export function AddCustomDeviceForm() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="1. Category">
-            <select
+          <Field label="1. Category (meterModel gateway)">
+            <input
+              list="device-category-suggestions"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
+              placeholder="Nhập đúng model gateway đang gửi"
               className="input"
               required
-            >
-              <option value="">Chọn category</option>
-              {deviceCategories.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
+            />
+            <datalist id="device-category-suggestions">
+              {categorySuggestions.map((item) => (
+                <option key={item} value={item} />
               ))}
-              {category && !deviceCategories.includes(category) ? (
-                <option value={category}>{category}</option>
-              ) : null}
-            </select>
+            </datalist>
           </Field>
           <Field label="2. Serial">
             <input
               value={serial}
               onChange={(e) => setSerial(e.target.value)}
-              placeholder="VD: 250384934"
+              placeholder="Số serial thực trên đồng hồ"
               className="input"
               required
             />
@@ -230,7 +233,7 @@ export function AddCustomDeviceForm() {
             <input
               value={brand}
               onChange={(e) => setBrand(e.target.value)}
-              placeholder="VD: Schneider Electric"
+              placeholder="Thương hiệu thực tế"
               className="input"
             />
           </Field>
@@ -238,7 +241,7 @@ export function AddCustomDeviceForm() {
             <input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="VD: PowerLogic PM5000"
+              placeholder="Tên model đang dùng"
               className="input"
             />
           </Field>
@@ -246,7 +249,7 @@ export function AddCustomDeviceForm() {
             <input
               value={deviceType}
               onChange={(e) => setDeviceType(e.target.value)}
-              placeholder="VD: Đồng hồ điện 3 pha, cảm biến lưu lượng, inverter..."
+              placeholder="Đồng hồ điện, cảm biến lưu lượng, ..."
               className="input"
             />
           </Field>

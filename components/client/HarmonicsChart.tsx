@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartDataTable, ChartTableToggle } from "@/components/client/ChartDataTable";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { ChartZoomSurface, CHART_ZOOM_HINT } from "@/components/client/ChartZoomSurface";
+import { zoomAround } from "@/components/client/chartZoom";
 import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, domainTicks, latestValue, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 
@@ -90,6 +93,7 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
+  const [showTable, setShowTable] = useState(false);
 
   const thduSeries = useMemo<Series[]>(
     () => {
@@ -160,19 +164,8 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
   const peakUScale = peakHarmDomain("u");
   const peakIScale = peakHarmDomain("i");
 
-  const span = viewWin.end - viewWin.start;
-  const zoomIn = () => {
-    const next = Math.max(32, Math.floor(span * 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
-  const zoomOut = () => {
-    const next = Math.min(N - 1, Math.floor(span / 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
+  const zoomIn = () => setViewWin((range) => zoomAround(range, hover, 0.7, N - 1, 32));
+  const zoomOut = () => setViewWin((range) => zoomAround(range, hover, 1 / 0.7, N - 1, 32));
 
   const timelineLabels = useMemo(
     () => Array.from({ length: N }, (_, index) => chartTimeLabel(samples, index, N, "full") || ""),
@@ -282,6 +275,7 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
                 </div>
               ) : null}
             </div>
+            <ChartTableToggle active={showTable} onClick={() => setShowTable((v) => !v)} />
           </div>
         </div>
       </div>
@@ -291,31 +285,51 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
         <div className="mb-2">
           <ChartTimeline compact labels={timelineLabels} values={timelineValues} range={viewWin} onRange={setViewWin} />
         </div>
-        <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-          <HarmPane
-            title={`THDu ${thduScale.unit}`}
-            series={thduSeries}
-            samples={samples}
-            viewWin={viewWin}
-            hover={crosshair ? hover : null}
-            onHover={setHover}
-            domain={thduScale.domain}
-            ticks={thduScale.ticks}
-            formatTick={(v) => String(v)}
-          />
-          <div className="h-px bg-slate-400" />
-          <HarmPane
-            title={`THDi ${thdiScale.unit}`}
-            series={thdiSeries}
-            samples={samples}
-            viewWin={viewWin}
-            hover={crosshair ? hover : null}
-            onHover={setHover}
-            domain={thdiScale.domain}
-            ticks={thdiScale.ticks}
-            formatTick={(v) => String(v)}
-            axis
-          />
+        <div className="min-w-0 w-full">
+          {showTable ? (
+            <ChartDataTable
+              samples={samples}
+              length={N}
+              range={viewWin}
+              series={[
+                ...thduSeries.map((item) => ({ ...item, digits: 2 })),
+                ...thdiSeries.map((item) => ({ ...item, digits: 2 })),
+              ]}
+            />
+          ) : (
+            <ChartZoomSurface
+              className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white"
+              range={viewWin}
+              onRange={setViewWin}
+              lastIndex={N - 1}
+              minSpan={32}
+            >
+              <HarmPane
+                title={`THDu ${thduScale.unit}`}
+                series={thduSeries}
+                samples={samples}
+                viewWin={viewWin}
+                hover={crosshair ? hover : null}
+                onHover={setHover}
+                domain={thduScale.domain}
+                ticks={thduScale.ticks}
+                formatTick={(v) => String(v)}
+              />
+              <div className="h-px bg-slate-400" />
+              <HarmPane
+                title={`THDi ${thdiScale.unit}`}
+                series={thdiSeries}
+                samples={samples}
+                viewWin={viewWin}
+                hover={crosshair ? hover : null}
+                onHover={setHover}
+                domain={thdiScale.domain}
+                ticks={thdiScale.ticks}
+                formatTick={(v) => String(v)}
+                axis
+              />
+            </ChartZoomSurface>
+          )}
         </div>
         </>
       ) : (
@@ -331,20 +345,27 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
         />
       )}
 
-      <div className="mt-2 flex w-[68px] flex-wrap gap-1">
-        <ToolBtn label="Phóng to" onClick={zoomIn}>
-          <ZoomIcon plus />
-        </ToolBtn>
-        <ToolBtn label="Thu nhỏ" onClick={zoomOut}>
-          <ZoomIcon plus={false} />
-        </ToolBtn>
-        <ToolBtn label="Vừa khung" onClick={() => setViewWin({ start: 0, end: N - 1 })}>
-          <FitIcon />
-        </ToolBtn>
-        <ToolBtn label="Con trỏ" active={crosshair} onClick={() => setCrosshair((v) => !v)}>
-          <CursorIcon />
-        </ToolBtn>
-      </div>
+      {tab === "trend" ? (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1">
+            <ToolBtn label="Phóng to" onClick={zoomIn}>
+              <ZoomIcon plus />
+            </ToolBtn>
+            <ToolBtn label="Thu nhỏ" onClick={zoomOut}>
+              <ZoomIcon plus={false} />
+            </ToolBtn>
+            <ToolBtn label="Vừa khung" onClick={() => setViewWin({ start: 0, end: N - 1 })}>
+              <FitIcon />
+            </ToolBtn>
+            <ToolBtn label="Con trỏ" active={crosshair} onClick={() => setCrosshair((v) => !v)}>
+              <CursorIcon />
+            </ToolBtn>
+          </div>
+          <span className="text-[11px] text-slate-400">
+            {showTable ? "Bảng ngày giờ · giá trị" : CHART_ZOOM_HINT}
+          </span>
+        </div>
+      ) : null}
     </section>
   );
 }

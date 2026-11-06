@@ -23,7 +23,7 @@ const iconWrap: Record<MeterStatus, string> = {
 };
 
 export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
-  const { openSettings } = useDiagramActions();
+  const { openSettings, refreshLive } = useDiagramActions();
 
   return (
     <div
@@ -40,7 +40,18 @@ export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
       />
 
       <div className="mb-2 flex items-start justify-between text-slate-300">
-        <RefreshIcon className="h-3.5 w-3.5" />
+        <button
+          type="button"
+          className="rounded p-0.5 hover:bg-slate-100 hover:text-emerald-600"
+          aria-label="Làm mới số liệu"
+          title="Làm mới số liệu"
+          onClick={(event) => {
+            event.stopPropagation();
+            refreshLive();
+          }}
+        >
+          <RefreshIcon className="h-3.5 w-3.5" />
+        </button>
         <button
           type="button"
           className="rounded p-0.5 hover:bg-slate-100 hover:text-slate-500"
@@ -77,18 +88,18 @@ export function MeterNode({ id, data, selected }: NodeProps<MeterFlowNode>) {
         </div>
       </div>
 
-      <div
-        className={`mt-3 grid gap-x-4 gap-y-1.5 ${
-          data.metrics.length > 2 ? "grid-cols-2" : "grid-cols-2"
-        }`}
-      >
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
         {data.metrics.map((metric) => (
-          <div key={metric.label}>
+          <div key={metric.key ?? metric.label}>
             <p className="text-[10.5px] text-slate-400">{metric.label}</p>
-            <p className="text-[12.5px] font-semibold text-slate-700">{metric.value}</p>
+            <p className="text-[12.5px] font-semibold tabular-nums text-slate-700">{metric.value}</p>
           </div>
         ))}
       </div>
+
+      {data.sampleAt ? (
+        <p className="mt-2 text-[10px] text-slate-400">Cập nhật: {data.sampleAt}</p>
+      ) : null}
 
       <Handle
         type="source"

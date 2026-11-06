@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_TIME_FILTER,
@@ -10,8 +9,10 @@ import {
 } from "@/components/client/TimeFilterBar";
 import {
   GHG_SCOPES,
+  computeManualTons,
   hydrateGhgSources,
   loadGhgSources,
+  saveGhgSources,
   scopeColor,
   scopeLabel,
   type GhgEmissionSource,
@@ -37,6 +38,11 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
   });
   const [sources, setSources] = useState<GhgEmissionSource[]>([]);
   const [selection, setSelection] = useState<GreenhouseSelection>({ kind: "all" });
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [draftValue, setDraftValue] = useState("");
+  const [draftUnit, setDraftUnit] = useState("lít");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -50,9 +56,24 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
     };
   }, [projectId]);
 
+  const editingSource = useMemo(
+    () => sources.find((item) => item.id === editingSourceId) ?? null,
+    [editingSourceId, sources],
+  );
+
+  useEffect(() => {
+    if (!editingSource) return;
+    setDraftValue(editingSource.manualValue == null ? "" : String(editingSource.manualValue));
+    setDraftUnit(editingSource.manualUnit ?? "lít");
+    setSaveError("");
+  }, [editingSource]);
+
   const rows = useMemo(() => {
     const scaled = sources.map((source) => {
-      const rawTons = source.tons ?? 0;
+      const rawTons =
+        source.method === "manual"
+          ? (computeManualTons(source) ?? source.tons ?? 0)
+          : (source.tons ?? 0);
       const tons = Number(rawTons < 1 ? rawTons.toFixed(2) : rawTons.toFixed(1));
       return {
         ...source,
@@ -67,6 +88,51 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
       }))
       .sort((a, b) => b.tons - a.tons);
   }, [sources]);
+
+  function openEntry(sourceId: string) {
+    setEditingSourceId(sourceId);
+  }
+
+  function closeEntry() {
+    setEditingSourceId(null);
+    setSaveError("");
+    setSaving(false);
+  }
+
+  function saveManualEntry() {
+    if (!editingSource) return;
+    if (editingSource.method !== "manual") {
+      closeEntry();
+      return;
+    }
+    const parsed = draftValue.trim() ? Number(draftValue.replace(",", ".")) : undefined;
+    if (draftValue.trim() && !Number.isFinite(parsed)) {
+      setSaveError("Giá trị nhập không hợp lệ.");
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    const nextSources = sources.map((item) => {
+      if (item.id !== editingSource.id) return item;
+      const next = {
+        ...item,
+        manualValue: parsed,
+        manualUnit: draftUnit.trim() || undefined,
+      };
+      return {
+        ...next,
+        tons: computeManualTons(next),
+      };
+    });
+    setSources(nextSources);
+    try {
+      saveGhgSources(nextSources, projectId);
+      closeEntry();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Không lưu được số liệu.");
+      setSaving(false);
+    }
+  }
 
   const selectedRows = useMemo(() => {
     if (selection.kind === "scope") return rows.filter((row) => row.scope === selection.scope);
@@ -244,7 +310,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
             CHI TIẾT PHÁT THẢI (TẤN CO₂E)
           </h3>
           <p className="mt-1 text-[12px] text-slate-400">
-            Nguồn phát thải lấy từ cấu hình Phạm vi 1 / 2 / 3
+            Nguồn lấy từ cấu hình GHG. Nguồn nhập thủ công (vd. dầu DO): bấm thao tác để nhập số liệu tại đây.
           </p>
           {visibleRows.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">
@@ -253,11 +319,12 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
           ) : (
             <>
               <div className="mt-3 overflow-x-auto">
-                <table className="w-full min-w-[420px] text-left text-[13px]">
+                <table className="w-full min-w-[520px] text-left text-[13px]">
                   <thead>
                     <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
                       <th className="py-2 font-semibold">HẠNG MỤC</th>
                       <th className="py-2 font-semibold">PHẠM VI</th>
+                      <th className="py-2 font-semibold">SỐ LIỆU</th>
                       <th className="py-2 text-right font-semibold">GIÁ TRỊ (TẤN)</th>
                       <th className="py-2 text-right font-semibold">TỶ TRỌNG</th>
                       <th className="py-2 text-right font-semibold">THAO TÁC</th>
@@ -270,19 +337,44 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
                         <td className="py-2.5">
                           <ScopeBadge scope={row.scope} />
                         </td>
+                        <td className="py-2.5 text-slate-600">
+                          {row.method === "manual" ? (
+                            row.manualValue == null ? (
+                              <span className="text-amber-600">Chưa nhập</span>
+                            ) : (
+                              <span>
+                                {row.manualValue.toLocaleString("vi-VN")}
+                                {row.manualUnit ? ` ${row.manualUnit}` : ""}
+                              </span>
+                            )
+                          ) : row.method === "meter" ? (
+                            <span className="text-slate-400">Từ điểm đo</span>
+                          ) : (
+                            <span className="text-slate-400">File</span>
+                          )}
+                        </td>
                         <td className="py-2.5 text-right text-slate-700">{fmt(row.tons)}</td>
                         <td className="py-2.5 text-right font-semibold text-slate-700">
                           {row.share.toFixed(1)}%
                         </td>
                         <td className="py-2.5 text-right">
-                          <Link
-                            href={`/chinh-sua-du-an/${encodeURIComponent(projectId)}/khi-nha-kinh?edit=${encodeURIComponent(row.id)}`}
+                          <button
+                            type="button"
+                            onClick={() => openEntry(row.id)}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600"
-                            aria-label={`Chỉnh sửa ${row.name}`}
-                            title="Chỉnh sửa nguồn phát thải"
+                            aria-label={
+                              row.method === "manual"
+                                ? `Nhập số liệu ${row.name}`
+                                : `Xem ${row.name}`
+                            }
+                            title={
+                              row.method === "manual"
+                                ? "Nhập số liệu thủ công"
+                                : "Xem nguồn phát thải"
+                            }
                           >
                             <PencilIcon className="h-4 w-4" />
-                          </Link>
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -318,6 +410,89 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
           )}
         </article>
       </div>
+
+      {editingSource ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ghg-entry-title"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl"
+          >
+            <h3 id="ghg-entry-title" className="text-[16px] font-bold text-slate-800">
+              {editingSource.method === "manual" ? "Nhập số liệu" : "Chi tiết nguồn"}
+            </h3>
+            <p className="mt-1 text-[13px] text-slate-500">
+              {editingSource.name} · {scopeLabel(editingSource.scope)}
+            </p>
+
+            {editingSource.method === "manual" ? (
+              <div className="mt-4 space-y-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">
+                    KHỐI LƯỢNG / GIÁ TRỊ THỦ CÔNG
+                  </span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_110px] gap-2">
+                    <input
+                      value={draftValue}
+                      onChange={(e) => setDraftValue(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="VD: 1200"
+                      className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500"
+                    />
+                    <input
+                      value={draftUnit}
+                      onChange={(e) => setDraftUnit(e.target.value)}
+                      placeholder="Đơn vị"
+                      className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </label>
+                <p className="text-[12px] text-slate-400">
+                  Hệ thống tính tấn CO₂e theo công thức đã cấu hình của nguồn này.
+                </p>
+                {saveError ? <p className="text-[12px] text-rose-600">{saveError}</p> : null}
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={closeEntry}
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={saveManualEntry}
+                    className="h-9 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {saving ? "Đang lưu..." : "Lưu số liệu"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-2 text-[13px] text-slate-600">
+                <p>
+                  Nguồn này lấy số liệu từ{" "}
+                  <strong className="font-semibold text-slate-800">
+                    {editingSource.method === "meter" ? "điểm đo" : "file tải lên"}
+                  </strong>
+                  , không nhập thủ công trên trang này.
+                </p>
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={closeEntry}
+                    className="h-9 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
     </div>
   );

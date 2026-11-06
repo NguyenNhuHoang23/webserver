@@ -92,7 +92,19 @@ export function alarmName(code: number | null) {
   if (code == null) return null;
   if (code === 1 || code === 3) return "Quá áp";
   if (code === 2) return "Quá dòng";
-  return `Mã ${code}`;
+  return `Cảnh báo gateway #${code}`;
+}
+
+/** Gợi ý đơn vị theo mã / nhóm khi cấu hình ngưỡng từ ValueAlarm. */
+export function alarmUnitHint(code: number | null, categoryId?: string) {
+  if (code === 1 || code === 3) return "V";
+  if (code === 2) return "A";
+  if (categoryId === "harmonics" || categoryId === "imbalance") return "%";
+  if (categoryId === "frequency") return "Hz";
+  if (categoryId === "power") return "kW";
+  if (categoryId === "energy") return "kWh";
+  if (categoryId === "ui") return "V";
+  return "";
 }
 
 export function replayLabel(isReplay: boolean) {

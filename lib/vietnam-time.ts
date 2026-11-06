@@ -76,9 +76,33 @@ export function formatStoredVietnam(value: string | null | undefined) {
 }
 
 export function formatCivilDate(iso: string) {
-  const [year, month, day] = iso.split("-");
+  const date = iso.slice(0, 10);
+  const [year, month, day] = date.split("-");
   if (year && month && day) return `${day}/${month}/${year}`;
   return iso;
+}
+
+/** Hiển thị ngày + giờ từ `YYYY-MM-DD` hoặc `YYYY-MM-DDTHH:mm`. */
+export function formatCivilDateTime(iso: string) {
+  const date = formatCivilDate(iso);
+  const match = iso.match(/[T ](\d{2}):(\d{2})/);
+  if (!match) return date;
+  return `${date} ${match[1]}:${match[2]}`;
+}
+
+export function civilDatePart(value: string) {
+  return value.slice(0, 10);
+}
+
+export function civilTimePart(value: string, fallback = "00:00") {
+  const match = value.match(/[T ](\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}` : fallback;
+}
+
+export function toCivilDateTime(dateOrDateTime: string, time = "00:00") {
+  const date = civilDatePart(dateOrDateTime);
+  const clock = civilTimePart(`${dateOrDateTime.includes("T") ? dateOrDateTime : `${date}T${time}`}`, time);
+  return `${date}T${clock}`;
 }
 
 export function vietnamNowLabel() {

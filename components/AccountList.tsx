@@ -5,52 +5,67 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/useAuth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
-  hydrateAccounts,
-  loadAccounts,
-  removeAccount,
-  type Account,
-  type AccountRole,
-} from "@/lib/accounts";
+  CUSTOMER_ACCOUNT_ROLE_META,
+  hydrateCustomerAccounts,
+  loadCustomerAccounts,
+  normalizeCustomerRole,
+  removeCustomerAccount,
+  type CustomerAccount,
+} from "@/lib/customer-accounts";
 import { hasPermission } from "@/lib/permissions";
+import { hydrateProjects, loadProjects, type Project } from "@/lib/projects";
 
 const PAGE_SIZE = 6;
-
-const ROLE_STYLE: Record<AccountRole, string> = {
-  "Quản trị viên": "bg-slate-900 text-white shadow-xs",
-  "Kỹ sư vận hành": "bg-emerald-50 text-emerald-700 border border-emerald-200/60",
-  "Quản lý dự án": "bg-cyan-50 text-cyan-700 border border-cyan-200/60",
-  "Nhân viên kỹ thuật": "bg-amber-50 text-amber-700 border border-amber-200/60",
-};
 
 export function AccountList() {
   const { session } = useAuth();
   const canManage = hasPermission(session, "manageUsers");
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accounts, setAccounts] = useState<CustomerAccount[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
+  const [accountToDelete, setAccountToDelete] = useState<CustomerAccount | null>(null);
 
   useEffect(() => {
-    setAccounts(loadAccounts());
+    setAccounts(loadCustomerAccounts());
+    setProjects(loadProjects());
     let active = true;
-    void hydrateAccounts().then((items) => {
-      if (active) setAccounts(items);
+    void Promise.all([hydrateCustomerAccounts(), hydrateProjects()]).then(([items, projectRows]) => {
+      if (!active) return;
+      setAccounts(items);
+      setProjects(projectRows);
     });
     return () => {
       active = false;
     };
   }, []);
 
+  const projectName = useMemo(() => {
+    const map = new Map(projects.map((item) => [item.id, item]));
+    return (projectId: string) => map.get(projectId);
+  }, [projects]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return accounts;
-    return accounts.filter(
-      (item) =>
+    return accounts.filter((item) => {
+      const managedIds = item.projectIds?.length ? item.projectIds : item.projectId ? [item.projectId] : [];
+      const projectHit = managedIds.some((id) => {
+        const project = projectName(id);
+        return (
+          id.toLowerCase().includes(q) ||
+          (project?.name ?? "").toLowerCase().includes(q) ||
+          (project?.customer ?? "").toLowerCase().includes(q)
+        );
+      });
+      return (
         item.username.toLowerCase().includes(q) ||
         item.email.toLowerCase().includes(q) ||
-        item.role.toLowerCase().includes(q),
-    );
-  }, [accounts, query]);
+        item.displayName.toLowerCase().includes(q) ||
+        projectHit
+      );
+    });
+  }, [accounts, projectName, query]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -59,34 +74,32 @@ export function AccountList() {
   const pageNumbers = visiblePages(currentPage, totalPages);
 
   return (
-    <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8 font-sans">
-      {/* Header */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="mx-auto max-w-[1400px] p-4 font-sans sm:p-6 lg:p-8">
+      <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
               Quản trị người dùng
             </h1>
             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
-              {accounts.length} tài khoản
+              {accounts.length} tài khoản khách
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Đăng nhập hệ thống, phân quyền theo vai trò User và quản lý tài khoản vận hành EMS.
+            EMS chỉ tạo Admin ban đầu. Tài khoản nhánh (chỉ xem / xem & chỉnh sửa) do Admin khách tạo trong Cấu hình dự án.
           </p>
         </div>
         {canManage ? (
           <Link
             href="/tai-khoan/them-moi"
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors shrink-0"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
           >
             <span className="text-base leading-none font-bold">+</span>
-            Thêm tài khoản
+            Thêm tài khoản Admin
           </Link>
         ) : null}
       </div>
 
-      {/* Search Input */}
       <div className="relative mb-6 max-w-md">
         <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400">
           <SearchIcon className="h-4 w-4" />
@@ -97,80 +110,132 @@ export function AccountList() {
             setQuery(e.target.value);
             setPage(1);
           }}
-          placeholder="Tìm kiếm tài khoản, email hoặc vai trò..."
-          className="h-10 w-full rounded-xl border border-slate-200 bg-white pr-3 pl-9 text-xs text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-xs"
+          placeholder="Tìm theo tên đăng nhập, khách hàng hoặc dự án..."
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white pr-3 pl-9 text-xs text-slate-800 shadow-xs outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
         />
       </div>
 
-      {/* Main Table */}
-      <section className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+      <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-xs">
+          <table className="w-full min-w-[820px] text-left text-xs">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-                <th className="px-5 py-3">Tên người dùng</th>
-                <th className="px-5 py-3">Địa chỉ Email</th>
-                <th className="px-5 py-3">Vai trò phân quyền</th>
-                <th className="px-5 py-3">Ngày tạo</th>
+                <th className="px-5 py-3">Tài khoản khách</th>
+                <th className="px-5 py-3">Email</th>
+                <th className="px-5 py-3">Phân cấp</th>
+                <th className="px-5 py-3">Dự án được quản trị</th>
                 <th className="px-5 py-3 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {pageRows.map((account) => (
-                <tr
-                  key={account.id}
-                  className="hover:bg-slate-50/80 transition-colors"
-                >
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200/60 uppercase">
-                        {account.username.slice(0, 2)}
+              {pageRows.map((account) => {
+                const accountRole = normalizeCustomerRole(account.role);
+                const managedIds =
+                  account.projectIds?.length > 0 ? account.projectIds : account.projectId ? [account.projectId] : [];
+                return (
+                  <tr key={account.id} className="transition-colors hover:bg-slate-50/80">
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-slate-100 text-xs font-semibold text-slate-700 uppercase">
+                          {account.username.slice(0, 2)}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-900">{account.username}</p>
+                          <p className="text-[11px] text-slate-500">{account.displayName}</p>
+                        </div>
                       </div>
-                      <span className="font-semibold text-slate-900">{account.username}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-600 font-mono text-[11px]">
-                    {account.email}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${ROLE_STYLE[account.role]}`}
-                    >
-                      {account.role}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-500 font-mono text-[11px]">
-                    {account.createdAt}
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    {canManage ? (
-                      <div className="flex justify-end gap-1">
-                        <Link
-                          href={`/tai-khoan/them-moi?id=${account.id}`}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors"
-                          title={`Sửa tài khoản ${account.username}`}
-                        >
-                          <EditIcon className="h-3.5 w-3.5" />
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => setAccountToDelete(account)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
-                          title={`Xóa tài khoản ${account.username}`}
-                        >
-                          <TrashIcon className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-slate-400">Chỉ xem</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-5 py-3.5 font-mono text-[11px] text-slate-600">{account.email}</td>
+                    <td className="px-5 py-3.5">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                          accountRole === "Admin"
+                            ? "bg-slate-900 text-white"
+                            : accountRole === "Edit"
+                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                              : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                        }`}
+                        title={CUSTOMER_ACCOUNT_ROLE_META[accountRole].hint}
+                      >
+                        {CUSTOMER_ACCOUNT_ROLE_META[accountRole].label}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      {accountRole === "Admin" ? (
+                        managedIds.length ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {managedIds.map((id) => {
+                              const project = projectName(id);
+                              return (
+                                <span
+                                  key={id}
+                                  className="inline-flex max-w-full items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600"
+                                >
+                                  <span className="truncate">{project?.name ?? id}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-[11px] font-medium text-slate-600">Chưa gắn dự án</span>
+                        )
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {managedIds.map((id) => {
+                            const project = projectName(id);
+                            const isPrimary = id === account.projectId;
+                            return (
+                              <span
+                                key={id}
+                                className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                  isPrimary
+                                    ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
+                                title={isPrimary ? "Dự án chính" : project?.customer}
+                              >
+                                <span className="truncate">{project?.name ?? id}</span>
+                              </span>
+                            );
+                          })}
+                          {managedIds.length === 0 ? (
+                            <span className="text-[11px] text-slate-400">Chưa gán dự án</span>
+                          ) : null}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      {canManage ? (
+                        <div className="flex justify-end gap-1">
+                          {accountRole === "Admin" ? (
+                            <Link
+                              href={`/tai-khoan/them-moi?id=${account.id}`}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
+                              title={`Sửa ${account.username}`}
+                            >
+                              <EditIcon className="h-3.5 w-3.5" />
+                            </Link>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => setAccountToDelete(account)}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                            title={`Xóa ${account.username}`}
+                          >
+                            <TrashIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">Chỉ xem</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {pageRows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-5 py-12 text-center text-xs text-slate-400">
-                    Không tìm thấy tài khoản nào phù hợp với từ khóa tìm kiếm.
+                    Chưa có tài khoản Admin. Thêm Admin ban đầu để khách quản lý truy cập ứng dụng.
                   </td>
                 </tr>
               )}
@@ -178,8 +243,7 @@ export function AccountList() {
           </table>
         </div>
 
-        {/* Pagination */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3.5 text-xs text-slate-500 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 py-3.5 text-xs text-slate-500">
           <p>
             Hiển thị {filtered.length === 0 ? 0 : start + 1}-
             {Math.min(start + PAGE_SIZE, filtered.length)} trên tổng số {filtered.length} tài khoản
@@ -199,38 +263,34 @@ export function AccountList() {
                 </PageBtn>
               ),
             )}
-            <PageBtn
-              disabled={currentPage === totalPages}
-              onClick={() => setPage(currentPage + 1)}
-            >
+            <PageBtn disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
               ›
             </PageBtn>
           </div>
         </div>
       </section>
 
-      {/* Bottom Info Note */}
       <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 text-xs text-emerald-900">
         <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white">
           i
         </span>
         <p className="leading-relaxed">
-          <strong className="font-semibold">Phân quyền User:</strong> Quản trị viên quản lý người dùng và dự án.
-          Quản lý dự án chỉnh sửa dự án/hệ số phát thải. Kỹ sư vận hành dùng Gateway và thiết bị.
-          Nhân viên kỹ thuật chủ yếu xem và theo dõi vận hành.
+          <strong className="font-semibold">Phân cấp:</strong> EMS tạo Admin ban đầu. Admin khách tạo tài khoản nhánh
+          trong Cấu hình → Quản lý tài khoản: <em>Chỉ xem</em> hoặc <em>Xem &amp; chỉnh sửa</em> thông số cấu hình.
         </p>
       </div>
 
       <ConfirmDialog
         open={Boolean(accountToDelete)}
-        title="Xác nhận xóa tài khoản"
-        description={`Bạn có chắc chắn muốn xóa tài khoản "${accountToDelete?.username}" (${accountToDelete?.email}) không? Người dùng sẽ không thể đăng nhập vào hệ thống sau khi bị xóa.`}
+        title="Xác nhận xóa tài khoản khách"
+        description={`Xóa "${accountToDelete?.username}" sẽ khiến khách không đăng nhập được các dự án đã được gán.`}
         confirmText="Xác nhận xóa"
         onConfirm={() => {
-          if (accountToDelete) {
-            setAccounts(removeAccount(accountToDelete.id));
+          if (!accountToDelete) return;
+          void removeCustomerAccount(accountToDelete.id).then((next) => {
+            setAccounts(next);
             setAccountToDelete(null);
-          }
+          });
         }}
         onCancel={() => setAccountToDelete(null)}
       />

@@ -1,128 +1,345 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
 import { hydrateClientMeters } from "@/lib/client-meters";
-import { formatCivilDate, formatStoredVietnam, vietnamNow } from "@/lib/vietnam-time";
+import { hydrateGhgSources } from "@/lib/ghg-sources";
+import { hydrateProjects } from "@/lib/projects";
+import {
+  REPORT_TEMPLATE_NOTE,
+  REPORTS,
+  reportById,
+  type ReportFormat,
+  type ReportId,
+} from "@/lib/report-defs";
+import {
+  formatCivilDate,
+  formatStoredVietnam,
+  vietnamNow,
+} from "@/lib/vietnam-time";
 
-type YesNo = "Có" | "Không";
-type Format = ".pdf" | ".xlsx" | ".csv";
 type Period = "Ngày" | "Tuần" | "Tháng" | "Năm";
 
-const TEMPLATES = ["Mẫu báo cáo", "Mẫu tiêu chuẩn", "Mẫu tùy chỉnh"];
+type ReportAlert = {
+  time: string;
+  point: string;
+  pointId?: string;
+  param: string;
+  value: string;
+  level: string;
+};
 
-const REPORTS = [
-  { id: "energy", name: "Điện năng tiêu thụ", title: "ĐIỆN NĂNG TIÊU THỤ" },
-  { id: "quality", name: "Chất lượng điện", title: "CHẤT LƯỢNG ĐIỆN" },
-  { id: "cost", name: "Chi phí", title: "CHI PHÍ" },
-  { id: "ghg", name: "Khí nhà kính", title: "KHÍ NHÀ KÍNH" },
-  { id: "alerts", name: "Cảnh báo", title: "CẢNH BÁO" },
-] as const;
+type PreviewModel = {
+  title: string;
+  reportName: string;
+  projectName: string;
+  periodLabel: string;
+  compareLabel?: string;
+  pointsLabel: string;
+  fields: { id: string; label: string }[];
+  rows: { label: string; value: string }[];
+  tableHeaders: string[];
+  tableRows: string[][];
+  includeChart: boolean;
+  note: string;
+};
 
-type ReportAlert = { time: string; point: string; param: string; value: string; level: string };
-
-export function ClientReports({ initialId = "energy" }: { initialId?: (typeof REPORTS)[number]["id"] }) {
+export function ClientReports({ initialId = "consumption" }: { initialId?: ReportId }) {
   const params = useParams<{ id: string }>();
   const projectId = params?.id ?? "default";
-  const [template, setTemplate] = useState(TEMPLATES[0]);
-  const [reportId, setReportId] = useState<(typeof REPORTS)[number]["id"]>(initialId);
-  const report = REPORTS.find((item) => item.id === reportId) ?? REPORTS[0];
-  const [title, setTitle] = useState<string>(report.title);
-  const [chart, setChart] = useState<YesNo>("Có");
-  const [summary, setSummary] = useState<YesNo>("Có");
-  const [detail, setDetail] = useState<YesNo>(reportId === "alerts" ? "Có" : "Không");
-  const [format, setFormat] = useState<Format>(".pdf");
-  const [period, setPeriod] = useState<Period>("Ngày");
+  const [projectName, setProjectName] = useState(projectId);
+  const [reportId, setReportId] = useState<ReportId>(
+    REPORTS.some((item) => item.id === initialId) ? initialId : "consumption",
+  );
+  const report = reportById(reportId);
+
+  const [title, setTitle] = useState(report.title);
+  const [format, setFormat] = useState<ReportFormat>("pdf");
+  const [period, setPeriod] = useState<Period>("Tháng");
   const [date, setDate] = useState(() => vietnamNow().date);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [compareDate, setCompareDate] = useState(() => {
+    const now = vietnamNow();
+    const [y, m] = now.date.split("-").map(Number);
+    const prevMonth = m === 1 ? 12 : m - 1;
+    const prevYear = m === 1 ? y - 1 : y;
+    return `${prevYear}-${String(prevMonth).padStart(2, "0")}-01`;
+  });
+  const [selectedFields, setSelectedFields] = useState<string[]>(report.defaultFields);
+  const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [points, setPoints] = useState<{ id: string; name: string }[]>([]);
+  const [points, setPoints] = useState<{ id: string; name: string; code: string }[]>([]);
   const [alertRows, setAlertRows] = useState<ReportAlert[]>([]);
+  const [ghgTons, setGhgTons] = useState(0);
+  const [ghgSources, setGhgSources] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([hydrateClientMeters(projectId), hydrateAlertEvents(projectId)]).then(([meters, events]) => {
-      if (!active) return;
-      const nextPoints = meters.map((meter) => ({
-        id: meter.id,
-        name: `(${meter.code}) ${meter.name}`,
-      }));
-      setPoints(nextPoints);
-      setSelected((current) => {
-        const valid = current.filter((id) => nextPoints.some((point) => point.id === id));
-        if (valid.length) return valid;
-        return nextPoints[0] ? [nextPoints[0].id] : [];
-      });
-      setAlertRows(events.map((event: AlertEvent) => ({
-        time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
-        point: event.pointName ?? event.meterPointId ?? "--",
-        param: event.parameter,
-        value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
-        level: event.severity === "critical" ? "Nghiêm trọng" : event.severity === "warning" ? "Cảnh báo" : "Thông tin",
-      })));
-    }).catch(() => undefined);
+    void Promise.all([
+      hydrateClientMeters(projectId),
+      hydrateAlertEvents(projectId),
+      hydrateGhgSources(projectId),
+      hydrateProjects(),
+    ])
+      .then(([meters, events, sources, projects]) => {
+        if (!active) return;
+        const project = projects.find((item) => item.id === projectId);
+        setProjectName(project?.name ?? project?.customer ?? projectId);
+        const nextPoints = meters.map((meter) => ({
+          id: meter.id,
+          code: meter.code,
+          name: `(${meter.code}) ${meter.name}`,
+        }));
+        setPoints(nextPoints);
+        setSelectedPoints((current) => {
+          const valid = current.filter((id) => nextPoints.some((point) => point.id === id));
+          if (valid.length) return valid;
+          return nextPoints[0] ? [nextPoints[0].id] : [];
+        });
+        setAlertRows(
+          events.map((event: AlertEvent) => ({
+            time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
+            point: event.pointName ?? event.meterPointId ?? "--",
+            pointId: event.meterPointId,
+            param: event.parameter,
+            value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
+            level:
+              event.severity === "critical"
+                ? "Nghiêm trọng"
+                : event.severity === "warning"
+                  ? "Cảnh báo"
+                  : "Thông tin",
+          })),
+        );
+        setGhgSources(sources.length);
+        setGhgTons(sources.reduce((sum, source) => sum + (source.tons ?? 0), 0));
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
   }, [projectId]);
 
   const dateLabel = useMemo(() => formatCivilDate(date), [date]);
+  const compareLabel = useMemo(() => formatCivilDate(compareDate), [compareDate]);
+  const periodLabel = `${period} · ${dateLabel}`;
 
-  const pickReport = (id: (typeof REPORTS)[number]["id"]) => {
-    const next = REPORTS.find((item) => item.id === id) ?? REPORTS[0];
+  const pickReport = (id: ReportId) => {
+    const next = reportById(id);
     setReportId(next.id);
     setTitle(next.title);
-    setDetail(next.id === "alerts" ? "Có" : "Không");
+    setSelectedFields(next.defaultFields);
+    setPreviewOpen(false);
+  };
+
+  const toggleField = (id: string) => {
+    setSelectedFields((list) => {
+      if (list.includes(id)) {
+        return list.length === 1 ? list : list.filter((item) => item !== id);
+      }
+      return [...list, id];
+    });
   };
 
   const togglePoint = (id: string) => {
-    setSelected((list) => {
+    setSelectedPoints((list) => {
       if (list.includes(id)) return list.length === 1 ? list : list.filter((item) => item !== id);
       return [...list, id];
     });
   };
 
-  const exportReport = () => {
-    const selectedPoints = points.filter((p) => selected.includes(p.id))
-      .map((p) => p.name)
-      .join("; ");
-    const body = [
-      title,
-      `Loại: ${report.name}`,
-      `Điểm đo: ${selectedPoints}`,
-      `Biểu đồ: ${chart}`,
-      `Bảng tổng hợp: ${summary}`,
-      `Bảng chi tiết: ${detail}`,
-      `Kỳ: ${period} ${dateLabel}`,
-      "",
-      report.id === "alerts"
-        ? alertRows.map((row) => `${row.time}\t${row.point}\t${row.param}\t${row.value}\t${row.level}`).join("\n")
-        : "Dữ liệu mẫu theo cấu hình báo cáo.",
-    ].join("\n");
+  const selectedPointNames = points
+    .filter((point) => selectedPoints.includes(point.id))
+    .map((point) => point.name);
 
-    if (format === ".csv") {
-      const csv =
-        report.id === "alerts"
-          ? ["Thời điểm,Điểm đo,Tham số,Giá trị,Mức", ...alertRows.map((r) => `${r.time},${r.point},${r.param},${r.value},${r.level}`)].join("\n")
-          : body;
-      download(csv, `${report.id}${format}`, "text/csv;charset=utf-8");
-      return;
+  const preview = useMemo((): PreviewModel => {
+    const fieldDefs = report.fields.filter((field) => selectedFields.includes(field.id));
+    const rows: { label: string; value: string }[] = [];
+    const tableHeaders: string[] = [];
+    const tableRows: string[][] = [];
+    const pointsLabel = report.needsMeterPoints
+      ? selectedPointNames.join("; ") || "Chưa chọn điểm đo"
+      : "Toàn dự án";
+
+    if (report.id === "alerts") {
+      const filtered = alertRows.filter(
+        (row) =>
+          !report.needsMeterPoints ||
+          !selectedPoints.length ||
+          !row.pointId ||
+          selectedPoints.includes(row.pointId),
+      );
+      if (selectedFields.includes("by_severity")) {
+        const critical = filtered.filter((row) => row.level === "Nghiêm trọng").length;
+        const warning = filtered.filter((row) => row.level === "Cảnh báo").length;
+        const info = filtered.filter((row) => row.level === "Thông tin").length;
+        rows.push(
+          { label: "Nghiêm trọng", value: String(critical) },
+          { label: "Cảnh báo", value: String(warning) },
+          { label: "Thông tin", value: String(info) },
+        );
+      }
+      rows.push({ label: "Tổng sự kiện trong kỳ (lọc điểm đo)", value: String(filtered.length) });
+      if (selectedFields.includes("alert_list") || selectedFields.includes("detail_table") || selectedFields.includes("summary_table")) {
+        tableHeaders.push("Thời điểm", "Điểm đo", "Tham số", "Giá trị", "Mức");
+        for (const row of filtered.slice(0, 50)) {
+          tableRows.push([row.time, row.point, row.param, row.value, row.level]);
+        }
+      }
+    } else if (report.id === "ghg") {
+      if (selectedFields.includes("ghg_total")) {
+        rows.push({
+          label: "Tổng phát thải",
+          value: `${ghgTons.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} tấn CO₂e`,
+        });
+      }
+      if (selectedFields.includes("by_source")) {
+        rows.push({ label: "Số nguồn cấu hình", value: String(ghgSources) });
+      }
+      if (selectedFields.includes("by_scope") || selectedFields.includes("summary_table")) {
+        tableHeaders.push("Hạng mục", "Giá trị");
+        tableRows.push(["Tổng CO₂e", `${ghgTons.toFixed(2)} tấn`], ["Số nguồn", String(ghgSources)]);
+      }
+    } else if (report.id === "compare") {
+      rows.push(
+        { label: "Kỳ chính", value: periodLabel },
+        { label: "Kỳ so sánh", value: `${period} · ${compareLabel}` },
+      );
+      if (selectedFields.includes("energy_delta")) rows.push({ label: "Δ Điện năng", value: "— (chờ mẫu dữ liệu kỳ)" });
+      if (selectedFields.includes("cost_delta")) rows.push({ label: "Δ Chi phí", value: "— (chờ mẫu dữ liệu kỳ)" });
+      if (selectedFields.includes("ghg_delta")) {
+        rows.push({ label: "Δ GHG", value: `${ghgTons.toFixed(2)} tấn (kỳ hiện tại)` });
+      }
+      if (selectedFields.includes("alert_delta")) {
+        rows.push({ label: "Cảnh báo kỳ hiện tại", value: String(alertRows.length) });
+      }
+      if (selectedFields.includes("summary_table")) {
+        tableHeaders.push("Chỉ tiêu", "Kỳ chính", "Kỳ so sánh", "Chênh lệch");
+        tableRows.push(["Điện năng (kWh)", "—", "—", "—"], ["Chi phí (VND)", "—", "—", "—"]);
+      }
+    } else {
+      // summary / consumption / cost — khung sẵn, gắn số GHG/alert có sẵn
+      if (selectedFields.includes("energy_total") || selectedFields.includes("kwh_total")) {
+        rows.push({ label: "Tổng điện năng", value: "— (lấy từ bản tin gateway khi xuất mẫu chính thức)" });
+      }
+      if (selectedFields.includes("cost_total")) {
+        rows.push({ label: "Tổng chi phí", value: "— (theo cấu hình biểu giá TOU)" });
+      }
+      if (selectedFields.includes("ghg_total")) {
+        rows.push({
+          label: "Tổng GHG",
+          value: `${ghgTons.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} tấn CO₂e`,
+        });
+      }
+      if (selectedFields.includes("alert_count")) {
+        rows.push({ label: "Số cảnh báo", value: String(alertRows.length) });
+      }
+      if (selectedFields.includes("kwh_by_point") || selectedFields.includes("cost_by_point")) {
+        tableHeaders.push("Điểm đo", "Giá trị");
+        for (const point of points.filter((item) => selectedPoints.includes(item.id))) {
+          tableRows.push([point.name, "—"]);
+        }
+      } else if (selectedFields.includes("summary_table") || selectedFields.includes("detail_table")) {
+        tableHeaders.push("Chỉ tiêu", "Giá trị");
+        for (const row of rows) tableRows.push([row.label, row.value]);
+      }
     }
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
-      <style>body{font-family:Inter,Arial,sans-serif;padding:32px;color:#1e293b}h1{font-size:20px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{border:1px solid #e2e8f0;padding:8px;text-align:left;font-size:13px}</style></head>
-      <body><h1>${title}</h1><pre>${body}</pre>
-      ${
-        report.id === "alerts"
-          ? `<table><thead><tr><th>Thời điểm</th><th>Điểm đo</th><th>Tham số</th><th>Giá trị</th><th>Mức</th></tr></thead><tbody>${alertRows.map(
-              (r) => `<tr><td>${r.time}</td><td>${r.point}</td><td>${r.param}</td><td>${r.value}</td><td>${r.level}</td></tr>`,
-            ).join("")}</tbody></table>`
-          : ""
-      }
-      </body></html>`;
-    download(html, `${report.id}.html`, "text/html;charset=utf-8");
-    if (format === ".pdf") {
+    return {
+      title,
+      reportName: report.name,
+      projectName,
+      periodLabel,
+      compareLabel: report.needsComparePeriod ? `${period} · ${compareLabel}` : undefined,
+      pointsLabel,
+      fields: fieldDefs.map((field) => ({ id: field.id, label: field.label })),
+      rows,
+      tableHeaders,
+      tableRows,
+      includeChart: selectedFields.includes("chart"),
+      note: REPORT_TEMPLATE_NOTE,
+    };
+  }, [
+    report,
+    selectedFields,
+    selectedPointNames,
+    selectedPoints,
+    alertRows,
+    ghgTons,
+    ghgSources,
+    periodLabel,
+    compareLabel,
+    period,
+    title,
+    projectName,
+    points,
+  ]);
+
+  const buildHtml = (model: PreviewModel) => {
+    const fieldList = model.fields.map((field) => `<li>${field.label}</li>`).join("");
+    const kpi = model.rows
+      .map(
+        (row) =>
+          `<div class="kpi"><div class="k">${row.label}</div><div class="v">${row.value}</div></div>`,
+      )
+      .join("");
+    const table =
+      model.tableHeaders.length && model.tableRows.length
+        ? `<table><thead><tr>${model.tableHeaders.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${model.tableRows
+            .map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`)
+            .join("")}</tbody></table>`
+        : "";
+    const chartBlock = model.includeChart
+      ? `<div class="chart">[Vùng biểu đồ — gắn theo mẫu PDF/Excel chính thức]</div>`
+      : "";
+
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${model.title}</title>
+<style>
+  body{font-family:Segoe UI,Arial,sans-serif;color:#0f172a;margin:0;background:#fff}
+  .page{max-width:900px;margin:0 auto;padding:28px 32px 40px}
+  .header{border-bottom:2px solid #059669;padding-bottom:12px;margin-bottom:18px}
+  .header .brand{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#059669;font-weight:700}
+  .header h1{margin:6px 0 0;font-size:22px}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin:14px 0 18px;font-size:13px;color:#475569}
+  .kpi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 18px}
+  .kpi{border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;background:#f8fafc}
+  .kpi .k{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
+  .kpi .v{margin-top:4px;font-size:16px;font-weight:700}
+  .chart{height:160px;border:1px dashed #94a3b8;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:13px;margin:12px 0 18px;background:#f8fafc}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+  th,td{border:1px solid #e2e8f0;padding:8px;text-align:left}
+  th{background:#f1f5f9;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#64748b}
+  .fields{font-size:12px;color:#475569}
+  .footer{margin-top:28px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11px;color:#64748b;display:flex;justify-content:space-between;gap:12px}
+  .note{margin-top:14px;font-size:11px;color:#94a3b8}
+</style></head><body><div class="page">
+  <header class="header">
+    <div class="brand">EMS · Báo cáo năng lượng</div>
+    <h1>${model.title}</h1>
+  </header>
+  <div class="meta">
+    <div><strong>Dự án:</strong> ${model.projectName}</div>
+    <div><strong>Loại:</strong> ${model.reportName}</div>
+    <div><strong>Kỳ báo cáo:</strong> ${model.periodLabel}</div>
+    ${model.compareLabel ? `<div><strong>Kỳ so sánh:</strong> ${model.compareLabel}</div>` : ""}
+    <div style="grid-column:1/-1"><strong>Phạm vi:</strong> ${model.pointsLabel}</div>
+  </div>
+  <div class="fields"><strong>Trường xuất:</strong><ul>${fieldList}</ul></div>
+  <div class="kpi-grid">${kpi}</div>
+  ${chartBlock}
+  ${table}
+  <p class="note">${model.note}</p>
+  <footer class="footer">
+    <span>Header/Footer mẫu — chờ chốt với a Phi</span>
+    <span>Xuất lúc ${formatStoredVietnam(new Date().toISOString().slice(0, 19)) ?? ""}</span>
+  </footer>
+</div></body></html>`;
+  };
+
+  const exportReport = () => {
+    const html = buildHtml(preview);
+    if (format === "pdf") {
       const win = window.open("", "_blank");
       if (win) {
         win.document.write(html);
@@ -130,27 +347,45 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
         win.focus();
         win.print();
       }
+      return;
     }
+
+    // Excel tạm thời: CSV UTF-8 (khi nhận file mẫu .xlsx sẽ thay bằng template)
+    const lines: string[] = [
+      preview.title,
+      `Dự án,${preview.projectName}`,
+      `Loại,${preview.reportName}`,
+      `Kỳ,${preview.periodLabel}`,
+      preview.compareLabel ? `Kỳ so sánh,${preview.compareLabel}` : "",
+      `Phạm vi,"${preview.pointsLabel}"`,
+      "",
+      "Chỉ tiêu,Giá trị",
+      ...preview.rows.map((row) => `"${row.label}","${row.value}"`),
+    ].filter(Boolean);
+    if (preview.tableHeaders.length) {
+      lines.push("", preview.tableHeaders.join(","));
+      for (const row of preview.tableRows) {
+        lines.push(row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","));
+      }
+    }
+    lines.push("", `Ghi chú,"${preview.note}"`);
+    downloadBlob(
+      "\uFEFF" + lines.join("\n"),
+      `${report.id}-${date}.csv`,
+      "text/csv;charset=utf-8",
+    );
   };
 
   return (
     <div className="flex h-full min-h-0 bg-[#f4f6f9]">
       <aside className="flex w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-5 py-4">
-          <h1 className="text-[16px] font-bold text-slate-800">Danh Sách Báo Cáo</h1>
+          <h1 className="text-[16px] font-bold text-slate-800">Danh sách báo cáo</h1>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+            Chọn loại → trường dữ liệu → xem trước → xuất PDF/Excel
+          </p>
         </div>
-        <div className="px-4 py-3">
-          <select
-            value={template}
-            onChange={(e) => setTemplate(e.target.value)}
-            className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
-          >
-            {TEMPLATES.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
-        </div>
-        <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {REPORTS.map((item, index) => {
             const active = item.id === reportId;
             return (
@@ -158,7 +393,7 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
                 key={item.id}
                 type="button"
                 onClick={() => pickReport(item.id)}
-                className={`mb-1 flex h-10 w-full items-center rounded-md px-3 text-left text-[13px] font-medium transition-colors ${
+                className={`mb-1 flex min-h-10 w-full items-center rounded-md px-3 py-2 text-left text-[13px] font-medium transition-colors ${
                   active ? "bg-emerald-600 text-white shadow-xs" : "text-slate-700 hover:bg-slate-50"
                 }`}
               >
@@ -171,45 +406,53 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
 
       <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-6">
         <section className="rounded-lg border border-slate-200 bg-white px-6 py-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <div className="relative mb-2">
+          <div className="relative mb-1">
             <h2 className="text-center text-[20px] font-semibold text-slate-800">{report.name}</h2>
             <div className="absolute top-0 right-0 flex items-center gap-1">
-              <IconBtn label="Tải xuống" onClick={exportReport}>
-                <DownloadIcon />
+              <IconBtn label="Xem trước" onClick={() => setPreviewOpen(true)}>
+                <EyeIcon />
               </IconBtn>
-              <IconBtn label="Xuất PDF" onClick={exportReport}>
-                <FileIcon />
+              <IconBtn label="Xuất báo cáo" onClick={exportReport}>
+                <DownloadIcon />
               </IconBtn>
             </div>
           </div>
-          <div className="relative mb-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setPickerOpen((v) => !v)}
-              className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50"
-            >
-              {selected.length} đã chọn
-              <Chevron />
-            </button>
-            {pickerOpen ? (
-              <div className="absolute right-0 top-9 z-20 w-64 rounded-md border border-slate-200 bg-white py-1 shadow-md">
-                {points.map((item) => (
-                  <label
-                    key={item.id}
-                    className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px] text-slate-600 hover:bg-slate-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(item.id)}
-                      onChange={() => togglePoint(item.id)}
-                      className="accent-emerald-600"
-                    />
-                    {item.name}
-                  </label>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <p className="mb-4 text-center text-[12px] text-slate-400">{report.description}</p>
+
+          {report.needsMeterPoints ? (
+            <div className="relative mb-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPickerOpen((value) => !value)}
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50"
+              >
+                {selectedPoints.length} điểm đo đã chọn
+                <Chevron />
+              </button>
+              {pickerOpen ? (
+                <div className="absolute top-9 right-0 z-20 max-h-64 w-72 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-md">
+                  {points.length === 0 ? (
+                    <p className="px-3 py-2 text-[12px] text-slate-400">Chưa có điểm đo</p>
+                  ) : (
+                    points.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px] text-slate-600 hover:bg-slate-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPoints.includes(item.id)}
+                          onChange={() => togglePoint(item.id)}
+                          className="accent-emerald-600"
+                        />
+                        {item.name}
+                      </label>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <ol className="divide-y divide-slate-100">
             <SettingRow index={1} label="Tiêu đề:">
@@ -219,85 +462,157 @@ export function ClientReports({ initialId = "energy" }: { initialId?: (typeof RE
                 className="h-9 w-full max-w-[420px] rounded-md border border-slate-200 px-3 text-sm font-semibold tracking-wide text-slate-800 outline-none focus:border-emerald-500"
               />
             </SettingRow>
-            <SettingRow index={2} label="Biểu đồ:">
-              <YesNoSelect value={chart} onChange={setChart} />
+
+            <SettingRow index={2} label="Trường dữ liệu xuất:">
+              <div className="w-full max-w-[520px] rounded-xl border border-slate-200 bg-slate-50/70 p-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {report.fields.map((field) => {
+                    const active = selectedFields.includes(field.id);
+                    return (
+                      <button
+                        key={field.id}
+                        type="button"
+                        title={field.hint}
+                        onClick={() => toggleField(field.id)}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                          active
+                            ? "bg-emerald-600 text-white"
+                            : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                        }`}
+                      >
+                        {field.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </SettingRow>
-            <SettingRow index={3} label="Bảng dữ liệu tổng hợp:">
-              <YesNoSelect value={summary} onChange={setSummary} />
-            </SettingRow>
-            <SettingRow index={4} label="Bảng dữ liệu chi tiết:">
-              <YesNoSelect value={detail} onChange={setDetail} />
-            </SettingRow>
-            <SettingRow index={5} label="Định dạng:">
+
+            <SettingRow index={3} label="Định dạng mẫu:">
               <select
                 value={format}
-                onChange={(e) => setFormat(e.target.value as Format)}
-                className="h-9 min-w-[140px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
+                onChange={(e) => setFormat(e.target.value as ReportFormat)}
+                className="h-9 min-w-[160px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
               >
-                <option>.pdf</option>
-                <option>.xlsx</option>
-                <option>.csv</option>
+                <option value="pdf">PDF (.pdf)</option>
+                <option value="xlsx">Excel (.xlsx)</option>
               </select>
             </SettingRow>
+
+            <SettingRow index={4} label="Kỳ thời gian:">
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value as Period)}
+                  className="h-9 min-w-[120px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
+                >
+                  <option>Ngày</option>
+                  <option>Tuần</option>
+                  <option>Tháng</option>
+                  <option>Năm</option>
+                </select>
+                <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[13px] text-slate-700">
+                  <CalendarIcon />
+                  {dateLabel}
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="sr-only"
+                  />
+                </label>
+              </div>
+            </SettingRow>
+
+            {report.needsComparePeriod ? (
+              <SettingRow index={5} label="Kỳ so sánh:">
+                <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[13px] text-slate-700">
+                  <CalendarIcon />
+                  {compareLabel}
+                  <input
+                    type="date"
+                    value={compareDate}
+                    onChange={(e) => setCompareDate(e.target.value)}
+                    className="sr-only"
+                  />
+                </label>
+              </SettingRow>
+            ) : null}
           </ol>
 
-          {report.id === "alerts" ? (
-            <div className="mt-6 overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-[13px]">
-                <thead>
-                  <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
-                    <th className="py-2">THỜI ĐIỂM</th>
-                    <th className="py-2">ĐIỂM ĐO</th>
-                    <th className="py-2">THAM SỐ</th>
-                    <th className="py-2">GIÁ TRỊ</th>
-                    <th className="py-2">MỨC</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {alertRows.map((row) => (
-                    <tr key={row.time} className="border-b border-slate-50 text-slate-700">
-                      <td className="py-2.5">{row.time}</td>
-                      <td className="py-2.5">{row.point}</td>
-                      <td className="py-2.5 font-medium">{row.param}</td>
-                      <td className="py-2.5">{row.value}</td>
-                      <td className="py-2.5">
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                            row.level === "Nghiêm trọng"
-                              ? "bg-red-50 text-red-600"
-                              : row.level === "Cảnh báo"
-                                ? "bg-amber-50 text-amber-700"
-                                : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
-                          {row.level}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[12px] leading-relaxed text-amber-900">
+            {REPORT_TEMPLATE_NOTE} Hiện tại xem trước dùng khung tạm; xuất PDF mở hộp thoại in, Excel tải CSV tương thích.
+          </div>
 
-          <div className="mt-8 flex flex-wrap items-center justify-end gap-3">
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value as Period)}
-              className="h-9 min-w-[120px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
+          <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setPreviewOpen(true)}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <option>Ngày</option>
-              <option>Tuần</option>
-              <option>Tháng</option>
-              <option>Năm</option>
-            </select>
-            <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[13px] text-slate-700">
-              <CalendarIcon />
-              {dateLabel}
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="sr-only" />
-            </label>
+              <EyeIcon />
+              Xem trước
+            </button>
+            <button
+              type="button"
+              onClick={exportReport}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700"
+            >
+              <DownloadIcon />
+              Xuất {format === "pdf" ? "PDF" : "Excel"}
+            </button>
           </div>
         </section>
+      </div>
+
+      {previewOpen ? (
+        <PreviewModal
+          html={buildHtml(preview)}
+          onClose={() => setPreviewOpen(false)}
+          onExport={() => {
+            exportReport();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function PreviewModal({
+  html,
+  onClose,
+  onExport,
+}: {
+  html: string;
+  onClose: () => void;
+  onExport: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
+      <div className="flex h-[min(90vh,880px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Xem trước báo cáo</h3>
+            <p className="text-[11px] text-slate-400">Header / footer tạm — sẽ thay bằng mẫu chốt với a Phi</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onExport}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+            >
+              Xuất từ bản xem trước
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-2 py-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        <iframe title="Xem trước báo cáo" srcDoc={html} className="min-h-0 flex-1 w-full bg-white" />
       </div>
     </div>
   );
@@ -310,28 +625,15 @@ function SettingRow({
 }: {
   index: number;
   label: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 py-3.5">
-      <p className="text-[14px] text-slate-700">
+    <li className="flex flex-wrap items-start justify-between gap-3 py-3.5">
+      <p className="pt-2 text-[14px] text-slate-700">
         {index}. {label}
       </p>
       {children}
     </li>
-  );
-}
-
-function YesNoSelect({ value, onChange }: { value: YesNo; onChange: (value: YesNo) => void }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as YesNo)}
-      className="h-9 min-w-[140px] rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
-    >
-      <option>Có</option>
-      <option>Không</option>
-    </select>
   );
 }
 
@@ -340,7 +642,7 @@ function IconBtn({
   label,
   onClick,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   label: string;
   onClick: () => void;
 }) {
@@ -356,7 +658,7 @@ function IconBtn({
   );
 }
 
-function download(content: string, filename: string, type: string) {
+function downloadBlob(content: string, filename: string, type: string) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -369,16 +671,26 @@ function download(content: string, filename: string, type: string) {
 function DownloadIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
-      <path d="M12 4v11M7.5 11.5 12 16l4.5-4.5M5 19h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M12 4v11M7.5 11.5 12 16l4.5-4.5M5 19h14"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-function FileIcon() {
+function EyeIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
-      <path d="M7 3.5h7l5 5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <path d="M14 3.5V9h5.5M9 13h6M9 16.5h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
 }

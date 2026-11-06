@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartDataTable, ChartTableToggle } from "@/components/client/ChartDataTable";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { ChartZoomSurface, CHART_ZOOM_HINT } from "@/components/client/ChartZoomSurface";
+import { zoomAround } from "@/components/client/chartZoom";
 import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
@@ -9,11 +12,6 @@ import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
 const N = 160;
 const AGGS = ["MAX", "AVG", "MIN"] as const;
 type Agg = (typeof AGGS)[number];
-
-function toggleIn<T>(list: T[], value: T) {
-  if (list.includes(value)) return list.length === 1 ? list : list.filter((item) => item !== value);
-  return [...list, value];
-}
 
 function smoothPath(pts: [number, number][]) {
   if (pts.length < 2) return "";
@@ -42,13 +40,11 @@ export function FrequencyChart({
   timeFilter: TimeFilterValue;
   samples?: ChartSample[];
 }) {
-  const [qty, setQty] = useState("Freq");
-  const [slotA, setSlotA] = useState("-");
-  const [slotB, setSlotB] = useState("-");
   const [aggs] = useState<Agg[]>(["AVG"]);
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
+  const [showTable, setShowTable] = useState(false);
 
   const series = useMemo(
     () =>
@@ -63,19 +59,8 @@ export function FrequencyChart({
 
   const freqDomain = samples?.length ? paddedDomain(series, [50.24, 50.34]) : undefined;
 
-  const span = viewWin.end - viewWin.start;
-  const zoomIn = () => {
-    const next = Math.max(32, Math.floor(span * 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
-  const zoomOut = () => {
-    const next = Math.min(N - 1, Math.floor(span / 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
+  const zoomIn = () => setViewWin((range) => zoomAround(range, hover, 0.7, N - 1, 32));
+  const zoomOut = () => setViewWin((range) => zoomAround(range, hover, 1 / 0.7, N - 1, 32));
 
   const timelineLabels = useMemo(
     () => Array.from({ length: N }, (_, index) => chartTimeLabel(samples, index, N, "full") || ""),
@@ -85,62 +70,47 @@ export function FrequencyChart({
 
   return (
     <section className="w-full min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4">
-      {/* Top bar: chọn kênh; bộ lọc thời gian dùng thanh chung của trang */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 outline-none focus:border-emerald-500 shadow-2xs"
-          >
-            <option value="Freq">Tần số (Freq)</option>
-            <option value="U">Điện áp (U)</option>
-            <option value="I">Dòng điện (I)</option>
-          </select>
-          {qty !== "Freq" && (
-            <>
-              <select
-                value={slotA === "-" ? "CH1" : slotA}
-                onChange={(e) => setSlotA(e.target.value)}
-                className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-[13px] text-slate-700 outline-none focus:border-emerald-500 shadow-2xs"
-              >
-                <option value="CH1">Pha A (CH1)</option>
-                <option value="CH2">Pha B (CH2)</option>
-                <option value="CH3">Pha C (CH3)</option>
-              </select>
-              <select
-                value={slotB === "-" ? "rms" : slotB}
-                onChange={(e) => setSlotB(e.target.value)}
-                className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-[13px] text-slate-700 outline-none focus:border-emerald-500 shadow-2xs"
-              >
-                <option value="rms">Hiệu dụng (RMS)</option>
-                <option value="pk+">Đỉnh dương (Pk+)</option>
-                <option value="pk-">Đỉnh âm (Pk-)</option>
-              </select>
-            </>
-          )}
+      <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-slate-800">Tần số (Freq)</h2>
+          <p className="mt-0.5 text-[12px] text-slate-500">Xu hướng tần số lưới theo thời gian</p>
         </div>
-
+        <ChartTableToggle active={showTable} onClick={() => setShowTable((v) => !v)} />
       </div>
 
       <div className="mb-2">
         <ChartTimeline compact labels={timelineLabels} values={timelineValues} range={viewWin} onRange={setViewWin} />
       </div>
 
-      <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-        <FreqPane
-          qty={qty}
-          series={series}
-          samples={samples}
-          viewWin={viewWin}
-          hover={crosshair ? hover : null}
-          onHover={setHover}
-          domain={freqDomain}
-        />
+      <div className="min-w-0 w-full">
+        {showTable ? (
+          <ChartDataTable
+            samples={samples}
+            length={N}
+            range={viewWin}
+            series={series.map((item) => ({ ...item, name: `${item.name} [Hz]`, digits: 3 }))}
+          />
+        ) : (
+          <ChartZoomSurface
+            className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white"
+            range={viewWin}
+            onRange={setViewWin}
+            lastIndex={N - 1}
+            minSpan={32}
+          >
+            <FreqPane
+              series={series}
+              samples={samples}
+              viewWin={viewWin}
+              hover={crosshair ? hover : null}
+              onHover={setHover}
+              domain={freqDomain}
+            />
+          </ChartZoomSurface>
+        )}
       </div>
 
-      {/* Dưới cùng chỉ giữ lại công cụ zoom / view */}
-      <div className="mt-2.5 flex items-center justify-between gap-3">
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1">
           <ToolBtn label="Phóng to" onClick={zoomIn}>
             <ZoomIcon plus />
@@ -156,7 +126,7 @@ export function FrequencyChart({
           </ToolBtn>
         </div>
         <span className="text-[11px] text-slate-400">
-          Kỳ hiển thị: {getTimeFilterLabel(timeFilter)}
+          {showTable ? "Bảng ngày giờ · giá trị" : CHART_ZOOM_HINT} · {getTimeFilterLabel(timeFilter)}
         </span>
       </div>
     </section>
@@ -164,7 +134,6 @@ export function FrequencyChart({
 }
 
 function FreqPane({
-  qty,
   series,
   samples,
   viewWin,
@@ -172,7 +141,6 @@ function FreqPane({
   onHover,
   domain,
 }: {
-  qty: string;
   series: { key: string; name: string; color: string; values: number[] }[];
   samples?: ChartSample[];
   viewWin: { start: number; end: number };
@@ -225,7 +193,7 @@ function FreqPane({
         fontSize="12"
         transform={`rotate(-90 14 ${H / 2})`}
       >
-        {qty} [Hz]
+        Freq [Hz]
       </text>
       {yTicks.map((v) => {
         const y = yAt(v);

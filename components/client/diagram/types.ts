@@ -13,8 +13,15 @@ export type MeterIcon =
 export type EnergyKind = string;
 
 export type MeterMetric = {
+  key?: string;
   label: string;
   value: string;
+};
+
+export type DiagramNodeDisplay = {
+  title?: string;
+  icon?: MeterIcon;
+  metricKeys?: string[];
 };
 
 export type MeterNodeData = {
@@ -25,6 +32,8 @@ export type MeterNodeData = {
   icon: MeterIcon;
   iconImage?: string;
   metrics: MeterMetric[];
+  metricKeys: string[];
+  sampleAt?: string;
   energy: EnergyKind;
   listed?: boolean;
 };

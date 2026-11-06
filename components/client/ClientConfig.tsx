@@ -2,6 +2,21 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useAuth } from "@/components/auth/useAuth";
+import { DEFAULT_PASSWORD } from "@/lib/auth-constants";
+import {
+  BRANCH_ACCOUNT_ROLES,
+  CUSTOMER_ACCOUNT_ROLE_META,
+  accountManagesProject,
+  canEditClientConfig,
+  canManageBranchAccounts,
+  hydrateCustomerAccounts,
+  isBranchRole,
+  normalizeCustomerRole,
+  removeCustomerAccount,
+  upsertCustomerAccount,
+  type CustomerAccount,
+} from "@/lib/customer-accounts";
 import {
   buildMeterDepthMap,
   hydrateClientMeters,
@@ -25,6 +40,14 @@ import {
   type TouBand,
   type VoltageLevelId,
 } from "@/lib/industrial-electricity";
+import {
+  ALERT_CATEGORY_OPTIONS,
+  DEFAULT_SEVERITY_BY_CATEGORY,
+  normalizeAlertConfig,
+  type AlertCategoryId,
+  type AlertConfig,
+  type AlertSeverityLevel,
+} from "@/lib/alert-config";
 import { hydrateProjectSettings, saveProjectSettings, type ProjectSettingsPayload } from "@/lib/project-settings";
 
 type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
@@ -41,8 +64,6 @@ const NAV: { id: TabId; n: number; label: string; icon: "doc" | "nodes" | "cash"
 ];
 
 const FALLBACK_UTILITIES = ["Điện", "Nước", "Nhiệt", "Hơi"];
-
-const ALERT_TAGS = ["Energy", "U/I", "Tần số", "Công suất", "Sóng hài", "Mất cân bằng pha"];
 
 type Slot = { id: string; name: string; color: string; from: string; to: string; price: string };
 type TouPriceInputs = Record<TouBand, string>;
@@ -65,18 +86,12 @@ function tariffInputs(levelId: string | undefined): TouPriceInputs {
     peak: formatTariffPrice(prices.peak),
   };
 }
-type AccountRow = {
-  id: string;
-  username: string;
-  fullName: string;
-  role: string;
-  email: string;
-  status: "Đang hoạt động" | "Ngoại tuyến";
-};
-
 export function ClientConfig() {
   const params = useParams<{ id: string }>();
   const projectId = params?.id ?? "default";
+  const { session } = useAuth();
+  const canEditConfig = canEditClientConfig(session);
+  const canManageUsers = canManageBranchAccounts(session) || session?.portal === "admin";
   const [tab, setTab] = useState<TabId>("meters");
   const [openParams, setOpenParams] = useState(true);
   const [saved, setSaved] = useState(false);
@@ -91,8 +106,9 @@ export function ClientConfig() {
   const [flatPrices, setFlatPrices] = useState<Record<string, string>>({});
   const [voltageLevel, setVoltageLevel] = useState<VoltageLevelId>(DEFAULT_VOLTAGE_LEVEL);
   const [touPrices, setTouPrices] = useState<TouPriceInputs>(() => tariffInputs(DEFAULT_VOLTAGE_LEVEL));
-  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [accounts, setAccounts] = useState<CustomerAccount[]>([]);
   const [adding, setAdding] = useState(false);
+  const [accountError, setAccountError] = useState("");
 
   const [classify, setClassify] = useState("Thông tin chung (Info)");
   const [startTime, setStartTime] = useState("");
@@ -104,11 +120,10 @@ export function ClientConfig() {
   const [language, setLanguage] = useState("Tiếng Việt");
   const [theme, setTheme] = useState<"Sáng" | "Tối" | "Hệ thống">("Sáng");
 
-  const [tags, setTags] = useState(ALERT_TAGS);
-  const [activeTag, setActiveTag] = useState("Energy");
   const [threshold, setThreshold] = useState("");
   const [dailyLimit, setDailyLimit] = useState(0);
   const [peakWarn, setPeakWarn] = useState(true);
+  const [severityByCategory, setSeverityByCategory] = useState(DEFAULT_SEVERITY_BY_CATEGORY);
 
   function applyCostSettings(settings: ProjectSettingsPayload, types: string[] = utilities) {
     const savedCost = settings.costConfig as SavedCostConfig | undefined;
@@ -133,6 +148,14 @@ export function ClientConfig() {
     if (savedCost.utility && types.includes(savedCost.utility)) setUtility(savedCost.utility);
   }
 
+  function applyAlertSettings(settings: ProjectSettingsPayload) {
+    const config = normalizeAlertConfig(settings.alertConfig);
+    setSeverityByCategory(config.severityByCategory);
+    setThreshold(config.overConsumptionKwh ?? "");
+    setDailyLimit(config.dailyLimit ?? 0);
+    setPeakWarn(config.peakHourWarning ?? true);
+  }
+
   useEffect(() => {
     const project = loadProjects().find((item) => item.id === projectId);
     const types = resolveMeterTypes(project);
@@ -142,12 +165,38 @@ export function ClientConfig() {
       .then(setMeters)
       .catch(() => setMeters(loadClientMeters(projectId)));
     void hydrateProjectSettings(projectId, { force: true })
-      .then((settings) => applyCostSettings(settings, types))
+      .then((settings) => {
+        applyCostSettings(settings, types);
+        applyAlertSettings(settings);
+      })
       .catch(() => undefined);
     setDevices(loadDevices());
   }, [projectId]);
 
+  useEffect(() => {
+    let active = true;
+    void hydrateCustomerAccounts(projectId)
+      .then((rows) => {
+        if (!active) return;
+        setAccounts(
+          rows.filter(
+            (item) => isBranchRole(item.role) && accountManagesProject(item, projectId),
+          ),
+        );
+      })
+      .catch(() => {
+        if (active) setAccounts([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
   const markSaved = async () => {
+    if (!canEditConfig) {
+      setSaveError("Tài khoản của bạn chỉ được xem cấu hình, không được chỉnh sửa.");
+      return;
+    }
     setSaveError("");
     setSaving(true);
     try {
@@ -165,6 +214,15 @@ export function ClientConfig() {
           },
         });
         applyCostSettings(stored);
+      } else if (tab === "alerts") {
+        const payload: AlertConfig = {
+          severityByCategory,
+          overConsumptionKwh: threshold,
+          dailyLimit,
+          peakHourWarning: peakWarn,
+        };
+        const stored = await saveProjectSettings(projectId, { alertConfig: payload });
+        applyAlertSettings(stored);
       } else {
         await saveClientMeters(projectId, meters);
       }
@@ -190,8 +248,14 @@ export function ClientConfig() {
       hint: `Cấu hình phân cấp cây cha–con của các điểm đo trên Sơ đồ · Dự án ${projectId}`,
     },
     cost: { title: "Cấu hình chi phí", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
-    alerts: { title: "Cấu hình cảnh báo", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
-    accounts: { title: "Quản lý tài khoản", hint: "Quản lý các thiết lập cơ bản cho dự án EMS" },
+    alerts: {
+      title: "Cấu hình cảnh báo",
+      hint: "Chọn mức độ (nghiêm trọng / cảnh báo / thông tin) theo từng loại lỗi. Nhật ký chỉ hiển thị thời điểm phát sinh.",
+    },
+    accounts: {
+      title: "Quản lý tài khoản",
+      hint: "Tài khoản nhánh truy cập ứng dụng: Chỉ xem hoặc Xem & chỉnh sửa thông số cấu hình",
+    },
   }[tab];
 
   return (
@@ -234,16 +298,23 @@ export function ClientConfig() {
               <h2 className="text-[22px] font-bold text-slate-800">{meta.title}</h2>
               <p className="mt-1 text-sm text-slate-500">{meta.hint}</p>
             </div>
-            <button
-              type="button"
-              title="Lưu"
-              onClick={() => void markSaved()}
-              disabled={saving}
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs transition-colors disabled:opacity-60"
-            >
-              {tab === "accounts" ? <FileIcon /> : <SaveIcon />}
-            </button>
+            {tab !== "accounts" ? (
+              <button
+                type="button"
+                title={canEditConfig ? "Lưu" : "Chỉ được xem"}
+                onClick={() => void markSaved()}
+                disabled={saving || !canEditConfig}
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs transition-colors disabled:opacity-60"
+              >
+                <SaveIcon />
+              </button>
+            ) : null}
           </div>
+          {!canEditConfig && tab !== "accounts" ? (
+            <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+              Tài khoản của bạn chỉ được xem cấu hình — không thể lưu thay đổi.
+            </p>
+          ) : null}
 
           {tab === "project" ? (
             <ProjectForm
@@ -305,20 +376,10 @@ export function ClientConfig() {
 
           {tab === "alerts" ? (
             <AlertsPanel
-              classify={classify}
-              onClassify={setClassify}
-              tags={tags}
-              activeTag={activeTag}
-              onActive={setActiveTag}
-              onRemoveTag={(tag) => {
-                setTags((list) => list.filter((item) => item !== tag));
-                if (activeTag === tag) setActiveTag(tags.find((item) => item !== tag) ?? "");
-              }}
-              onAddTag={() => {
-                const next = `Mới ${tags.length + 1}`;
-                setTags((list) => [...list, next]);
-                setActiveTag(next);
-              }}
+              severityByCategory={severityByCategory}
+              onSeverity={(category, level) =>
+                setSeverityByCategory((current) => ({ ...current, [category]: level }))
+              }
               threshold={threshold}
               onThreshold={setThreshold}
               dailyLimit={dailyLimit}
@@ -330,14 +391,41 @@ export function ClientConfig() {
 
           {tab === "accounts" ? (
             <AccountsPanel
+              projectId={projectId}
               accounts={accounts}
               adding={adding}
+              canManage={canManageUsers}
+              error={accountError}
               onAdding={setAdding}
               onAdd={(row) => {
-                setAccounts((list) => [...list, row]);
-                setAdding(false);
+                setAccountError("");
+                void upsertCustomerAccount(row)
+                  .then((next) => {
+                    setAccounts(
+                      next.filter(
+                        (item) => isBranchRole(item.role) && accountManagesProject(item, projectId),
+                      ),
+                    );
+                    setAdding(false);
+                  })
+                  .catch((error) => {
+                    setAccountError(error instanceof Error ? error.message : "Không tạo được tài khoản.");
+                  });
               }}
-              onRemove={(id) => setAccounts((list) => list.filter((item) => item.id !== id))}
+              onRemove={(id) => {
+                setAccountError("");
+                void removeCustomerAccount(id)
+                  .then((next) => {
+                    setAccounts(
+                      next.filter(
+                        (item) => isBranchRole(item.role) && accountManagesProject(item, projectId),
+                      ),
+                    );
+                  })
+                  .catch((error) => {
+                    setAccountError(error instanceof Error ? error.message : "Không xóa được tài khoản.");
+                  });
+              }}
             />
           ) : null}
 
@@ -350,7 +438,6 @@ export function ClientConfig() {
                   void hydrateProjectSettings(projectId, { force: true }).then((settings) => {
                     applyCostSettings(settings);
                   });
-                  setAccounts([]);
                 }}
                 className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
@@ -359,7 +446,7 @@ export function ClientConfig() {
               <button
                 type="button"
                 onClick={() => void markSaved()}
-                disabled={saving}
+                disabled={saving || !canEditConfig}
                 className="h-10 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors disabled:opacity-60"
               >
                 {saving ? "Đang lưu..." : "Lưu cấu hình"}
@@ -968,13 +1055,8 @@ function CostPanel({
 }
 
 function AlertsPanel({
-  classify,
-  onClassify,
-  tags,
-  activeTag,
-  onActive,
-  onRemoveTag,
-  onAddTag,
+  severityByCategory,
+  onSeverity,
   threshold,
   onThreshold,
   dailyLimit,
@@ -982,13 +1064,8 @@ function AlertsPanel({
   peakWarn,
   onPeakWarn,
 }: {
-  classify: string;
-  onClassify: (v: string) => void;
-  tags: string[];
-  activeTag: string;
-  onActive: (v: string) => void;
-  onRemoveTag: (v: string) => void;
-  onAddTag: () => void;
+  severityByCategory: Record<AlertCategoryId, AlertSeverityLevel>;
+  onSeverity: (category: AlertCategoryId, level: AlertSeverityLevel) => void;
   threshold: string;
   onThreshold: (v: string) => void;
   dailyLimit: number;
@@ -998,46 +1075,46 @@ function AlertsPanel({
 }) {
   return (
     <div>
-      <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">PHÂN LOẠI</p>
-      <select
-        value={classify}
-        onChange={(e) => onClassify(e.target.value)}
-        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
-      >
-        <option>Thông tin chung (Info)</option>
-        <option>Ngưỡng vận hành</option>
-      </select>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {tags.map((tag) => {
-          const active = tag === activeTag;
-          return (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => onActive(tag)}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium transition-colors ${
-                active ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+      <p className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
+        Trang Cảnh báo chỉ ghi nhận thời điểm phát sinh. Chọn mức độ cho từng loại lỗi bên dưới — loại đánh dấu
+        <span className="font-semibold text-rose-700"> Nghiêm trọng </span>
+        sẽ được thống kê riêng.
+      </p>
+
+      <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">
+        MỨC ĐỘ THEO DANH MỤC LỖI
+      </p>
+      <div className="mb-5 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+        {ALERT_CATEGORY_OPTIONS.map((option) => (
+          <div
+            key={option.id}
+            className="flex flex-wrap items-center justify-between gap-3 bg-white px-3 py-2.5"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-800">{option.label}</p>
+              <p className="text-[11px] text-slate-400">{option.hint}</p>
+            </div>
+            <select
+              value={severityByCategory[option.id]}
+              onChange={(e) => onSeverity(option.id, e.target.value as AlertSeverityLevel)}
+              className={`h-9 rounded-lg border px-2.5 text-xs font-semibold outline-none focus:ring-1 focus:ring-emerald-500 ${
+                severityByCategory[option.id] === "critical"
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : severityByCategory[option.id] === "warning"
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-slate-200 bg-slate-50 text-slate-700"
               }`}
             >
-              {tag}
-              <span
-                role="presentation"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveTag(tag);
-                }}
-                className="text-[11px] opacity-70 hover:opacity-100"
-              >
-                ×
-              </span>
-            </button>
-          );
-        })}
-        <button type="button" onClick={onAddTag} className="text-[12px] font-semibold text-emerald-600 hover:underline">
-          + Thêm mới
-        </button>
+              <option value="critical">Nghiêm trọng</option>
+              <option value="warning">Cảnh báo</option>
+              <option value="info">Thông tin</option>
+            </select>
+          </div>
+        ))}
       </div>
-      <div className="mt-2 divide-y divide-slate-100">
+
+      <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">NGƯỠNG VẬN HÀNH</p>
+      <div className="divide-y divide-slate-100">
         <Field title="Over-consumption threshold" hint="Ngưỡng tiêu thụ vượt mức cho phép (kWh)">
           <input
             value={threshold}
@@ -1058,7 +1135,7 @@ function AlertsPanel({
               className={`relative h-6 w-11 rounded-full transition-colors ${peakWarn ? "bg-emerald-600" : "bg-slate-300"}`}
             >
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${peakWarn ? "left-5.5" : "left-0.5"}`}
+                className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition"
                 style={{ left: peakWarn ? 22 : 2 }}
               />
             </button>
@@ -1071,34 +1148,58 @@ function AlertsPanel({
 }
 
 function AccountsPanel({
+  projectId,
   accounts,
   adding,
+  canManage,
+  error,
   onAdding,
   onAdd,
   onRemove,
 }: {
-  accounts: AccountRow[];
+  projectId: string;
+  accounts: CustomerAccount[];
   adding: boolean;
+  canManage: boolean;
+  error: string;
   onAdding: (v: boolean) => void;
-  onAdd: (row: AccountRow) => void;
+  onAdd: (row: CustomerAccount) => void;
   onRemove: (id: string) => void;
 }) {
-  const [draft, setDraft] = useState({ username: "", fullName: "", role: "Người xem", email: "" });
+  const [draft, setDraft] = useState({
+    username: "",
+    fullName: "",
+    role: "View" as "View" | "Edit",
+    email: "",
+    password: "",
+  });
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-[15px] font-semibold text-slate-800">Danh sách tài khoản phụ</h3>
-        <button
-          type="button"
-          onClick={() => onAdding(true)}
-          className="inline-flex h-10 items-center gap-1.5 rounded-md bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors"
-        >
-          <UserPlusIcon />
-          + Thêm mới tài khoản
-        </button>
+        <div>
+          <h3 className="text-[15px] font-semibold text-slate-800">Tài khoản nhánh truy cập ứng dụng</h3>
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            Chỉ xem thông số, hoặc xem và chỉnh sửa trong phần cấu hình.
+          </p>
+        </div>
+        {canManage ? (
+          <button
+            type="button"
+            onClick={() => onAdding(true)}
+            className="inline-flex h-10 items-center gap-1.5 rounded-md bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors"
+          >
+            <UserPlusIcon />
+            + Thêm tài khoản nhánh
+          </button>
+        ) : (
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+            Chỉ Admin được thêm/xóa
+          </span>
+        )}
       </div>
-      {adding ? (
-        <div className="mb-4 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-4">
+      {adding && canManage ? (
+        <div className="mb-4 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-3 lg:grid-cols-6">
           <input
             value={draft.username}
             onChange={(e) => setDraft({ ...draft, username: e.target.value })}
@@ -1117,20 +1218,40 @@ function AccountsPanel({
             placeholder="Email"
             className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
           />
+          <select
+            value={draft.role}
+            onChange={(e) => setDraft({ ...draft, role: e.target.value as "View" | "Edit" })}
+            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
+          >
+            {BRANCH_ACCOUNT_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {CUSTOMER_ACCOUNT_ROLE_META[role].label}
+              </option>
+            ))}
+          </select>
+          <input
+            type="password"
+            value={draft.password}
+            onChange={(e) => setDraft({ ...draft, password: e.target.value })}
+            placeholder="Mật khẩu"
+            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
+          />
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => {
-                if (!draft.username || !draft.email) return;
+                if (!draft.username.trim() || !draft.email.trim() || !draft.password.trim()) return;
                 onAdd({
-                  id: `a${Date.now()}`,
-                  username: draft.username,
-                  fullName: draft.fullName || draft.username,
+                  id: `cus-${Date.now()}`,
+                  username: draft.username.trim(),
+                  displayName: draft.fullName.trim() || draft.username.trim(),
+                  email: draft.email.trim(),
                   role: draft.role,
-                  email: draft.email,
-                  status: "Đang hoạt động",
+                  projectId,
+                  projectIds: [projectId],
+                  password: draft.password.trim() || DEFAULT_PASSWORD,
                 });
-                setDraft({ username: "", fullName: "", role: "Người xem", email: "" });
+                setDraft({ username: "", fullName: "", role: "View", email: "", password: "" });
               }}
               className="h-9 rounded-md bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700 shadow-xs transition-colors"
             >
@@ -1142,47 +1263,60 @@ function AccountsPanel({
           </div>
         </div>
       ) : null}
+      {error ? <p className="mb-3 text-[12px] text-rose-600">{error}</p> : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-[13px]">
           <thead>
             <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
               <th className="py-2">TÊN NGƯỜI DÙNG / HỌ TÊN</th>
-              <th className="py-2">VAI TRÒ</th>
+              <th className="py-2">QUYỀN CẤU HÌNH</th>
               <th className="py-2">EMAIL</th>
-              <th className="py-2">TRẠNG THÁI</th>
               <th className="py-2 text-right">THAO TÁC</th>
             </tr>
           </thead>
           <tbody>
-            {accounts.map((row) => (
-              <tr key={row.id} className="border-b border-slate-50">
-                <td className="py-3">
-                  <p className="font-medium text-slate-800">{row.username}</p>
-                  <p className="text-[12px] text-slate-500">{row.fullName}</p>
-                </td>
-                <td className="py-3 text-slate-600">{row.role}</td>
-                <td className="py-3 text-slate-600">{row.email}</td>
-                <td className="py-3">
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                      row.status === "Đang hoạt động" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    {row.status}
-                  </span>
-                </td>
-                <td className="py-3">
-                  <span className="flex justify-end gap-1 text-slate-400">
-                    <IconBtn label="Sửa">
-                      <PencilIcon />
-                    </IconBtn>
-                    <IconBtn label="Xóa" onClick={() => onRemove(row.id)}>
-                      <TrashIcon />
-                    </IconBtn>
-                  </span>
+            {accounts.map((row) => {
+              const role = normalizeCustomerRole(row.role);
+              return (
+                <tr key={row.id} className="border-b border-slate-50">
+                  <td className="py-3">
+                    <p className="font-medium text-slate-800">{row.username}</p>
+                    <p className="text-[12px] text-slate-500">{row.displayName}</p>
+                  </td>
+                  <td className="py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                        role === "Edit"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                      title={CUSTOMER_ACCOUNT_ROLE_META[role].hint}
+                    >
+                      {CUSTOMER_ACCOUNT_ROLE_META[role].label}
+                    </span>
+                  </td>
+                  <td className="py-3 text-slate-600">{row.email}</td>
+                  <td className="py-3">
+                    {canManage ? (
+                      <span className="flex justify-end gap-1 text-slate-400">
+                        <IconBtn label="Xóa" onClick={() => onRemove(row.id)}>
+                          <TrashIcon />
+                        </IconBtn>
+                      </span>
+                    ) : (
+                      <span className="block text-right text-[11px] text-slate-400">Chỉ xem</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {accounts.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="py-10 text-center text-[12px] text-slate-400">
+                  Chưa có tài khoản nhánh. Admin hãy thêm tài khoản Chỉ xem hoặc Xem &amp; chỉnh sửa.
                 </td>
               </tr>
-            ))}
+            ) : null}
           </tbody>
         </table>
       </div>

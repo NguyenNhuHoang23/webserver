@@ -3,6 +3,7 @@
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { alarmName, alarmUnitHint } from "@/lib/gateway-protocol";
 import { hydrateProjectSettings, loadProjectSettings, saveProjectSettings } from "@/lib/project-settings";
 import type { MeterType } from "@/lib/projects";
 
@@ -17,12 +18,22 @@ type CategoryId =
 
 type Alarm = {
   id: string;
+  /** Mã IDAlarm gateway bắn về */
   alarmId: string;
   name: string;
   description: string;
+  /** Ngưỡng so với ValueAlarm */
   threshold: string;
   unit: string;
   current: string;
+};
+
+type LiveGatewayAlarm = {
+  alarmCode: number | null;
+  alarmName: string | null;
+  alarmValue: number | null;
+  occurredAt: string | null;
+  meterId: string | null;
 };
 
 type Category = {
@@ -96,18 +107,21 @@ function buildCategoryMap(utilities: string[]) {
 
 const initialAlarms: Record<string, Alarm[]> = {};
 
-function defaultAlarmsFor(categoryId: string, label?: string): Alarm[] {
-  return [
-    {
-      id: `${categoryId}-1`,
-      alarmId: "1",
-      name: label ? `Cảnh báo ${label}` : "",
-      description: "",
-      threshold: "",
-      unit: "",
-      current: "",
-    },
-  ];
+function defaultUnitForCategory(categoryId: string) {
+  return alarmUnitHint(null, categoryId) || "";
+}
+
+function normalizeAlarm(alarm: Alarm, categoryId: string): Alarm {
+  const unit =
+    alarm.unit && !(categoryId === "harmonics" && alarm.unit === "V" && alarm.threshold === "0")
+      ? alarm.unit
+      : defaultUnitForCategory(categoryId);
+  return {
+    ...alarm,
+    unit,
+    threshold: alarm.threshold === "0" && !alarm.name ? "" : alarm.threshold,
+    current: alarm.current === "--.-" ? "" : alarm.current,
+  };
 }
 
 export function AlertConfig({
@@ -127,6 +141,7 @@ export function AlertConfig({
     categoriesForUtility(firstUtility)[0]?.id ?? "energy",
   );
   const [alarmsByCategory, setAlarmsByCategory] = useState(initialAlarms);
+  const [liveAlarms, setLiveAlarms] = useState<LiveGatewayAlarm[]>([]);
   const [settingsReady, setSettingsReady] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<{ id: CategoryId; label: string } | null>(null);
@@ -170,7 +185,13 @@ export function AlertConfig({
           ? savedActiveId
           : restoredCategories[0]?.id ?? "",
       );
-      if (saved?.alarmsByCategory) setAlarmsByCategory(saved.alarmsByCategory);
+      if (saved?.alarmsByCategory) {
+        const next: Record<string, Alarm[]> = {};
+        for (const [categoryId, rows] of Object.entries(saved.alarmsByCategory)) {
+          next[categoryId] = rows.map((row) => normalizeAlarm(row, categoryId));
+        }
+        setAlarmsByCategory(next);
+      }
       setSettingsReady(true);
     }).catch(() => {
       if (active) setSettingsReady(true);
@@ -179,6 +200,43 @@ export function AlertConfig({
       active = false;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    void fetch(`/api/gateway/console?from=${encodeURIComponent(from)}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Không tải được cảnh báo gateway.");
+        const data = (await response.json()) as {
+          alarms?: Array<{
+            source?: string;
+            alarmCode?: number | null;
+            alarmName?: string | null;
+            alarmValue?: number | null;
+            occurredAt?: string | null;
+            meterId?: string | null;
+          }>;
+        };
+        if (!active) return;
+        setLiveAlarms(
+          (data.alarms ?? [])
+            .filter((item) => item.source !== "threshold")
+            .map((item) => ({
+              alarmCode: item.alarmCode ?? null,
+              alarmName: item.alarmName ?? null,
+              alarmValue: item.alarmValue ?? null,
+              occurredAt: item.occurredAt ?? null,
+              meterId: item.meterId ?? null,
+            })),
+        );
+      })
+      .catch(() => {
+        if (active) setLiveAlarms([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!settingsReady) return;
@@ -216,17 +274,24 @@ export function AlertConfig({
     }));
   }
 
+  function latestValueForAlarmId(alarmId: string) {
+    const code = Number(alarmId);
+    if (!Number.isFinite(code)) return null;
+    return liveAlarms.find((item) => item.alarmCode === code) ?? null;
+  }
+
   function addAlarm() {
     if (!active) return;
     const nextNo = (alarmsByCategory[active.id] ?? []).length + 1;
+    const unit = defaultUnitForCategory(active.id);
     const row: Alarm = {
       id: `${active.id}-${Date.now()}`,
       alarmId: String(nextNo),
-      name: "",
-      description: "Mô tả điều kiện kích hoạt cảnh báo",
-      threshold: "0",
-      unit: "V",
-      current: "--.-",
+      name: alarmName(nextNo) ?? "",
+      description: "Ngưỡng so với ValueAlarm gateway gửi về (IDAlarm).",
+      threshold: "",
+      unit,
+      current: "",
     };
     setAlarmsByCategory((current) => ({
       ...current,
@@ -252,7 +317,7 @@ export function AlertConfig({
         : [...(current[activeUtility] ?? []), category],
     }));
     setAlarmsByCategory((current) =>
-      current[category.id] ? current : { ...current, [category.id]: defaultAlarmsFor(category.id, category.label) },
+      current[category.id] ? current : { ...current, [category.id]: [] },
     );
     setActiveId(category.id);
     setAddingCategory(false);
@@ -433,75 +498,135 @@ export function AlertConfig({
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-slate-900">
-              Cấu hình Cảnh báo: {active.label}
+              Cảnh báo tức thời gateway: {active.label}
             </h2>
-            <button
-              type="button"
-              className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
-            >
+            <p className="mt-1 max-w-3xl text-sm text-slate-500">
+              Chỉ cấu hình cảnh báo gateway bắn về qua <code className="text-[12px]">IDAlarm</code> /{" "}
+              <code className="text-[12px]">ValueAlarm</code>. Ngưỡng lấy theo giá trị thực tế gateway gửi.
+              Cảnh báo vận hành khác cấu hình ở trang người dùng (Cấu hình → Cảnh báo).
+            </p>
+            <p className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
               <LiveIcon className="h-4 w-4" />
-              Cấu hình Gateway trực tuyến (Live Gateway Configuration)
-            </button>
+              Live từ gateway · {liveAlarms.length} sự kiện gần đây
+            </p>
           </div>
         </div>
 
+        {active.id === "harmonics" ? (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-900">
+            Sóng hài: đơn vị thường là <strong>%</strong> (THD), không phải V. Xem{" "}
+            <code className="text-[12px]">ValueAlarm</code> gateway gửi về rồi đặt ngưỡng tương ứng.
+          </div>
+        ) : null}
+
         <div className="space-y-3">
-          {alarms.map((alarm) => (
-            <article
-              key={alarm.id}
-              className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.03)]"
-            >
-              <div className="flex flex-wrap items-start gap-4">
-                <label className="w-16 shrink-0">
-                  <span className="mb-1.5 block text-[10px] font-semibold tracking-wide text-slate-400">
-                    ID ALARM
-                  </span>
-                  <input
-                    value={alarm.alarmId}
-                    onChange={(e) => updateAlarm(alarm.id, { alarmId: e.target.value })}
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-center text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
-                  />
-                </label>
+          {alarms.map((alarm) => {
+            const live = latestValueForAlarmId(alarm.alarmId);
+            const liveValue =
+              live?.alarmValue == null
+                ? null
+                : `${live.alarmValue}${alarm.unit ? ` ${alarm.unit}` : ""}`;
+            return (
+              <article
+                key={alarm.id}
+                className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.03)]"
+              >
+                <div className="grid gap-3 lg:grid-cols-[88px_minmax(0,1.4fr)_minmax(180px,0.9fr)]">
+                  <label>
+                    <span className="mb-1.5 block text-[10px] font-semibold tracking-wide text-slate-400">
+                      IDAlarm
+                    </span>
+                    <input
+                      value={alarm.alarmId}
+                      onChange={(e) => {
+                        const alarmId = e.target.value.replace(/[^\d]/g, "");
+                        const code = Number(alarmId);
+                        const hinted = alarmUnitHint(Number.isFinite(code) ? code : null, active.id);
+                        updateAlarm(alarm.id, {
+                          alarmId,
+                          name: alarm.name || alarmName(Number.isFinite(code) ? code : null) || "",
+                          unit: alarm.unit || hinted,
+                        });
+                      }}
+                      inputMode="numeric"
+                      placeholder="vd: 1"
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-center text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                    />
+                  </label>
 
-                <label className="min-w-[240px] flex-1">
-                  <span className="mb-1.5 block text-[10px] font-semibold tracking-wide text-slate-400">
-                    TÊN CẢNH BÁO
-                  </span>
-                  <input
-                    value={alarm.name}
-                    onChange={(e) => updateAlarm(alarm.id, { name: e.target.value })}
-                    placeholder="Nhập tên cảnh báo"
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
-                  />
-                  <span className="mt-1.5 block text-xs text-slate-400">{alarm.description}</span>
-                </label>
+                  <label>
+                    <span className="mb-1.5 block text-[10px] font-semibold tracking-wide text-slate-400">
+                      TÊN CẢNH BÁO
+                    </span>
+                    <input
+                      value={alarm.name}
+                      onChange={(e) => updateAlarm(alarm.id, { name: e.target.value })}
+                      placeholder="Theo mã gateway hoặc đặt tên dễ hiểu"
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                    />
+                    <span className="mt-1.5 block text-xs text-slate-400">
+                      {alarm.description || "Khớp IDAlarm gateway; ngưỡng so với ValueAlarm."}
+                    </span>
+                  </label>
 
-                <div className="ml-auto flex min-w-[120px] items-baseline justify-end gap-1.5 pt-6">
-                  <input
-                    value={alarm.threshold}
-                    onChange={(e) => updateAlarm(alarm.id, { threshold: e.target.value })}
-                    className="w-24 bg-transparent text-right text-3xl font-bold tracking-tight text-emerald-600 outline-none"
-                    aria-label="Ngưỡng cảnh báo"
-                  />
-                  <span className="text-lg font-semibold text-emerald-500">{alarm.unit}</span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-2">
+                    <label>
+                      <span className="mb-1.5 block text-[10px] font-semibold tracking-wide text-slate-400">
+                        NGƯỠNG (theo ValueAlarm)
+                      </span>
+                      <input
+                        value={alarm.threshold}
+                        onChange={(e) => updateAlarm(alarm.id, { threshold: e.target.value })}
+                        inputMode="decimal"
+                        placeholder={live?.alarmValue == null ? "Nhập ngưỡng" : String(live.alarmValue)}
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                        aria-label="Ngưỡng cảnh báo"
+                      />
+                    </label>
+                    <label>
+                      <span className="mb-1.5 block text-[10px] font-semibold tracking-wide text-slate-400">
+                        ĐƠN VỊ
+                      </span>
+                      <input
+                        value={alarm.unit}
+                        onChange={(e) => updateAlarm(alarm.id, { unit: e.target.value })}
+                        placeholder={active.id === "harmonics" ? "%" : "V"}
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-center text-sm font-semibold outline-none focus:border-emerald-500"
+                      />
+                    </label>
+                  </div>
                 </div>
-              </div>
 
-              <div className="mt-3 flex items-center gap-2 text-sm font-medium text-emerald-700">
-                <CurrentIcon className="h-3.5 w-3.5" />
-                Giá trị hiện tại: {alarm.current}
-              </div>
-            </article>
-          ))}
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                  <span className="inline-flex items-center gap-2 font-medium text-emerald-700">
+                    <CurrentIcon className="h-3.5 w-3.5" />
+                    ValueAlarm gần nhất:{" "}
+                    <strong>{liveValue ?? (alarm.current || "Chưa có gói từ gateway")}</strong>
+                  </span>
+                  {live?.meterId ? (
+                    <span className="text-xs text-slate-400">Meter {live.meterId}</span>
+                  ) : null}
+                  {live?.occurredAt ? (
+                    <span className="text-xs text-slate-400">{live.occurredAt}</span>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+          {alarms.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-400">
+              Chưa có cảnh báo tức thời. Thêm mã IDAlarm mà gateway đang gửi về.
+            </p>
+          ) : null}
         </div>
 
         <button
           type="button"
           onClick={addAlarm}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-[#f8fafc] py-3.5 text-sm font-semibold text-slate-600 hover:border-emerald-500 hover:bg-emerald-50/30 hover:text-emerald-700 transition-colors"
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-[#f8fafc] py-3.5 text-sm font-semibold text-slate-600 transition-colors hover:border-emerald-500 hover:bg-emerald-50/30 hover:text-emerald-700"
         >
           <span className="text-base leading-none text-emerald-600">+</span>
-          Thêm loại cảnh báo
+          Thêm cảnh báo tức thời (IDAlarm)
         </button>
       </section>
 

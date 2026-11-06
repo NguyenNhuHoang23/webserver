@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartDataTable, ChartTableToggle } from "@/components/client/ChartDataTable";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { ChartZoomSurface, CHART_ZOOM_HINT } from "@/components/client/ChartZoomSurface";
+import { zoomAround } from "@/components/client/chartZoom";
 import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, domainTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
@@ -67,6 +70,7 @@ export function PowerChart({
   const [hover, setHover] = useState<number | null>(null);
   const [viewWin, setViewWin] = useState({ start: 0, end: N - 1 });
   const [crosshair, setCrosshair] = useState(true);
+  const [showTable, setShowTable] = useState(false);
 
   const pSeries = useMemo(
     () =>
@@ -101,19 +105,8 @@ export function PowerChart({
   const pDomain = samples?.length ? paddedDomain(pSeries, [300, 400]) : ([300, 400] as [number, number]);
   const dpfDomain = samples?.length ? paddedDomain(dpfSeries, [-1, -0.98]) : ([-0.988, -1] as [number, number]);
 
-  const span = viewWin.end - viewWin.start;
-  const zoomIn = () => {
-    const next = Math.max(32, Math.floor(span * 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
-  const zoomOut = () => {
-    const next = Math.min(N - 1, Math.floor(span / 0.7));
-    const mid = Math.floor((viewWin.start + viewWin.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setViewWin({ start, end: Math.min(N - 1, start + next) });
-  };
+  const zoomIn = () => setViewWin((range) => zoomAround(range, hover, 0.7, N - 1, 32));
+  const zoomOut = () => setViewWin((range) => zoomAround(range, hover, 1 / 0.7, N - 1, 32));
 
   const timelineLabels = useMemo(
     () => Array.from({ length: N }, (_, index) => chartTimeLabel(samples, index, N, "full") || ""),
@@ -173,41 +166,61 @@ export function PowerChart({
             ))}
           </div>
         </div>
-
+        <ChartTableToggle active={showTable} onClick={() => setShowTable((v) => !v)} />
       </div>
 
       <div className="mb-2">
         <ChartTimeline compact labels={timelineLabels} values={timelineValues} range={viewWin} onRange={setViewWin} />
       </div>
 
-      <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-        <PowerPane
-          title={yLabel}
-          series={pSeries}
-          samples={samples}
-          viewWin={viewWin}
-          hover={crosshair ? hover : null}
-          onHover={setHover}
-          domain={pDomain}
-          ticks={samples?.length ? domainTicks(pDomain) : [300, 350, 400]}
-          formatTick={(v) => (Math.abs(pDomain[1] - pDomain[0]) < 20 ? v.toFixed(2) : String(Math.round(v)))}
-        />
-        <div className="h-px bg-slate-400" />
-        <PowerPane
-          title={botQty}
-          series={dpfSeries}
-          samples={samples}
-          viewWin={viewWin}
-          hover={crosshair ? hover : null}
-          onHover={setHover}
-          domain={dpfDomain}
-          ticks={samples?.length ? domainTicks(dpfDomain) : [-0.99, -0.995, -1]}
-          formatTick={(v) => (v === -1 ? "±1.000" : v.toFixed(3))}
-          axis
-        />
+      <div className="min-w-0 w-full">
+        {showTable ? (
+          <ChartDataTable
+            samples={samples}
+            length={N}
+            range={viewWin}
+            series={[
+              ...pSeries.map((item) => ({ ...item, digits: 2 })),
+              ...dpfSeries.map((item) => ({ ...item, digits: 3 })),
+            ]}
+          />
+        ) : (
+          <ChartZoomSurface
+            className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white"
+            range={viewWin}
+            onRange={setViewWin}
+            lastIndex={N - 1}
+            minSpan={32}
+          >
+            <PowerPane
+              title={yLabel}
+              series={pSeries}
+              samples={samples}
+              viewWin={viewWin}
+              hover={crosshair ? hover : null}
+              onHover={setHover}
+              domain={pDomain}
+              ticks={samples?.length ? domainTicks(pDomain) : [300, 350, 400]}
+              formatTick={(v) => (Math.abs(pDomain[1] - pDomain[0]) < 20 ? v.toFixed(2) : String(Math.round(v)))}
+            />
+            <div className="h-px bg-slate-400" />
+            <PowerPane
+              title={botQty}
+              series={dpfSeries}
+              samples={samples}
+              viewWin={viewWin}
+              hover={crosshair ? hover : null}
+              onHover={setHover}
+              domain={dpfDomain}
+              ticks={samples?.length ? domainTicks(dpfDomain) : [-0.99, -0.995, -1]}
+              formatTick={(v) => (v === -1 ? "±1.000" : v.toFixed(3))}
+              axis
+            />
+          </ChartZoomSurface>
+        )}
       </div>
 
-      <div className="mt-2.5 flex items-center justify-between gap-3">
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1">
           <ToolBtn label="Phóng to" onClick={zoomIn}>
             <ZoomIcon plus />
@@ -223,7 +236,7 @@ export function PowerChart({
           </ToolBtn>
         </div>
         <span className="text-[11px] text-slate-400">
-          Kỳ hiển thị: {getTimeFilterLabel(timeFilter)}
+          {showTable ? "Bảng ngày giờ · giá trị" : CHART_ZOOM_HINT} · {getTimeFilterLabel(timeFilter)}
         </span>
       </div>
     </section>

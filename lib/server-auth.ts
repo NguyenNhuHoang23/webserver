@@ -24,7 +24,7 @@ export async function getServerSession(): Promise<AuthSession | null> {
               COALESCE(a.username, c.username) AS username,
               COALESCE(a.email, c.email) AS email,
               COALESCE(a.username, c.display_name) AS displayName,
-              COALESCE(a.role, 'Khách hàng') AS role,
+              COALESCE(a.role, c.role, 'View') AS role,
               s.project_id AS projectId
          FROM auth_sessions s
          LEFT JOIN accounts a ON s.portal = 'admin' AND a.id = s.user_id
@@ -35,14 +35,36 @@ export async function getServerSession(): Promise<AuthSession | null> {
     );
     const row = rows[0];
     if (!row) return null;
+    let projectIds: string[] | undefined;
+    if (row.portal === "customer") {
+      const links = await queryRows<{ projectId: string }>(
+        `SELECT project_id AS projectId FROM customer_account_projects WHERE account_id = ?`,
+        [String(row.userId)],
+      );
+      projectIds = links.map((item) => String(item.projectId)).filter(Boolean);
+      if (!projectIds.length && row.projectId) projectIds = [String(row.projectId)];
+    }
+    const rawRole = String(row.role ?? "");
+    const role =
+      row.portal === "customer"
+        ? rawRole === "Admin"
+          ? "Admin"
+          : rawRole === "View" || rawRole === "Viewer"
+            ? "View"
+            : rawRole === "Edit" || rawRole === "Manage" || rawRole === "Editor"
+              ? "Edit"
+              : "View"
+        : rawRole;
+
     return {
       portal: row.portal,
       userId: String(row.userId),
       username: String(row.username ?? ""),
       displayName: String(row.displayName ?? row.username ?? ""),
       email: String(row.email ?? ""),
-      role: String(row.role ?? ""),
+      role,
       ...(row.projectId ? { projectId: String(row.projectId) } : {}),
+      ...(projectIds?.length ? { projectIds } : {}),
     };
   } catch (error) {
     console.error("getServerSession failed", error);

@@ -123,6 +123,18 @@ export async function loadProjectGatewaySamples(
   }
 }
 
+export async function loadProjectGatewayLatest(projectId: string): Promise<ProjectGatewaySample[]> {
+  try {
+    const params = new URLSearchParams({ projectId, summary: "latest" });
+    const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
+    if (!response.ok) return [];
+    const body = (await response.json()) as ProjectGatewaySample[];
+    return Array.isArray(body) ? body : [];
+  } catch {
+    return [];
+  }
+}
+
 export function valuesForKey(samples: ChartSample[] | undefined, key: string, length: number): number[] | null {
   if (!samples?.length || length < 1) return null;
   const nums = samples

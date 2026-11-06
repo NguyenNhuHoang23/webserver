@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartDataTable, ChartTableToggle } from "@/components/client/ChartDataTable";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
+import { ChartZoomSurface, CHART_ZOOM_HINT } from "@/components/client/ChartZoomSurface";
+import { zoomAround } from "@/components/client/chartZoom";
 import { useChartSize } from "@/components/client/useChartSize";
 import { chartTimeLabel, chartTimeTicks, paddedDomain, valuesForKey, type ChartSample } from "@/lib/gateway-series";
 import { getTimeFilterLabel, type TimeFilterValue } from "./TimeFilterBar";
@@ -45,21 +48,11 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
   const [agg] = useState<Agg>("AVG");
   const [hover, setHover] = useState<number | null>(null);
   const [crosshair, setCrosshair] = useState(true);
+  const [showTable, setShowTable] = useState(false);
   const [window, setWindow] = useState({ start: 0, end: N - 1 });
 
-  const span = window.end - window.start;
-  const zoomIn = () => {
-    const next = Math.max(40, Math.floor(span * 0.7));
-    const mid = Math.floor((window.start + window.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setWindow({ start, end: Math.min(N - 1, start + next) });
-  };
-  const zoomOut = () => {
-    const next = Math.min(N - 1, Math.floor(span / 0.7));
-    const mid = Math.floor((window.start + window.end) / 2);
-    const start = Math.max(0, mid - Math.floor(next / 2));
-    setWindow({ start, end: Math.min(N - 1, start + next) });
-  };
+  const zoomIn = () => setWindow((range) => zoomAround(range, hover, 0.7, N - 1, 40));
+  const zoomOut = () => setWindow((range) => zoomAround(range, hover, 1 / 0.7, N - 1, 40));
 
   const uSeries = useMemo(
     () =>
@@ -127,37 +120,57 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
             onChannel={(ch) => setICh((list) => toggleIn(list, ch))}
           />
         </div>
-
+        <ChartTableToggle active={showTable} onClick={() => setShowTable((v) => !v)} />
       </div>
 
       <div className="mb-2">
         <ChartTimeline compact labels={timelineLabels} values={timelineValues} range={window} onRange={setWindow} />
       </div>
 
-      <div className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white">
-        <WavePane
-          title={`${uQty} [V]`}
-          series={uSeries}
-          samples={samples}
-          window={window}
-          hover={crosshair ? hover : null}
-          onHover={setHover}
-          domain={uDomain}
-        />
-        <div className="h-2 border-y border-slate-300 bg-slate-200" />
-        <WavePane
-          title={`${iQty} [A]`}
-          series={iSeries}
-          samples={samples}
-          window={window}
-          hover={crosshair ? hover : null}
-          onHover={setHover}
-          domain={iDomain}
-          axis
-        />
+      <div className="min-w-0 w-full">
+        {showTable ? (
+          <ChartDataTable
+            samples={samples}
+            length={N}
+            range={window}
+            series={[
+              ...uSeries.map((item) => ({ ...item, name: `${item.name} [V]`, digits: 2 })),
+              ...iSeries.map((item) => ({ ...item, name: `${item.name} [A]`, digits: 2 })),
+            ]}
+          />
+        ) : (
+          <ChartZoomSurface
+            className="min-w-0 w-full overflow-hidden rounded-[2px] border border-slate-400 bg-white"
+            range={window}
+            onRange={setWindow}
+            lastIndex={N - 1}
+            minSpan={40}
+          >
+            <WavePane
+              title={`${uQty} [V]`}
+              series={uSeries}
+              samples={samples}
+              window={window}
+              hover={crosshair ? hover : null}
+              onHover={setHover}
+              domain={uDomain}
+            />
+            <div className="h-2 border-y border-slate-300 bg-slate-200" />
+            <WavePane
+              title={`${iQty} [A]`}
+              series={iSeries}
+              samples={samples}
+              window={window}
+              hover={crosshair ? hover : null}
+              onHover={setHover}
+              domain={iDomain}
+              axis
+            />
+          </ChartZoomSurface>
+        )}
       </div>
 
-      <div className="mt-2.5 flex items-center justify-between gap-3">
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1">
           <ToolBtn label="Phóng to" onClick={zoomIn}>
             <ZoomIcon plus />
@@ -173,7 +186,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
           </ToolBtn>
         </div>
         <span className="text-[11px] text-slate-400">
-          Kỳ hiển thị: {getTimeFilterLabel(timeFilter)}
+          {showTable ? "Bảng ngày giờ · giá trị" : CHART_ZOOM_HINT} · {getTimeFilterLabel(timeFilter)}
         </span>
       </div>
     </div>
