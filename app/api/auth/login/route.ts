@@ -55,15 +55,8 @@ async function findCustomerAccount(identifier: string, password: string, project
   const account = rows[0];
   if (!account) return null;
 
-  const rawRole = String(account.role ?? "View");
-  const role =
-    rawRole === "Admin"
-      ? "Admin"
-      : rawRole === "View" || rawRole === "Viewer"
-        ? "View"
-        : rawRole === "Edit" || rawRole === "Manage" || rawRole === "Editor"
-          ? "Edit"
-          : "View";
+  const rawRole = String(account.role ?? "Manage");
+  const role = rawRole === "Admin" ? "Admin" : "Manage";
   let projectIds = await loadCustomerProjectIds(String(account.id));
   if (!projectIds.length && account.projectId) {
     projectIds = [String(account.projectId)];

@@ -6,13 +6,15 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/useAuth";
 import { DEFAULT_PASSWORD } from "@/lib/auth";
 import {
-  hydrateCustomerAccounts,
-  normalizeProjectIds,
-  upsertCustomerAccount,
-  type CustomerAccount,
-} from "@/lib/customer-accounts";
+  ACCOUNT_ROLE_META,
+  ACCOUNT_ROLES,
+  hydrateAccounts,
+  todayLabel,
+  upsertAccount,
+  type Account,
+  type AccountRole,
+} from "@/lib/accounts";
 import { hasPermission } from "@/lib/permissions";
-import { hydrateProjects, type Project } from "@/lib/projects";
 
 export function AddAccountForm() {
   const router = useRouter();
@@ -21,26 +23,14 @@ export function AddAccountForm() {
   const searchParams = useSearchParams();
   const editingId = searchParams.get("id");
 
-  const [projects, setProjects] = useState<Project[]>([]);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [projectIds, setProjectIds] = useState<string[]>([]);
-  const [primaryProjectId, setPrimaryProjectId] = useState("");
+  const [role, setRole] = useState<AccountRole>("Nhân viên kỹ thuật");
   const [password, setPassword] = useState("");
   const [isEdit, setIsEdit] = useState(false);
-  const [existing, setExisting] = useState<CustomerAccount | null>(null);
+  const [existing, setExisting] = useState<Account | null>(null);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    void hydrateProjects().then((projectRows) => {
-      if (active) setProjects(projectRows);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!editingId) {
@@ -49,7 +39,7 @@ export function AddAccountForm() {
       return;
     }
     let active = true;
-    void hydrateCustomerAccounts().then((rows) => {
+    void hydrateAccounts().then((rows) => {
       if (!active) return;
       const found = rows.find((item) => item.id === editingId);
       if (!found) {
@@ -57,14 +47,11 @@ export function AddAccountForm() {
         setExisting(null);
         return;
       }
-      const normalized = normalizeProjectIds(found.projectId, found.projectIds);
       setIsEdit(true);
       setExisting(found);
       setUsername(found.username);
       setEmail(found.email);
-      setDisplayName(found.displayName);
-      setProjectIds(normalized.projectIds);
-      setPrimaryProjectId(normalized.projectId);
+      setRole(found.role);
       setPassword("");
     });
     return () => {
@@ -72,30 +59,13 @@ export function AddAccountForm() {
     };
   }, [editingId]);
 
-  function toggleProject(projectId: string) {
-    setProjectIds((list) => {
-      const next = list.includes(projectId) ? list.filter((id) => id !== projectId) : [...list, projectId];
-      setPrimaryProjectId((current) => {
-        if (next.includes(current)) return current;
-        return next[0] ?? "";
-      });
-      return next;
-    });
-  }
-
   function handleSubmit() {
-    if (!canManage) return;
+    if (!canManage || saving) return;
     setError("");
     const name = username.trim();
     const mail = email.trim();
-    const display = displayName.trim() || name;
-    const normalized = normalizeProjectIds(primaryProjectId, projectIds);
     if (!name || !mail) {
       setError("Vui lòng nhập tên đăng nhập và email.");
-      return;
-    }
-    if (!normalized.projectIds.length) {
-      setError("Chọn ít nhất một dự án gắn với Admin khách hàng này.");
       return;
     }
     if (!isEdit && !password.trim()) {
@@ -103,30 +73,30 @@ export function AddAccountForm() {
       return;
     }
 
-    void upsertCustomerAccount({
-      id: editingId && isEdit ? editingId : `cus-${Date.now()}`,
+    setSaving(true);
+    void upsertAccount({
+      id: editingId && isEdit ? editingId : `acc-${Date.now()}`,
       username: name,
       email: mail,
-      displayName: display,
-      role: "Admin",
-      projectId: normalized.projectId,
-      projectIds: normalized.projectIds,
-      password: password.trim() || existing?.password || DEFAULT_PASSWORD,
+      role,
+      createdAt: existing?.createdAt ?? todayLabel(),
+      password: password.trim() || (isEdit ? "" : DEFAULT_PASSWORD),
     })
       .then(() => router.push("/tai-khoan"))
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "Không lưu được tài khoản Admin.");
-      });
+        setError(err instanceof Error ? err.message : "Không lưu được tài khoản nội bộ.");
+      })
+      .finally(() => setSaving(false));
   }
 
   if (!canManage) {
     return (
       <div className="mx-auto max-w-[640px] p-6 lg:p-8">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
-          Chỉ Quản trị viên được thêm hoặc sửa tài khoản Admin khách hàng.
+          Chỉ Quản trị viên được thêm hoặc sửa tài khoản nội bộ công ty.
           <div className="mt-4">
-            <Link href="/" className="font-semibold text-emerald-700 hover:underline">
-              Về danh sách dự án
+            <Link href="/tai-khoan" className="font-semibold text-emerald-700 hover:underline">
+              Về danh sách tài khoản
             </Link>
           </div>
         </div>
@@ -135,14 +105,13 @@ export function AddAccountForm() {
   }
 
   return (
-    <div className="mx-auto max-w-[980px] p-6 lg:p-8">
+    <div className="mx-auto max-w-[720px] p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          {isEdit ? "Cập nhật tài khoản Admin" : "Thêm tài khoản Admin khách hàng"}
+          {isEdit ? "Cập nhật tài khoản nội bộ" : "Thêm tài khoản nội bộ"}
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          EMS chỉ tạo Admin ban đầu. Sau đó Admin khách tự tạo tài khoản nhánh (chỉ xem / xem & chỉnh sửa) trong Cấu
-          hình → Quản lý tài khoản.
+          Nhân sự công ty đăng nhập cổng quản trị EMS. Tài khoản khách hàng tạo trong dự án, không dùng form này.
         </p>
       </div>
 
@@ -154,18 +123,8 @@ export function AddAccountForm() {
         }}
       >
         <div className="mb-6">
-          <h2 className="text-[15px] font-semibold text-slate-800">Thông tin đăng nhập Admin</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Gắn các dự án thuộc khách hàng này. Admin dùng các dự án đó làm phạm vi quản lý tài khoản nhánh.
-          </p>
-        </div>
-
-        <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
-          <p className="text-[13px] font-semibold text-slate-900">Phân cấp: Admin</p>
-          <p className="mt-1 text-[12px] leading-5 text-slate-500">
-            Toàn quyền cấu hình và quản lý tài khoản nhánh. Tài khoản truy cập (Chỉ xem / Xem & chỉnh sửa) do Admin tạo
-            sau trên cổng khách hàng.
-          </p>
+          <h2 className="text-[15px] font-semibold text-slate-800">Thông tin đăng nhập</h2>
+          <p className="mt-1 text-sm text-slate-500">Vai trò quyết định quyền trên cổng quản trị.</p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -173,7 +132,7 @@ export function AddAccountForm() {
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="Ví dụ: admin_khach_a"
+              placeholder="Ví dụ: nguyenvana"
               className="input"
               required
             />
@@ -183,18 +142,24 @@ export function AddAccountForm() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="Ví dụ: admin@customer.com"
+              placeholder="Ví dụ: a.nguyen@congty.com"
               className="input"
               required
             />
           </Field>
-          <Field label="TÊN HIỂN THỊ">
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Ví dụ: Admin Khách A"
+          <Field label="VAI TRÒ">
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as AccountRole)}
               className="input"
-            />
+            >
+              {ACCOUNT_ROLES.map((item) => (
+                <option key={item} value={item}>
+                  {ACCOUNT_ROLE_META[item].label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">{ACCOUNT_ROLE_META[role].hint}</p>
           </Field>
           <Field label={isEdit ? "MẬT KHẨU MỚI (TÙY CHỌN)" : "MẬT KHẨU"}>
             <input
@@ -208,72 +173,6 @@ export function AddAccountForm() {
           </Field>
         </div>
 
-        <div className="mt-6">
-          <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <p className="text-[11px] font-semibold tracking-wide text-slate-500">DỰ ÁN CỦA KHÁCH HÀNG</p>
-              <p className="mt-0.5 text-[12px] text-slate-500">
-                Đã chọn {projectIds.length}/{projects.length} dự án
-              </p>
-            </div>
-            {projectIds.length > 0 ? (
-              <label className="flex items-center gap-2 text-[12px] text-slate-600">
-                <span>Dự án chính</span>
-                <select
-                  value={primaryProjectId}
-                  onChange={(e) => setPrimaryProjectId(e.target.value)}
-                  className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[12px] outline-none focus:border-emerald-500"
-                >
-                  {projectIds.map((id) => {
-                    const project = projects.find((item) => item.id === id);
-                    return (
-                      <option key={id} value={id}>
-                        {project?.name ?? id}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-            ) : null}
-          </div>
-
-          <div className="max-h-[320px] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-            {projects.length === 0 ? (
-              <p className="px-1 py-6 text-center text-sm text-slate-400">Chưa có dự án nào để gán.</p>
-            ) : (
-              <ul className="grid gap-2 sm:grid-cols-2">
-                {projects.map((project) => {
-                  const checked = projectIds.includes(project.id);
-                  return (
-                    <li key={project.id}>
-                      <label
-                        className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors ${
-                          checked
-                            ? "border-emerald-300 bg-emerald-50/80"
-                            : "border-slate-200 bg-white hover:border-slate-300"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleProject(project.id)}
-                          className="mt-1 accent-emerald-600"
-                        />
-                        <span className="min-w-0">
-                          <span className="block text-[13px] font-semibold text-slate-800">{project.name}</span>
-                          <span className="mt-0.5 block text-[11px] text-slate-500">
-                            {project.customer} · {project.id}
-                          </span>
-                        </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </div>
-
         {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
 
         <div className="mt-8 flex flex-wrap justify-end gap-3">
@@ -285,9 +184,10 @@ export function AddAccountForm() {
           </Link>
           <button
             type="submit"
-            className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-emerald-700"
+            disabled={saving}
+            className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-emerald-700 disabled:opacity-60"
           >
-            {isEdit ? "Cập nhật Admin" : "Lưu tài khoản Admin"}
+            {saving ? "Đang lưu..." : isEdit ? "Cập nhật tài khoản" : "Lưu tài khoản"}
           </button>
         </div>
       </form>

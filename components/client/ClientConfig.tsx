@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { useAuth } from "@/components/auth/useAuth";
 import { DEFAULT_PASSWORD } from "@/lib/auth-constants";
 import {
-  BRANCH_ACCOUNT_ROLES,
   CUSTOMER_ACCOUNT_ROLE_META,
   accountManagesProject,
   canEditClientConfig,
@@ -254,7 +253,7 @@ export function ClientConfig() {
     },
     accounts: {
       title: "Quản lý tài khoản",
-      hint: "Tài khoản nhánh truy cập ứng dụng: Chỉ xem hoặc Xem & chỉnh sửa thông số cấu hình",
+      hint: "Admin khách tạo tài khoản Manage để xem & chỉnh sửa cấu hình dự án",
     },
   }[tab];
 
@@ -397,7 +396,7 @@ export function ClientConfig() {
               canManage={canManageUsers}
               error={accountError}
               onAdding={setAdding}
-              onAdd={(row) => {
+              onSave={(row) => {
                 setAccountError("");
                 void upsertCustomerAccount(row)
                   .then((next) => {
@@ -409,7 +408,9 @@ export function ClientConfig() {
                     setAdding(false);
                   })
                   .catch((error) => {
-                    setAccountError(error instanceof Error ? error.message : "Không tạo được tài khoản.");
+                    setAccountError(
+                      error instanceof Error ? error.message : "Không lưu được tài khoản nhánh.",
+                    );
                   });
               }}
               onRemove={(id) => {
@@ -1154,7 +1155,7 @@ function AccountsPanel({
   canManage,
   error,
   onAdding,
-  onAdd,
+  onSave,
   onRemove,
 }: {
   projectId: string;
@@ -1163,103 +1164,128 @@ function AccountsPanel({
   canManage: boolean;
   error: string;
   onAdding: (v: boolean) => void;
-  onAdd: (row: CustomerAccount) => void;
+  onSave: (row: CustomerAccount) => void;
   onRemove: (id: string) => void;
 }) {
-  const [draft, setDraft] = useState({
+  const emptyDraft = {
+    id: "",
     username: "",
     fullName: "",
-    role: "View" as "View" | "Edit",
     email: "",
     password: "",
-  });
+  };
+  const [draft, setDraft] = useState(emptyDraft);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const formOpen = adding || Boolean(editingId);
+  const isEdit = Boolean(editingId);
+
+  function resetForm() {
+    setDraft(emptyDraft);
+    setEditingId(null);
+    onAdding(false);
+  }
+
+  function startCreate() {
+    setEditingId(null);
+    setDraft(emptyDraft);
+    onAdding(true);
+  }
+
+  function startEdit(row: CustomerAccount) {
+    onAdding(false);
+    setEditingId(row.id);
+    setDraft({
+      id: row.id,
+      username: row.username,
+      fullName: row.displayName,
+      email: row.email,
+      password: "",
+    });
+  }
+
+  function submitForm() {
+    if (!draft.username.trim() || !draft.email.trim()) return;
+    if (!isEdit && !draft.password.trim()) return;
+    onSave({
+      id: isEdit && editingId ? editingId : `cus-${Date.now()}`,
+      username: draft.username.trim(),
+      displayName: draft.fullName.trim() || draft.username.trim(),
+      email: draft.email.trim(),
+      role: "Manage",
+      projectId,
+      projectIds: [projectId],
+      password: draft.password.trim() || (isEdit ? "" : DEFAULT_PASSWORD),
+    });
+    resetForm();
+  }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-[15px] font-semibold text-slate-800">Tài khoản nhánh truy cập ứng dụng</h3>
+          <h3 className="text-[15px] font-semibold text-slate-800">Tài khoản Manage truy cập ứng dụng</h3>
           <p className="mt-0.5 text-[12px] text-slate-500">
-            Chỉ xem thông số, hoặc xem và chỉnh sửa trong phần cấu hình.
+            Admin khách tạo / sửa / xóa tài khoản Manage để xem &amp; chỉnh sửa cấu hình dự án này.
           </p>
         </div>
         {canManage ? (
           <button
             type="button"
-            onClick={() => onAdding(true)}
+            onClick={startCreate}
             className="inline-flex h-10 items-center gap-1.5 rounded-md bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors"
           >
             <UserPlusIcon />
-            + Thêm tài khoản nhánh
+            + Thêm tài khoản Manage
           </button>
         ) : (
           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
-            Chỉ Admin được thêm/xóa
+            Chỉ Admin được thêm/sửa/xóa
           </span>
         )}
       </div>
-      {adding && canManage ? (
-        <div className="mb-4 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 md:grid-cols-3 lg:grid-cols-6">
-          <input
-            value={draft.username}
-            onChange={(e) => setDraft({ ...draft, username: e.target.value })}
-            placeholder="Tên đăng nhập"
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
-          />
-          <input
-            value={draft.fullName}
-            onChange={(e) => setDraft({ ...draft, fullName: e.target.value })}
-            placeholder="Họ tên"
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
-          />
-          <input
-            value={draft.email}
-            onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-            placeholder="Email"
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
-          />
-          <select
-            value={draft.role}
-            onChange={(e) => setDraft({ ...draft, role: e.target.value as "View" | "Edit" })}
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
-          >
-            {BRANCH_ACCOUNT_ROLES.map((role) => (
-              <option key={role} value={role}>
-                {CUSTOMER_ACCOUNT_ROLE_META[role].label}
-              </option>
-            ))}
-          </select>
-          <input
-            type="password"
-            value={draft.password}
-            onChange={(e) => setDraft({ ...draft, password: e.target.value })}
-            placeholder="Mật khẩu"
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                if (!draft.username.trim() || !draft.email.trim() || !draft.password.trim()) return;
-                onAdd({
-                  id: `cus-${Date.now()}`,
-                  username: draft.username.trim(),
-                  displayName: draft.fullName.trim() || draft.username.trim(),
-                  email: draft.email.trim(),
-                  role: draft.role,
-                  projectId,
-                  projectIds: [projectId],
-                  password: draft.password.trim() || DEFAULT_PASSWORD,
-                });
-                setDraft({ username: "", fullName: "", role: "View", email: "", password: "" });
-              }}
-              className="h-9 rounded-md bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700 shadow-xs transition-colors"
-            >
-              Thêm
-            </button>
-            <button type="button" onClick={() => onAdding(false)} className="h-9 rounded-md border px-3 text-sm">
-              Hủy
-            </button>
+      {formOpen && canManage ? (
+        <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="mb-2 text-[12px] font-semibold text-slate-700">
+            {isEdit ? `Sửa tài khoản: ${draft.username || editingId}` : "Thêm tài khoản Manage mới"}
+          </p>
+          <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-5">
+            <input
+              value={draft.username}
+              onChange={(e) => setDraft({ ...draft, username: e.target.value })}
+              placeholder="Tên đăng nhập"
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
+            />
+            <input
+              value={draft.fullName}
+              onChange={(e) => setDraft({ ...draft, fullName: e.target.value })}
+              placeholder="Họ tên"
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
+            />
+            <input
+              value={draft.email}
+              onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+              placeholder="Email"
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
+            />
+            <input
+              type="password"
+              value={draft.password}
+              onChange={(e) => setDraft({ ...draft, password: e.target.value })}
+              placeholder={isEdit ? "Mật khẩu mới (tuỳ chọn)" : "Mật khẩu"}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={submitForm}
+                className="h-9 rounded-md bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700 shadow-xs transition-colors"
+              >
+                {isEdit ? "Lưu sửa" : "Thêm"}
+              </button>
+              <button type="button" onClick={resetForm} className="h-9 rounded-md border px-3 text-sm">
+                Hủy
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1269,7 +1295,7 @@ function AccountsPanel({
           <thead>
             <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
               <th className="py-2">TÊN NGƯỜI DÙNG / HỌ TÊN</th>
-              <th className="py-2">QUYỀN CẤU HÌNH</th>
+              <th className="py-2">PHÂN CẤP</th>
               <th className="py-2">EMAIL</th>
               <th className="py-2 text-right">THAO TÁC</th>
             </tr>
@@ -1277,19 +1303,19 @@ function AccountsPanel({
           <tbody>
             {accounts.map((row) => {
               const role = normalizeCustomerRole(row.role);
+              const editing = editingId === row.id;
               return (
-                <tr key={row.id} className="border-b border-slate-50">
+                <tr
+                  key={row.id}
+                  className={`border-b border-slate-50 ${editing ? "bg-emerald-50/40" : ""}`}
+                >
                   <td className="py-3">
                     <p className="font-medium text-slate-800">{row.username}</p>
                     <p className="text-[12px] text-slate-500">{row.displayName}</p>
                   </td>
                   <td className="py-3">
                     <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                        role === "Edit"
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
+                      className="inline-flex rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700"
                       title={CUSTOMER_ACCOUNT_ROLE_META[role].hint}
                     >
                       {CUSTOMER_ACCOUNT_ROLE_META[role].label}
@@ -1299,6 +1325,9 @@ function AccountsPanel({
                   <td className="py-3">
                     {canManage ? (
                       <span className="flex justify-end gap-1 text-slate-400">
+                        <IconBtn label="Sửa" onClick={() => startEdit(row)}>
+                          <PencilIcon />
+                        </IconBtn>
                         <IconBtn label="Xóa" onClick={() => onRemove(row.id)}>
                           <TrashIcon />
                         </IconBtn>
@@ -1313,7 +1342,7 @@ function AccountsPanel({
             {accounts.length === 0 ? (
               <tr>
                 <td colSpan={4} className="py-10 text-center text-[12px] text-slate-400">
-                  Chưa có tài khoản nhánh. Admin hãy thêm tài khoản Chỉ xem hoặc Xem &amp; chỉnh sửa.
+                  Chưa có tài khoản Manage. Admin hãy thêm tài khoản Manage cho dự án này.
                 </td>
               </tr>
             ) : null}

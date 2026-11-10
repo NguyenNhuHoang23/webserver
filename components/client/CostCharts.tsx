@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
 import { useChartSize } from "@/components/client/useChartSize";
+import { downloadChartExcel } from "@/components/client/ChartDataTable";
 import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
@@ -412,19 +413,12 @@ export function CostCharts() {
     setSelectedIds([]);
   }
 
-  const exportCsv = () => {
-    const periodName = getTimeFilterLabel(timeFilter);
-    const header = ["Thời điểm", ...selectedPoints.map((p) => `${p.code} ${p.name}`)].join(",");
-    const rows = primaryBars.map((bar, i) =>
-      [bar.label, ...series.map((s) => s.bars[i]?.dark ?? 0)].join(","),
+  const exportExcel = () => {
+    downloadChartExcel(
+      `chi-phi-${energy}`,
+      ["Thời điểm", ...selectedPoints.map((p) => `${p.code} ${p.name}`)],
+      primaryBars.map((bar, i) => [bar.label, ...series.map((s) => s.bars[i]?.dark ?? 0)]),
     );
-    const blob = new Blob([[`# Kỳ: ${periodName}`, header, ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `chi-phi-${energy}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -642,7 +636,7 @@ export function CostCharts() {
                 <IconBtn label="Tổng" active={showSum} onClick={() => setShowSum((v) => !v)}>
                   <SigmaIcon className="h-4 w-4" />
                 </IconBtn>
-                <IconBtn label="Xuất dữ liệu" onClick={exportCsv}>
+                <IconBtn label="Xuất file Excel" onClick={exportExcel}>
                   <SaveIcon className="h-4 w-4" />
                 </IconBtn>
                 <IconBtn label="Làm mới" onClick={() => setReloadKey((value) => value + 1)}>

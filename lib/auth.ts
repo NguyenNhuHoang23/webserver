@@ -122,12 +122,12 @@ export function canViewClientProject(session: AuthSession | null, projectId?: st
   return session.projectId === projectId;
 }
 
-/** Khách hàng được chỉnh sửa cấu hình dự án (Admin / Edit). */
+/** Khách hàng được chỉnh sửa cấu hình dự án (Admin / Manage). */
 export function canEditCustomerConfig(session: AuthSession | null | undefined) {
   if (!session) return false;
   if (session.portal === "admin") return true;
   if (session.portal !== "customer") return false;
-  return session.role === "Admin" || session.role === "Edit" || session.role === "Manage";
+  return session.role === "Admin" || session.role === "Manage";
 }
 
 export function getAuthRedirect(session: AuthSession | null, pathname: string): string | null {

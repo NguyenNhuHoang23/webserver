@@ -40,15 +40,7 @@ export async function GET() {
 
     const rawRole = String(session.role ?? "");
     const role =
-      session.portal === "customer"
-        ? rawRole === "Admin"
-          ? "Admin"
-          : rawRole === "View" || rawRole === "Viewer"
-            ? "View"
-            : rawRole === "Edit" || rawRole === "Manage" || rawRole === "Editor"
-              ? "Edit"
-              : "View"
-        : rawRole;
+      session.portal === "customer" ? (rawRole === "Admin" ? "Admin" : "Manage") : rawRole;
 
     return Response.json({
       session: {

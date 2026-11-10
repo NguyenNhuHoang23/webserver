@@ -179,6 +179,7 @@ export function PowerChart({
             samples={samples}
             length={N}
             range={viewWin}
+            exportFileName="cong-suat"
             series={[
               ...pSeries.map((item) => ({ ...item, digits: 2 })),
               ...dpfSeries.map((item) => ({ ...item, digits: 3 })),

@@ -10,23 +10,73 @@ export type ChartTableSeries = {
   digits?: number;
 };
 
+function escapeCsvCell(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+/** Xuất bảng dạng CSV UTF-8 (BOM) — mở được bằng Excel. */
+export function downloadChartExcel(
+  filename: string,
+  headers: string[],
+  rows: Array<Array<string | number>>,
+) {
+  const lines = [
+    headers.map((cell) => escapeCsvCell(String(cell))).join(","),
+    ...rows.map((row) => row.map((cell) => escapeCsvCell(String(cell))).join(",")),
+  ];
+  const blob = new Blob(["\uFEFF" + lines.join("\n")], {
+    type: "application/vnd.ms-excel;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const safeName = filename.replace(/[^\w\-À-ỹ.]+/gi, "_");
+  anchor.href = url;
+  anchor.download = safeName.endsWith(".xls") || safeName.endsWith(".csv") ? safeName : `${safeName}.xls`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function ChartDataTable({
   samples,
   length,
   range,
   series,
   emptyText = "Không có dữ liệu trong khoảng đang xem.",
+  exportFileName = "bang-so-lieu",
 }: {
   samples?: ChartSample[];
   length: number;
   range: { start: number; end: number };
   series: ChartTableSeries[];
   emptyText?: string;
+  /** Tên file khi xuất Excel (không cần đuôi). */
+  exportFileName?: string;
 }) {
   const start = Math.max(0, range.start);
   const end = Math.min(length - 1, range.end);
   const rows: number[] = [];
   for (let i = start; i <= end; i += 1) rows.push(i);
+
+  function exportExcel() {
+    if (!series.length || rows.length === 0) return;
+    const headers = ["Ngày giờ", ...series.map((item) => item.name)];
+    const data = rows.map((index) => {
+      const stamp =
+        chartTimeLabel(samples, index, length, "tooltip") ||
+        chartTimeLabel(samples, index, length, "full") ||
+        `#${index + 1}`;
+      return [
+        stamp,
+        ...series.map((item) => {
+          const value = item.values[index];
+          if (!Number.isFinite(value)) return "";
+          const digits = item.digits ?? (Math.abs(value) < 10 ? 3 : 2);
+          return value.toFixed(digits);
+        }),
+      ];
+    });
+    downloadChartExcel(exportFileName, headers, data);
+  }
 
   if (!series.length || rows.length === 0) {
     return (
@@ -38,6 +88,17 @@ export function ChartDataTable({
 
   return (
     <div className="overflow-hidden rounded-[2px] border border-slate-400 bg-white">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+        <p className="text-[11px] font-medium text-slate-500">Bảng số liệu · {rows.length} mẫu</p>
+        <button
+          type="button"
+          onClick={exportExcel}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-600 bg-white px-2.5 text-[12px] font-semibold text-emerald-700 shadow-xs transition-colors hover:bg-emerald-50"
+        >
+          <ExcelIcon />
+          Xuất file Excel
+        </button>
+      </div>
       <div className="max-h-[420px] overflow-auto">
         <table className="w-full min-w-[520px] border-collapse text-left text-[12px]">
           <thead className="sticky top-0 z-10 bg-slate-50">
@@ -83,6 +144,20 @@ export function ChartDataTable({
         Hiển thị {rows.length} mẫu trong khoảng đang xem
       </div>
     </div>
+  );
+}
+
+function ExcelIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden>
+      <path
+        d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M14 3v5h5M8.5 17l2.2-6h.6l2.2 6M9.2 14.5h3.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

@@ -133,6 +133,7 @@ export function UiWaveform({ timeFilter, samples }: { timeFilter: TimeFilterValu
             samples={samples}
             length={N}
             range={window}
+            exportFileName="dien-ap-dong-dien"
             series={[
               ...uSeries.map((item) => ({ ...item, name: `${item.name} [V]`, digits: 2 })),
               ...iSeries.map((item) => ({ ...item, name: `${item.name} [A]`, digits: 2 })),

@@ -141,6 +141,7 @@ export function UnbalanceChart({ samples }: { samples?: ChartSample[] }) {
             samples={samples}
             length={N}
             range={viewWin}
+            exportFileName="mat-can-bang"
             series={[
               ...uSeries.map((item) => ({ ...item, digits: 3 })),
               ...iSeries.map((item) => ({ ...item, digits: 3 })),

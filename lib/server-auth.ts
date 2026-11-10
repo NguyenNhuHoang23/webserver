@@ -46,15 +46,7 @@ export async function getServerSession(): Promise<AuthSession | null> {
     }
     const rawRole = String(row.role ?? "");
     const role =
-      row.portal === "customer"
-        ? rawRole === "Admin"
-          ? "Admin"
-          : rawRole === "View" || rawRole === "Viewer"
-            ? "View"
-            : rawRole === "Edit" || rawRole === "Manage" || rawRole === "Editor"
-              ? "Edit"
-              : "View"
-        : rawRole;
+      row.portal === "customer" ? (rawRole === "Admin" ? "Admin" : "Manage") : rawRole;
 
     return {
       portal: row.portal,

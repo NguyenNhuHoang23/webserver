@@ -307,7 +307,12 @@ export function ProjectList() {
                           <div className="space-y-1.5">
                             {admins.map((account) => (
                               <div key={account.id}>
-                                <p className="font-medium text-slate-800">{account.username}</p>
+                                <Link
+                                  href={`/tai-khoan-khach/chi-tiet?id=${account.id}`}
+                                  className="font-medium text-slate-800 hover:text-emerald-700"
+                                >
+                                  {account.username}
+                                </Link>
                                 <p className="text-[11px] text-slate-400">{account.displayName}</p>
                               </div>
                             ))}

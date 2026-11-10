@@ -5,11 +5,19 @@ import { hasPermission } from "@/lib/permissions";
 import { getServerSession, requirePermission } from "@/lib/server-auth";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
 
-function normalizeCustomerAccountRole(role: unknown): "Admin" | "View" | "Edit" {
+function normalizeCustomerAccountRole(role: unknown): "Admin" | "Manage" {
   if (role === "Admin") return "Admin";
-  if (role === "View" || role === "Viewer") return "View";
-  if (role === "Edit" || role === "Manage" || role === "Editor") return "Edit";
-  return "View";
+  // View/Edit cũ → Manage (phân cấp 2 quyền Admin | Manage)
+  if (
+    role === "Manage" ||
+    role === "Edit" ||
+    role === "Editor" ||
+    role === "View" ||
+    role === "Viewer"
+  ) {
+    return "Manage";
+  }
+  return "Manage";
 }
 
 type Params = { params: Promise<{ resource: string }> };
@@ -515,7 +523,7 @@ async function saveResource(resource: string, body: Row) {
   if (resource === "customer-accounts") {
     await ensureCustomerAccountProjects();
     const password = asString(body.password, "123456");
-    const role = normalizeCustomerAccountRole(body.role ?? "View");
+    const role = normalizeCustomerAccountRole(body.role ?? "Manage");
     const projectIds = Array.from(
       new Set(
         [
@@ -840,12 +848,13 @@ async function canMutateCustomerAccounts(body?: Row, deletingId?: string | null)
     if (body) {
       const role = normalizeCustomerAccountRole(body.role);
       if (role === "Admin") {
-        return { ok: false as const, message: "Admin khách chỉ tạo được tài khoản nhánh (Chỉ xem / Xem & chỉnh sửa)." };
+        return { ok: false as const, message: "Admin khách chỉ tạo được tài khoản Manage." };
       }
+      body.role = "Manage";
     }
     if (deletingId) {
       const rows = await queryRows<{ role: string }>(
-        `SELECT COALESCE(role, 'View') AS role FROM customer_accounts WHERE id = ? LIMIT 1`,
+        `SELECT COALESCE(role, 'Manage') AS role FROM customer_accounts WHERE id = ? LIMIT 1`,
         [deletingId],
       );
       if (normalizeCustomerAccountRole(rows[0]?.role) === "Admin") {
@@ -869,9 +878,9 @@ export async function POST(request: NextRequest, context: Params) {
     if (resource === "customer-accounts") {
       const gate = await canMutateCustomerAccounts(body);
       if (!gate.ok) return forbidden(gate.message);
-      // Staff EMS chỉ tạo/sửa Admin ban đầu.
+      // Staff EMS được chọn Admin hoặc Manage; Admin khách chỉ tạo Manage (đã ép ở gate).
       if (gate.session.portal === "admin") {
-        body.role = "Admin";
+        body.role = normalizeCustomerAccountRole(body.role ?? "Admin");
       }
     }
     return Response.json(await saveResource(resource, body));

@@ -88,6 +88,7 @@ export function FrequencyChart({
             samples={samples}
             length={N}
             range={viewWin}
+            exportFileName="tan-so"
             series={series.map((item) => ({ ...item, name: `${item.name} [Hz]`, digits: 3 }))}
           />
         ) : (

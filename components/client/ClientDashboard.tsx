@@ -15,20 +15,27 @@ import {
 import { registerToKwh } from "@/lib/meter-parameters";
 import { hydrateProjectSettings } from "@/lib/project-settings";
 import {
-  loadProjectGatewayDaily,
+  loadProjectGatewayDailyRange,
   loadProjectGatewayEnergySlots,
+  loadProjectGatewaySamples,
   type GatewayDailyPoint,
   type GatewayEnergySlot,
   type ProjectGatewaySample,
 } from "@/lib/gateway-series";
 import { formatStoredVietnam, vietnamFromStored } from "@/lib/vietnam-time";
-
-const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
-
-const YEAR_OPTIONS = [2024, 2025, 2026, 2027];
+import {
+  DEFAULT_TIME_FILTER,
+  getTimeFilterLabel,
+  getTimeFilterPeriods,
+  periodIndexForInstant,
+  shiftTimeFilter,
+  TimeFilterBar,
+  timeFilterSpan,
+  type TimeFilterValue,
+} from "@/components/client/TimeFilterBar";
 
 type DashboardAlert = { id: string; time: string; point: string; param: string; value: string };
-type EnergyPoint = { day: string; label: string; kwh: number; indexKwh: number; hasSample: boolean };
+type EnergyPoint = { day: string; kwh: number; hasSample: boolean };
 type StatusSlice = { label: string; value: number; color: string };
 
 const EMPTY_STATUS: StatusSlice[] = [
@@ -36,23 +43,6 @@ const EMPTY_STATUS: StatusSlice[] = [
   { label: "CẢNH BÁO", value: 0, color: "#ef8d3a" },
   { label: "NGOẠI TUYẾN", value: 0, color: "#9aa3af" },
 ];
-
-function pad2(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function daysInMonth(year: number, month: number) {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function monthRange(year: number, month: number) {
-  const last = daysInMonth(year, month);
-  return {
-    from: `${year}-${pad2(month)}-01`,
-    to: `${year}-${pad2(month)}-${pad2(last)}`,
-    last,
-  };
-}
 
 function formatKwh(value: number) {
   if (!Number.isFinite(value)) return "0.0";
@@ -104,52 +94,86 @@ function monthlyCostFromSlots(slots: GatewayEnergySlot[], prices: TouPrices) {
   return total;
 }
 
-function monthEnergySeries(rows: GatewayDailyPoint[], year: number, month: number): EnergyPoint[] {
-  const byDay = new Map<string, { kwh: number; indexKwh: number }>();
+function energySeriesFromDaily(filter: TimeFilterValue, rows: GatewayDailyPoint[]): EnergyPoint[] {
+  const periods = getTimeFilterPeriods(filter);
+  const kwh = periods.map(() => 0);
+  const hasSample = periods.map(() => false);
   for (const row of rows) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day)) continue;
+    const index = periodIndexForInstant(filter, `${row.day}T00:00:00`, periods.length);
+    if (index < 0) continue;
     const firstKwh = registerToKwh(Number(row.firstWh));
     const lastKwh = registerToKwh(Number(row.lastWh));
     if (!Number.isFinite(firstKwh) || !Number.isFinite(lastKwh)) continue;
-    const consumed = Math.max(0, lastKwh - firstKwh);
-    const current = byDay.get(row.day) ?? { kwh: 0, indexKwh: 0 };
-    byDay.set(row.day, {
-      kwh: current.kwh + consumed,
-      indexKwh: current.indexKwh + lastKwh,
-    });
+    kwh[index] += Math.max(0, lastKwh - firstKwh);
+    hasSample[index] = true;
   }
-  const last = daysInMonth(year, month);
-  return Array.from({ length: last }, (_, index) => {
-    const day = index + 1;
-    const iso = `${year}-${pad2(month)}-${pad2(day)}`;
-    const point = byDay.get(iso);
-    return {
-      day: iso,
-      label: pad2(day),
-      kwh: point?.kwh ?? 0,
-      indexKwh: point?.indexKwh ?? 0,
-      hasSample: Boolean(point),
-    };
-  });
+  return periods.map((period, index) => ({
+    day: period.label,
+    kwh: kwh[index],
+    hasSample: hasSample[index],
+  }));
+}
+
+function energySeriesFromSamples(filter: TimeFilterValue, samples: ProjectGatewaySample[]): EnergyPoint[] {
+  const periods = getTimeFilterPeriods(filter);
+  const byMeterPeriod = new Map<string, number[]>();
+  for (const sample of samples) {
+    const wh = sample.values.EPaed;
+    if (typeof wh !== "number" || !Number.isFinite(wh)) continue;
+    const index = periodIndexForInstant(filter, sample.at, periods.length);
+    if (index < 0) continue;
+    const key = `${sample.meterPointId}::${index}`;
+    const list = byMeterPeriod.get(key) ?? [];
+    list.push(wh);
+    byMeterPeriod.set(key, list);
+  }
+  const kwh = periods.map(() => 0);
+  const hasSample = periods.map(() => false);
+  for (const [key, list] of byMeterPeriod) {
+    const index = Number(key.split("::")[1]);
+    if (!Number.isInteger(index) || index < 0 || index >= periods.length) continue;
+    hasSample[index] = true;
+    if (list.length >= 2) {
+      kwh[index] += Math.max(0, (list[list.length - 1] - list[0]) / 1000);
+    }
+  }
+  return periods.map((period, index) => ({
+    day: period.label,
+    kwh: kwh[index],
+    hasSample: hasSample[index],
+  }));
+}
+
+function totalKwhFromDaily(rows: GatewayDailyPoint[]) {
+  let total = 0;
+  for (const row of rows) {
+    const firstKwh = registerToKwh(Number(row.firstWh));
+    const lastKwh = registerToKwh(Number(row.lastWh));
+    if (!Number.isFinite(firstKwh) || !Number.isFinite(lastKwh)) continue;
+    total += Math.max(0, lastKwh - firstKwh);
+  }
+  return total;
 }
 
 export function ClientDashboard({ project }: { project: Project }) {
-  const now = new Date();
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
+  const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(DEFAULT_TIME_FILTER);
   const [dailyRows, setDailyRows] = useState<GatewayDailyPoint[]>([]);
-  const [monthSlots, setMonthSlots] = useState<GatewayEnergySlot[]>([]);
+  const [gatewaySamples, setGatewaySamples] = useState<ProjectGatewaySample[]>([]);
+  const [periodSlots, setPeriodSlots] = useState<GatewayEnergySlot[]>([]);
   const [latest, setLatest] = useState<ProjectGatewaySample | null>(null);
   const [touPrices, setTouPrices] = useState<TouPrices>(() => resolveTouPrices("kv-under-6").prices);
   const [deviceStatus, setDeviceStatus] = useState(EMPTY_STATUS);
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
   const [co2, setCo2] = useState(0);
   const [ghgSourceCount, setGhgSourceCount] = useState(0);
-  const [prevMonthKwh, setPrevMonthKwh] = useState<number | null>(null);
-  const alignedMonth = useRef(false);
+  const [prevPeriodKwh, setPrevPeriodKwh] = useState<number | null>(null);
+  const alignedFilter = useRef(false);
+  const filterTouched = useRef(false);
 
   useEffect(() => {
-    alignedMonth.current = false;
+    alignedFilter.current = false;
+    filterTouched.current = false;
   }, [project.id]);
 
   useEffect(() => {
@@ -161,44 +185,46 @@ export function ClientDashboard({ project }: { project: Project }) {
         hydrateClientMeters(project.id),
         hydrateGhgSources(project.id),
         hydrateProjectSettings(project.id),
-      ]).then(([alertEvents, devices, meters, sources, settings]) => {
-        if (!active) return;
-        const saved = settings.costConfig as {
-          electricity?: {
-            voltageLevel?: string;
-            prices?: Partial<Record<"normal" | "off" | "peak", string>>;
-          };
-        } | undefined;
-        setTouPrices(resolveTouPrices(saved?.electricity?.voltageLevel, saved?.electricity?.prices).prices);
-        const deviceIds = new Set(meters.map((meter) => meter.deviceId).filter(Boolean));
-        const projectDevices = devices.filter((device) => deviceIds.has(device.id));
-        const sourceDevices = projectDevices.length ? projectDevices : devices;
-        const counts = sourceDevices.reduce(
-          (result, device) => {
-            if (device.status === "offline") result.offline += 1;
-            else if (device.status === "maintenance") result.warning += 1;
-            else result.normal += 1;
-            return result;
-          },
-          { normal: 0, warning: 0, offline: 0 },
-        );
-        setDeviceStatus([
-          { label: "BÌNH THƯỜNG", value: counts.normal, color: "#43a047" },
-          { label: "CẢNH BÁO", value: counts.warning, color: "#ef8d3a" },
-          { label: "NGOẠI TUYẾN", value: counts.offline, color: "#9aa3af" },
-        ]);
-        setAlerts(
-          alertEvents.slice(0, 12).map((event: AlertEvent) => ({
-            id: event.id ?? `${event.occurredAt}-${event.meterPointId}-${event.parameter}`,
-            time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
-            point: event.pointName ?? event.meterPointId ?? "--",
-            param: event.parameter,
-            value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
-          })),
-        );
-        setGhgSourceCount(sources.length);
-        setCo2(sources.reduce((sum, source) => sum + (source.tons ?? 0), 0));
-      }).catch(() => undefined);
+      ])
+        .then(([alertEvents, devices, meters, sources, settings]) => {
+          if (!active) return;
+          const saved = settings.costConfig as {
+            electricity?: {
+              voltageLevel?: string;
+              prices?: Partial<Record<"normal" | "off" | "peak", string>>;
+            };
+          } | undefined;
+          setTouPrices(resolveTouPrices(saved?.electricity?.voltageLevel, saved?.electricity?.prices).prices);
+          const deviceIds = new Set(meters.map((meter) => meter.deviceId).filter(Boolean));
+          const projectDevices = devices.filter((device) => deviceIds.has(device.id));
+          const sourceDevices = projectDevices.length ? projectDevices : devices;
+          const counts = sourceDevices.reduce(
+            (result, device) => {
+              if (device.status === "offline") result.offline += 1;
+              else if (device.status === "maintenance") result.warning += 1;
+              else result.normal += 1;
+              return result;
+            },
+            { normal: 0, warning: 0, offline: 0 },
+          );
+          setDeviceStatus([
+            { label: "BÌNH THƯỜNG", value: counts.normal, color: "#43a047" },
+            { label: "CẢNH BÁO", value: counts.warning, color: "#ef8d3a" },
+            { label: "NGOẠI TUYẾN", value: counts.offline, color: "#9aa3af" },
+          ]);
+          setAlerts(
+            alertEvents.slice(0, 12).map((event: AlertEvent) => ({
+              id: event.id ?? `${event.occurredAt}-${event.meterPointId}-${event.parameter}`,
+              time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
+              point: event.pointName ?? event.meterPointId ?? "--",
+              param: event.parameter,
+              value: `${event.value}${event.unit ? ` ${event.unit}` : ""}`,
+            })),
+          );
+          setGhgSourceCount(sources.length);
+          setCo2(sources.reduce((sum, source) => sum + (source.tons ?? 0), 0));
+        })
+        .catch(() => undefined);
     };
     reload();
     window.addEventListener("ems-alert-events-changed", reload);
@@ -212,65 +238,118 @@ export function ClientDashboard({ project }: { project: Project }) {
 
   useEffect(() => {
     let active = true;
-    const { from, to } = monthRange(year, month);
-    const prevMonth = month === 1 ? 12 : month - 1;
-    const prevYear = month === 1 ? year - 1 : year;
-    void Promise.all([
-      loadProjectGatewayDaily(project.id, year, month),
-      loadProjectGatewayEnergySlots(project.id, from, to),
-      loadProjectGatewayDaily(project.id, prevYear, prevMonth),
-    ]).then(([summary, slots, prevSummary]) => {
+    const span = timeFilterSpan(timeFilter);
+    const prevFilter = shiftTimeFilter(timeFilter, -1);
+    const prevSpan = timeFilterSpan(prevFilter);
+
+    const loadCurrent = span.hourly
+      ? Promise.all([
+          loadProjectGatewaySamples(project.id, { from: span.from, to: span.to, limit: 6000 }),
+          loadProjectGatewayEnergySlots(project.id, span.from, span.to),
+          loadProjectGatewayDailyRange(project.id, span.from, span.to),
+        ]).then(([samples, slots, summary]) => ({
+          samples,
+          slots: slots.slots,
+          days: summary.days,
+          latest: slots.latest ?? summary.latest,
+        }))
+      : Promise.all([
+          loadProjectGatewayDailyRange(project.id, span.from, span.to),
+          loadProjectGatewayEnergySlots(project.id, span.from, span.to),
+          loadProjectGatewaySamples(project.id, { from: span.from, to: span.to, limit: 800 }),
+        ]).then(([summary, slots, samples]) => ({
+          samples,
+          slots: slots.slots,
+          days: summary.days,
+          latest: summary.latest ?? slots.latest,
+        }));
+
+    const loadPrev =
+      timeFilter.mode === "month"
+        ? loadProjectGatewayDailyRange(project.id, prevSpan.from, prevSpan.to).then((summary) =>
+            summary.days.length ? totalKwhFromDaily(summary.days) : null,
+          )
+        : Promise.resolve(null);
+
+    void Promise.all([loadCurrent, loadPrev]).then(([current, prevTotal]) => {
       if (!active) return;
-      setDailyRows(summary.days);
-      setLatest(summary.latest);
-      setMonthSlots(slots.slots);
-      const prevSeries = monthEnergySeries(prevSummary.days, prevYear, prevMonth);
-      const prevTotal = prevSeries.reduce((sum, item) => sum + item.kwh, 0);
-      setPrevMonthKwh(prevSummary.days.length ? prevTotal : null);
+      setGatewaySamples(current.samples);
+      setDailyRows(current.days);
+      setPeriodSlots(current.slots);
+      setLatest(current.latest);
+      setPrevPeriodKwh(prevTotal);
+      if (filterTouched.current || alignedFilter.current || !current.latest) return;
+      const parts = vietnamFromStored(current.latest.at);
+      alignedFilter.current = true;
+      if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) return;
+      setTimeFilter((currentFilter) => ({
+        ...currentFilter,
+        mode: "month",
+        month: parts.monthKey,
+        year: parts.year,
+        date: parts.date,
+      }));
     });
+
     return () => {
       active = false;
     };
-  }, [project.id, year, month]);
+  }, [project.id, timeFilter]);
 
-  useEffect(() => {
-    if (alignedMonth.current || !latest) return;
-    const stamp = vietnamFromStored(latest.at);
-    if (!stamp) return;
-    alignedMonth.current = true;
-    if (stamp.year !== year || stamp.month !== month) {
-      setYear(stamp.year);
-      setMonth(stamp.month);
-    }
-  }, [latest, year, month]);
-
-  const energySeries = useMemo(() => monthEnergySeries(dailyRows, year, month), [dailyRows, year, month]);
+  const span = useMemo(() => timeFilterSpan(timeFilter), [timeFilter]);
+  const energySeries = useMemo(
+    () =>
+      span.hourly
+        ? energySeriesFromSamples(timeFilter, gatewaySamples)
+        : energySeriesFromDaily(timeFilter, dailyRows),
+    [span.hourly, timeFilter, gatewaySamples, dailyRows],
+  );
   const consumptionTotal = energySeries.reduce((sum, item) => sum + item.kwh, 0);
-  const showIndex = dailyRows.length > 0 && consumptionTotal === 0;
-  const chartSeries = energySeries.map((item) => ({
-    day: item.label,
-    kwh: showIndex ? item.indexKwh : item.kwh,
-    hasSample: item.hasSample,
-  }));
+  const showIndex =
+    !span.hourly && dailyRows.length > 0 && consumptionTotal === 0;
+  const chartSeries = useMemo(() => {
+    if (!showIndex) {
+      return energySeries.map((item) => ({
+        day: item.day,
+        kwh: item.kwh,
+        hasSample: item.hasSample,
+      }));
+    }
+    const periods = getTimeFilterPeriods(timeFilter);
+    const indexKwh = periods.map(() => 0);
+    const hasSample = periods.map(() => false);
+    for (const row of dailyRows) {
+      const index = periodIndexForInstant(timeFilter, `${row.day}T00:00:00`, periods.length);
+      if (index < 0) continue;
+      indexKwh[index] += registerToKwh(Number(row.lastWh));
+      hasSample[index] = true;
+    }
+    return periods.map((period, index) => ({
+      day: period.label,
+      kwh: indexKwh[index],
+      hasSample: hasSample[index],
+    }));
+  }, [showIndex, energySeries, dailyRows, timeFilter]);
   const sampledValues = chartSeries.filter((item) => item.hasSample).map((item) => item.kwh);
   const energyMax = sampledValues.length ? Math.max(...sampledValues) : 0;
   const energyMin = sampledValues.length ? Math.min(...sampledValues) : 0;
-  const monthCost = useMemo(() => monthlyCostFromSlots(monthSlots, touPrices), [monthSlots, touPrices]);
-  const monthCostThousands = monthCost / 1000;
+  const periodCost = useMemo(() => monthlyCostFromSlots(periodSlots, touPrices), [periodSlots, touPrices]);
+  const periodCostThousands = periodCost / 1000;
+  const periodLabel = getTimeFilterLabel(timeFilter);
   const energyMom = useMemo(() => {
-    if (prevMonthKwh == null || !Number.isFinite(prevMonthKwh)) return null;
-    const delta = consumptionTotal - prevMonthKwh;
-    const pct = prevMonthKwh > 0 ? (delta / prevMonthKwh) * 100 : null;
-    return { delta, pct, prev: prevMonthKwh };
-  }, [consumptionTotal, prevMonthKwh]);
+    if (timeFilter.mode !== "month" || prevPeriodKwh == null || !Number.isFinite(prevPeriodKwh)) return null;
+    const delta = consumptionTotal - prevPeriodKwh;
+    const pct = prevPeriodKwh > 0 ? (delta / prevPeriodKwh) * 100 : null;
+    return { delta, pct, prev: prevPeriodKwh };
+  }, [timeFilter.mode, consumptionTotal, prevPeriodKwh]);
 
   const energyMomCaption =
     energyMom == null
-      ? dailyRows.length
-        ? `Tổng tháng ${pad2(month)}/${year}: ${formatKwh(consumptionTotal)} kWh`
-        : `Chưa có số liệu tháng ${pad2(month)}/${year}`
+      ? dailyRows.length || gatewaySamples.length
+        ? `Tổng ${periodLabel}: ${formatKwh(consumptionTotal)} kWh`
+        : `Chưa có số liệu · ${periodLabel}`
       : energyMom.pct == null
-        ? `Tháng trước chưa có tiêu thụ · Tháng này ${formatKwh(consumptionTotal)} kWh`
+        ? `Kỳ trước chưa có tiêu thụ · Kỳ này ${formatKwh(consumptionTotal)} kWh`
         : `${energyMom.delta >= 0 ? "Tăng" : "Giảm"} ${formatKwh(Math.abs(energyMom.delta))} kWh (${Math.abs(energyMom.pct).toFixed(1)}%) so với tháng trước (${formatKwh(energyMom.prev)} kWh)`;
 
   const co2Caption =
@@ -288,14 +367,15 @@ export function ClientDashboard({ project }: { project: Project }) {
           <h1 className="text-[28px] font-bold tracking-tight text-slate-800">
             {project.customer}
           </h1>
+          <p className="mt-1 text-[13px] text-slate-500">Kỳ xem: {periodLabel}</p>
         </div>
-        <MonthPicker
-          month={month}
-          year={year}
-          onChange={(nextMonth, nextYear) => {
-            setMonth(nextMonth);
-            setYear(nextYear);
+        <TimeFilterBar
+          value={timeFilter}
+          onChange={(next) => {
+            filterTouched.current = true;
+            setTimeFilter(next);
           }}
+          className="justify-end"
         />
       </div>
 
@@ -316,7 +396,7 @@ export function ClientDashboard({ project }: { project: Project }) {
             </p>
             {showIndex ? (
               <p className="w-full text-[12px] text-amber-700">
-                Công tơ không tăng trong tháng — cột đang hiện chỉ số EPaed cuối ngày để thấy các ngày có bản tin.
+                Công tơ không tăng trong kỳ — cột đang hiện chỉ số EPaed cuối kỳ để thấy các mốc có bản tin.
               </p>
             ) : null}
           </div>
@@ -346,16 +426,16 @@ export function ClientDashboard({ project }: { project: Project }) {
         <DashboardCard title="CHI PHÍ">
           <DonutChart
             color="#1e5f8a"
-            value={monthCostThousands.toLocaleString("vi-VN", {
-              maximumFractionDigits: monthCostThousands > 0 && monthCostThousands < 10 ? 2 : 0,
+            value={periodCostThousands.toLocaleString("vi-VN", {
+              maximumFractionDigits: periodCostThousands > 0 && periodCostThousands < 10 ? 2 : 0,
             })}
             unit="nghìn VNĐ"
             caption={
-              monthCost > 0
-                ? `Tổng tháng ${pad2(month)}/${year}: ${formatVnd(monthCost)} VND (trước VAT)`
-                : monthSlots.length > 0
-                  ? `Tháng ${pad2(month)}/${year}: có bản tin nhưng EPaed không tăng → 0 VND`
-                  : `Chưa có số liệu chi phí tháng ${pad2(month)}/${year}`
+              periodCost > 0
+                ? `Tổng ${periodLabel}: ${formatVnd(periodCost)} VND (trước VAT)`
+                : periodSlots.length > 0
+                  ? `${periodLabel}: có bản tin nhưng EPaed không tăng → 0 VND`
+                  : `Chưa có số liệu chi phí · ${periodLabel}`
             }
           />
         </DashboardCard>
@@ -368,101 +448,6 @@ export function ClientDashboard({ project }: { project: Project }) {
           <AlertLogTable rows={alerts} />
         </DashboardCard>
       </div>
-    </div>
-  );
-}
-
-function MonthPicker({
-  month,
-  year,
-  onChange,
-}: {
-  month: number;
-  year: number;
-  onChange: (month: number, year: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  const label = `Tháng ${String(month).padStart(2, "0")}/${year}`;
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:bg-slate-50"
-      >
-        <CalendarIcon className="h-4 w-4 text-slate-400" />
-        {label}
-        <span className="text-[10px] text-slate-400">▾</span>
-      </button>
-
-      {open ? (
-        <div className="absolute top-11 right-0 z-20 w-[220px] rounded-md border border-slate-200 bg-white p-3 shadow-md">
-          <div className="mb-2 flex items-center gap-2">
-            <select
-              value={year}
-              onChange={(e) => onChange(month, Number(e.target.value))}
-              className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-emerald-500"
-              aria-label="Năm"
-            >
-              {YEAR_OPTIONS.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </div>
-          <ul role="listbox" aria-label="Chọn tháng" className="grid grid-cols-3 gap-1.5">
-            {MONTH_OPTIONS.map((value) => {
-              const active = value === month;
-              return (
-                <li key={value}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    onClick={() => {
-                      onChange(value, year);
-                      setOpen(false);
-                    }}
-                    className={`h-9 w-full rounded-md text-[12px] font-medium transition-colors ${
-                      active
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "bg-slate-50 text-slate-600 hover:bg-slate-100"
-                    }`}
-                  >
-                    {String(value).padStart(2, "0")}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -530,24 +515,24 @@ function EnergyChart({ data }: { data: { day: string; kwh: number; hasSample?: b
 
   return (
     <div className="flex h-[250px] items-end gap-[2px] overflow-x-auto pb-1">
-      {data.map((item) => {
+      {data.map((item, index) => {
         const heightPct = item.kwh > 0 ? Math.max((item.kwh / max) * 100, 4) : 0;
         return (
-          <div key={item.day} className="flex min-w-[10px] flex-1 flex-col items-center">
+          <div key={`${item.day}-${index}`} className="flex min-w-[10px] flex-1 flex-col items-center">
             <div className="flex h-[210px] w-full items-end justify-center">
               {heightPct > 0 ? (
                 <div
                   className="w-[7px] rounded-t-sm bg-emerald-600 transition-all hover:bg-emerald-500"
                   style={{ height: `${heightPct}%` }}
-                  title={`Ngày ${item.day}: ${formatKwh(item.kwh)} kWh`}
+                  title={`${item.day}: ${formatKwh(item.kwh)} kWh`}
                 />
               ) : (
                 <div
                   className={`h-[2px] w-[7px] rounded-sm ${item.hasSample ? "bg-emerald-300" : "bg-slate-200"}`}
                   title={
                     item.hasSample
-                      ? `Ngày ${item.day}: có bản tin, sản lượng 0 kWh`
-                      : `Ngày ${item.day}: không có bản tin`
+                      ? `${item.day}: có bản tin, sản lượng 0 kWh`
+                      : `${item.day}: không có bản tin`
                   }
                 />
               )}
@@ -789,15 +774,6 @@ function ExpandIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function CalendarIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M8 3.5V7M16 3.5V7M4 10h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }

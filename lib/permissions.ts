@@ -44,7 +44,14 @@ export function isAdminRole(session: AuthSession | null | undefined) {
 
 /** Quyền tối thiểu để mở từng khu vực quản trị. */
 export function permissionForPath(pathname: string): Permission | null {
-  if (pathname === "/tai-khoan" || pathname.startsWith("/tai-khoan/")) return "manageUsers";
+  if (
+    pathname === "/tai-khoan" ||
+    pathname.startsWith("/tai-khoan/") ||
+    pathname === "/tai-khoan-khach" ||
+    pathname.startsWith("/tai-khoan-khach/")
+  ) {
+    return "manageUsers";
+  }
   if (
     pathname === "/tao-du-an" ||
     pathname.startsWith("/tao-du-an/") ||

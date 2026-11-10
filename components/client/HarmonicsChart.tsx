@@ -291,6 +291,7 @@ export function HarmonicsChart({ samples }: { samples?: ChartSample[] }) {
               samples={samples}
               length={N}
               range={viewWin}
+              exportFileName="song-hai"
               series={[
                 ...thduSeries.map((item) => ({ ...item, digits: 2 })),
                 ...thdiSeries.map((item) => ({ ...item, digits: 2 })),

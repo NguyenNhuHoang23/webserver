@@ -28,12 +28,13 @@ const navGroups: {
         icon: DeviceIcon,
         permission: "manageDevices",
       },
-      {
-        href: "/gateway",
-        label: "Gateway Server",
-        icon: GatewayIcon,
-        permission: "manageGateway",
-      },
+      // Tạm ẩn — chưa cần Gateway Server trên menu (API /api/gateway vẫn giữ cho dữ liệu realtime)
+      // {
+      //   href: "/gateway",
+      //   label: "Gateway Server",
+      //   icon: GatewayIcon,
+      //   permission: "manageGateway",
+      // },
     ],
   },
   {
@@ -48,6 +49,12 @@ const navGroups: {
       {
         href: "/tai-khoan",
         label: "Quản trị người dùng",
+        icon: AccountIcon,
+        permission: "manageUsers",
+      },
+      {
+        href: "/tai-khoan-khach",
+        label: "Tài khoản khách hàng",
         icon: AccountIcon,
         permission: "manageUsers",
       },
@@ -434,15 +441,15 @@ function AlertConfigIcon({ className }: { className?: string }) {
   );
 }
 
-function GatewayIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="8" width="18" height="8" rx="2" />
-      <path d="M7 12h.01M12 12h.01M17 12h.01" strokeWidth="2.4" />
-      <path d="M12 8V4M8 16v3M16 16v3" />
-    </svg>
-  );
-}
+// function GatewayIcon({ className }: { className?: string }) {
+//   return (
+//     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+//       <rect x="3" y="8" width="18" height="8" rx="2" />
+//       <path d="M7 12h.01M12 12h.01M17 12h.01" strokeWidth="2.4" />
+//       <path d="M12 8V4M8 16v3M16 16v3" />
+//     </svg>
+//   );
+// }
 
 function DeviceIcon({ className }: { className?: string }) {
   return (

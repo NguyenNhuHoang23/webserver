@@ -3,12 +3,17 @@ import type { AuthSession } from "@/lib/auth";
 import { dbFetch, emitDbChange } from "@/lib/db-client";
 import { loadProjects } from "@/lib/projects";
 
-/** Admin do EMS tạo ban đầu; View/Edit là tài khoản nhánh do Admin khách tạo. */
-export type CustomerAccountRole = "Admin" | "View" | "Edit";
+/**
+ * Phân cấp tài khoản khách (2 quyền theo yêu cầu):
+ * - Admin: quản trị khách hàng, tạo/xóa tài khoản Manage, toàn quyền cấu hình
+ * - Manage: xem & chỉnh sửa cấu hình trong phạm vi dự án được gán
+ */
+export type CustomerAccountRole = "Admin" | "Manage";
 
-export const CUSTOMER_ACCOUNT_ROLES: CustomerAccountRole[] = ["Admin", "View", "Edit"];
+export const CUSTOMER_ACCOUNT_ROLES: CustomerAccountRole[] = ["Admin", "Manage"];
 
-export const BRANCH_ACCOUNT_ROLES: Array<"View" | "Edit"> = ["View", "Edit"];
+/** Tài khoản nhánh do Admin khách tạo — chỉ Manage. */
+export const BRANCH_ACCOUNT_ROLES: Array<"Manage"> = ["Manage"];
 
 export const CUSTOMER_ACCOUNT_ROLE_META: Record<
   CustomerAccountRole,
@@ -16,15 +21,11 @@ export const CUSTOMER_ACCOUNT_ROLE_META: Record<
 > = {
   Admin: {
     label: "Admin",
-    hint: "Tài khoản quản lý khách hàng: tạo/xóa tài khoản nhánh; toàn quyền cấu hình.",
+    hint: "Quản trị khách hàng: tạo/xóa tài khoản Manage; toàn quyền cấu hình dự án được gán.",
   },
-  View: {
-    label: "Chỉ xem",
-    hint: "Tài khoản nhánh: xem thông số trong phần cấu hình, không chỉnh sửa.",
-  },
-  Edit: {
-    label: "Xem & chỉnh sửa",
-    hint: "Tài khoản nhánh: xem và chỉnh sửa thông số trong phần cấu hình.",
+  Manage: {
+    label: "Manage",
+    hint: "Xem và chỉnh sửa thông số cấu hình trong dự án được gán; không quản lý tài khoản khác.",
   },
 };
 
@@ -43,28 +44,35 @@ export type CustomerAccount = {
 
 export function normalizeCustomerRole(role: unknown): CustomerAccountRole {
   if (role === "Admin") return "Admin";
-  if (role === "View" || role === "Viewer" || role === "Người xem") return "View";
-  // Manage (cũ) = quyền chỉnh sửa cấu hình
-  if (role === "Edit" || role === "Manage" || role === "Editor") return "Edit";
-  return "View";
+  // Manage + các tên cũ (Edit / View) gom về Manage theo phân cấp 2 quyền
+  if (
+    role === "Manage" ||
+    role === "Edit" ||
+    role === "Editor" ||
+    role === "View" ||
+    role === "Viewer" ||
+    role === "Người xem"
+  ) {
+    return "Manage";
+  }
+  return "Manage";
 }
 
-export function isBranchRole(role: unknown): role is "View" | "Edit" {
-  const normalized = normalizeCustomerRole(role);
-  return normalized === "View" || normalized === "Edit";
+export function isBranchRole(role: unknown): role is "Manage" {
+  return normalizeCustomerRole(role) === "Manage";
 }
 
 export function canManageBranchAccounts(session: AuthSession | null | undefined) {
   return session?.portal === "customer" && normalizeCustomerRole(session.role) === "Admin";
 }
 
-/** Admin hoặc Edit được lưu cấu hình; View chỉ xem. Staff admin portal luôn được. */
+/** Admin hoặc Manage được lưu cấu hình. Staff admin portal luôn được. */
 export function canEditClientConfig(session: AuthSession | null | undefined) {
   if (!session) return false;
   if (session.portal === "admin") return true;
   if (session.portal !== "customer") return false;
   const role = normalizeCustomerRole(session.role);
-  return role === "Admin" || role === "Edit";
+  return role === "Admin" || role === "Manage";
 }
 
 /** Tài khoản Admin của cùng khách hàng với dự án (theo dự án chính / dự án được gán). */
@@ -185,7 +193,12 @@ export async function upsertCustomerAccount(account: CustomerAccount) {
   const accounts = loadCustomerAccounts();
   const exists = accounts.some((item) => item.id === normalized.id);
   const next = exists
-    ? accounts.map((item) => (item.id === normalized.id ? { ...item, ...normalized } : item))
+    ? accounts.map((item) => {
+        if (item.id !== normalized.id) return item;
+        const merged = { ...item, ...normalized };
+        if (!normalized.password) merged.password = item.password;
+        return merged;
+      })
     : [normalized, ...accounts];
   customerAccountsCache = next;
   emitDbChange("customer-accounts");

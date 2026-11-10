@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChartTimeline } from "@/components/client/ChartTimeline";
 import { useChartSize } from "@/components/client/useChartSize";
+import { downloadChartExcel } from "@/components/client/ChartDataTable";
 import {
   DEFAULT_TIME_FILTER,
   TimeFilterBar,
@@ -783,31 +784,56 @@ export function EnergyCharts() {
                     />
                   </div>
                 ) : (
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full min-w-[480px] text-left text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-[11px] text-slate-400">
-                          <th className="py-2 font-medium">Thời điểm</th>
-                          {selectedPoints.map((p) => (
-                            <th key={p.id} className="py-2 font-medium" style={{ color: p.color }}>
-                              ({p.code}) {p.name}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleBars.map((point, rowIdx) => (
-                          <tr key={point.minute} className="border-b border-slate-50 text-slate-600">
-                            <td className="py-1.5 font-medium">{point.label}</td>
-                            {multiBars.map((series) => (
-                              <td key={series.point.id} className="py-1.5">
-                                {formatKwh(series.bars[range.start + rowIdx]?.kwh ?? 0)} {consumptionUnit}
-                              </td>
+                  <div className="mt-4 overflow-hidden rounded-[2px] border border-slate-300">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-[11px] font-medium text-slate-500">
+                        Bảng số liệu · {visibleBars.length} mẫu
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          downloadChartExcel(
+                            `dien-nang-${energy}`,
+                            ["Thời điểm", ...selectedPoints.map((p) => `(${p.code}) ${p.name}`)],
+                            visibleBars.map((point, rowIdx) => [
+                              point.label,
+                              ...multiBars.map((series) =>
+                                formatKwh(series.bars[range.start + rowIdx]?.kwh ?? 0),
+                              ),
+                            ]),
+                          );
+                        }}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-600 bg-white px-2.5 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-50"
+                      >
+                        Xuất file Excel
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[480px] text-left text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-[11px] text-slate-400">
+                            <th className="py-2 pl-3 font-medium">Thời điểm</th>
+                            {selectedPoints.map((p) => (
+                              <th key={p.id} className="py-2 font-medium" style={{ color: p.color }}>
+                                ({p.code}) {p.name}
+                              </th>
                             ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {visibleBars.map((point, rowIdx) => (
+                            <tr key={point.minute} className="border-b border-slate-50 text-slate-600">
+                              <td className="py-1.5 pl-3 font-medium">{point.label}</td>
+                              {multiBars.map((series) => (
+                                <td key={series.point.id} className="py-1.5">
+                                  {formatKwh(series.bars[range.start + rowIdx]?.kwh ?? 0)} {consumptionUnit}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </article>
@@ -940,31 +966,52 @@ export function EnergyCharts() {
                 </div>
               </div>
             ) : (
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[480px] text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-[11px] text-slate-400">
-                      <th className="py-2 font-medium">Thời điểm</th>
-                      {selectedPoints.map((p) => (
-                        <th key={p.id} className="py-2 font-medium" style={{ color: p.color }}>
-                          ({p.code}) {p.name}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Array.from({ length: 25 }, (_, i) => (
-                      <tr key={i} className="border-b border-slate-50 text-slate-600">
-                        <td className="py-1.5">{String(i).padStart(2, "0")}:00</td>
-                        {values.map((row, s) => (
-                          <td key={selectedPoints[s]?.id ?? s} className="py-1.5">
-                            {row[i].toFixed(1)}
-                          </td>
+              <div className="mt-4 overflow-hidden rounded-[2px] border border-slate-300">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-[11px] font-medium text-slate-500">Bảng số liệu · 25 mẫu</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadChartExcel(
+                        `bieu-do-${metric}`,
+                        ["Thời điểm", ...selectedPoints.map((p) => `(${p.code}) ${p.name}`)],
+                        Array.from({ length: 25 }, (_, i) => [
+                          `${String(i).padStart(2, "0")}:00`,
+                          ...values.map((row) => row[i].toFixed(1)),
+                        ]),
+                      );
+                    }}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-600 bg-white px-2.5 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-50"
+                  >
+                    Xuất file Excel
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[480px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[11px] text-slate-400">
+                        <th className="py-2 pl-3 font-medium">Thời điểm</th>
+                        {selectedPoints.map((p) => (
+                          <th key={p.id} className="py-2 font-medium" style={{ color: p.color }}>
+                            ({p.code}) {p.name}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: 25 }, (_, i) => (
+                        <tr key={i} className="border-b border-slate-50 text-slate-600">
+                          <td className="py-1.5 pl-3">{String(i).padStart(2, "0")}:00</td>
+                          {values.map((row, s) => (
+                            <td key={selectedPoints[s]?.id ?? s} className="py-1.5">
+                              {row[i].toFixed(1)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
