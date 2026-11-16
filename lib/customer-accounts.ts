@@ -1,19 +1,22 @@
+import { normalizeAccountRole } from "@/lib/accounts";
 import { DEFAULT_PASSWORD } from "@/lib/auth-constants";
 import type { AuthSession } from "@/lib/auth";
 import { dbFetch, emitDbChange } from "@/lib/db-client";
 import { loadProjects } from "@/lib/projects";
 
 /**
- * Phân cấp tài khoản khách (2 quyền theo yêu cầu):
- * - Admin: quản trị khách hàng, tạo/xóa tài khoản Manage, toàn quyền cấu hình
- * - Manage: xem & chỉnh sửa cấu hình trong phạm vi dự án được gán
+ * Phân cấp tài khoản khách:
+ * - Admin: tài khoản ban đầu khi lập dự án; thêm/sửa/xóa tài khoản nhánh; toàn quyền cấu hình
+ * - View: Chỉ xem — khóa sửa/lưu cấu hình
+ * - Edit: Xem và chỉnh sửa — được chỉnh thông số cấu hình
  */
-export type CustomerAccountRole = "Admin" | "Manage";
+export type CustomerAccountRole = "Admin" | "View" | "Edit";
+export type BranchAccountRole = "View" | "Edit";
 
-export const CUSTOMER_ACCOUNT_ROLES: CustomerAccountRole[] = ["Admin", "Manage"];
+export const CUSTOMER_ACCOUNT_ROLES: CustomerAccountRole[] = ["Admin", "View", "Edit"];
 
-/** Tài khoản nhánh do Admin khách tạo — chỉ Manage. */
-export const BRANCH_ACCOUNT_ROLES: Array<"Manage"> = ["Manage"];
+/** Tài khoản nhánh do Admin khách tạo — đúng 2 lựa chọn. */
+export const BRANCH_ACCOUNT_ROLES: BranchAccountRole[] = ["View", "Edit"];
 
 export const CUSTOMER_ACCOUNT_ROLE_META: Record<
   CustomerAccountRole,
@@ -21,11 +24,15 @@ export const CUSTOMER_ACCOUNT_ROLE_META: Record<
 > = {
   Admin: {
     label: "Admin",
-    hint: "Quản trị khách hàng: tạo/xóa tài khoản Manage; toàn quyền cấu hình dự án được gán.",
+    hint: "Tài khoản khách chính: tạo/sửa/xóa tài khoản nhánh; toàn quyền cấu hình dự án được gán.",
   },
-  Manage: {
-    label: "Manage",
-    hint: "Xem và chỉnh sửa thông số cấu hình trong dự án được gán; không quản lý tài khoản khác.",
+  View: {
+    label: "Chỉ xem",
+    hint: "Xem dữ liệu dự án; khóa / không cho sửa và lưu cấu hình.",
+  },
+  Edit: {
+    label: "Xem và chỉnh sửa",
+    hint: "Được phép chỉnh sửa các thông số cấu hình trong dự án được gán.",
   },
 };
 
@@ -44,35 +51,46 @@ export type CustomerAccount = {
 
 export function normalizeCustomerRole(role: unknown): CustomerAccountRole {
   if (role === "Admin") return "Admin";
-  // Manage + các tên cũ (Edit / View) gom về Manage theo phân cấp 2 quyền
   if (
-    role === "Manage" ||
-    role === "Edit" ||
-    role === "Editor" ||
     role === "View" ||
     role === "Viewer" ||
-    role === "Người xem"
+    role === "Người xem" ||
+    role === "Chỉ xem"
   ) {
-    return "Manage";
+    return "View";
   }
-  return "Manage";
+  // Manage cũ / Edit → Xem và chỉnh sửa
+  if (
+    role === "Edit" ||
+    role === "Editor" ||
+    role === "Manage" ||
+    role === "Xem và chỉnh sửa"
+  ) {
+    return "Edit";
+  }
+  return "Edit";
 }
 
-export function isBranchRole(role: unknown): role is "Manage" {
-  return normalizeCustomerRole(role) === "Manage";
+export function isBranchRole(role: unknown): role is BranchAccountRole {
+  const normalized = normalizeCustomerRole(role);
+  return normalized === "View" || normalized === "Edit";
 }
 
 export function canManageBranchAccounts(session: AuthSession | null | undefined) {
   return session?.portal === "customer" && normalizeCustomerRole(session.role) === "Admin";
 }
 
-/** Admin hoặc Manage được lưu cấu hình. Staff admin portal luôn được. */
-export function canEditClientConfig(session: AuthSession | null | undefined) {
+/** Admin / Edit được lưu cấu hình; View bị khóa. Staff theo phạm vi dự án. */
+export function canEditClientConfig(session: AuthSession | null | undefined, projectId?: string) {
   if (!session) return false;
-  if (session.portal === "admin") return true;
+  if (session.portal === "admin") {
+    if (normalizeAccountRole(session.role) === "Admin") return true;
+    if (!projectId) return normalizeAccountRole(session.role) === "Manage";
+    return Boolean(session.projectIds?.includes(projectId));
+  }
   if (session.portal !== "customer") return false;
   const role = normalizeCustomerRole(session.role);
-  return role === "Admin" || role === "Manage";
+  return role === "Admin" || role === "Edit";
 }
 
 /** Tài khoản Admin của cùng khách hàng với dự án (theo dự án chính / dự án được gán). */

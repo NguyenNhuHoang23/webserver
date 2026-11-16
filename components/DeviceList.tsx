@@ -87,7 +87,7 @@ export function DeviceList() {
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Danh mục trống mặc định — chỉ thêm loại đồng hồ thực tế đang có / sẽ lắp. Không dùng model ví dụ.
+            Danh mục trống mặc định — chỉ thêm loại đồng hồ thực tế (ví dụ PM2230 khớp gateway). Không dùng model mẫu như PM5000.
           </p>
         </div>
         <Link
@@ -340,8 +340,9 @@ export function DeviceList() {
         <div className="flex items-start gap-2.5 border-t border-emerald-100 bg-emerald-50/40 px-5 py-3 text-xs text-emerald-800">
           <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
           <p>
-            <strong className="font-semibold">Lưu ý:</strong> Chỉ thêm đúng loại đồng hồ thực tế. Category phải trùng{" "}
-            <code className="text-[11px]">meterModel</code> từ gateway; khi thêm điểm đo trong dự án chỉ cần chọn loại đã khai báo.
+            <strong className="font-semibold">Lưu ý:</strong> Chỉ thêm đúng loại đồng hồ thực tế đang lắp (PM2230).
+            Category phải trùng <code className="text-[11px]">meterModel</code> từ gateway; không dùng placeholder PM5000.
+            Khi thêm điểm đo trong dự án chỉ cần chọn loại đã khai báo.
           </p>
         </div>
       </section>

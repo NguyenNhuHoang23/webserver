@@ -1,23 +1,25 @@
 import type { PoolConnection } from "mysql2/promise";
 import { NextRequest } from "next/server";
+import { normalizeAccountRole } from "@/lib/accounts";
 import { getProjectsListTelemetry } from "@/lib/gateway-store";
 import { hasPermission } from "@/lib/permissions";
 import { getServerSession, requirePermission } from "@/lib/server-auth";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
 
-function normalizeCustomerAccountRole(role: unknown): "Admin" | "Manage" {
+function normalizeCustomerAccountRole(role: unknown): "Admin" | "View" | "Edit" {
   if (role === "Admin") return "Admin";
-  // View/Edit cũ → Manage (phân cấp 2 quyền Admin | Manage)
-  if (
-    role === "Manage" ||
-    role === "Edit" ||
-    role === "Editor" ||
-    role === "View" ||
-    role === "Viewer"
-  ) {
-    return "Manage";
+  if (role === "View" || role === "Viewer" || role === "Người xem" || role === "Chỉ xem") {
+    return "View";
   }
-  return "Manage";
+  // Manage cũ / Edit → Xem và chỉnh sửa
+  if (role === "Edit" || role === "Editor" || role === "Manage" || role === "Xem và chỉnh sửa") {
+    return "Edit";
+  }
+  return "Edit";
+}
+
+function normalizeStaffAccountRole(role: unknown): "Admin" | "Manage" {
+  return normalizeAccountRole(role);
 }
 
 type Params = { params: Promise<{ resource: string }> };
@@ -71,7 +73,82 @@ let deviceColumnsReady: Promise<void> | null = null;
 let ghgColumnsReady: Promise<void> | null = null;
 let projectSettingsReady: Promise<void> | null = null;
 let customerAccountProjectsReady: Promise<void> | null = null;
+let accountProjectsReady: Promise<void> | null = null;
 let diagramDisplaysReady: Promise<void> | null = null;
+let alertDeliveryColumnsReady: Promise<void> | null = null;
+
+function normalizeAlertDeliveryStatus(value: unknown, allowNull = false) {
+  if (value === "sent" || value === "failed" || value === "pending") return value;
+  return allowNull ? null : "pending";
+}
+
+function ensureAlertDeliveryColumns() {
+  if (!alertDeliveryColumnsReady) {
+    alertDeliveryColumnsReady = (async () => {
+      await emsDb
+        .query(
+          `ALTER TABLE alert_events
+             ADD COLUMN IF NOT EXISTS email_status VARCHAR(20) NULL AFTER acknowledged_at`,
+        )
+        .catch(() => undefined);
+      await emsDb
+        .query(
+          `ALTER TABLE alert_events
+             ADD COLUMN IF NOT EXISTS zalo_status VARCHAR(20) NULL AFTER email_status`,
+        )
+        .catch(() => undefined);
+      await emsDb
+        .query(
+          `ALTER TABLE alert_events
+             ADD COLUMN IF NOT EXISTS telegram_status VARCHAR(20) NULL AFTER zalo_status`,
+        )
+        .catch(() => undefined);
+    })().catch((error) => {
+      alertDeliveryColumnsReady = null;
+      console.error("alert delivery columns migrate failed", error);
+      throw error;
+    });
+  }
+  return alertDeliveryColumnsReady;
+}
+
+function ensureAccountProjects() {
+  if (!accountProjectsReady) {
+    accountProjectsReady = migrateAccountProjects().catch((error) => {
+      accountProjectsReady = null;
+      console.error("account_projects migrate failed", error);
+      throw error;
+    });
+  }
+  return accountProjectsReady;
+}
+
+async function migrateAccountProjects() {
+  await emsDb.query(
+    `CREATE TABLE IF NOT EXISTS account_projects (
+       account_id VARCHAR(64) NOT NULL,
+       project_id VARCHAR(64) NOT NULL,
+       PRIMARY KEY (account_id, project_id),
+       KEY idx_account_projects_project (project_id),
+       CONSTRAINT fk_account_projects_account
+         FOREIGN KEY (account_id) REFERENCES accounts (id)
+         ON DELETE CASCADE ON UPDATE CASCADE,
+       CONSTRAINT fk_account_projects_project
+         FOREIGN KEY (project_id) REFERENCES projects (id)
+         ON DELETE CASCADE ON UPDATE CASCADE
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  );
+  // Chuẩn hóa role cũ → Admin | Manage
+  await emsDb
+    .execute(`UPDATE accounts SET role = 'Admin' WHERE role IN ('Admin', 'Quản trị viên')`)
+    .catch(() => undefined);
+  await emsDb
+    .execute(
+      `UPDATE accounts SET role = 'Manage'
+        WHERE role NOT IN ('Admin', 'Quản trị viên')`,
+    )
+    .catch(() => undefined);
+}
 
 function ensureDiagramDisplaysColumn() {
   if (!diagramDisplaysReady) {
@@ -285,10 +362,26 @@ async function getProjects(projectId?: string) {
 async function getResource(resource: string, request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("projectId") || undefined;
   if (resource === "accounts") {
-    return queryRows<Row>(
+    await ensureAccountProjects();
+    const accounts = await queryRows<Row>(
       `SELECT id, username, email, role, DATE_FORMAT(created_at, '%d/%m/%Y') AS createdAt
          FROM accounts ORDER BY created_at DESC, id`,
     );
+    if (!accounts.length) return [];
+    const links = await queryRows<{ accountId: string; projectId: string }>(
+      `SELECT account_id AS accountId, project_id AS projectId FROM account_projects`,
+    );
+    const byAccount = new Map<string, string[]>();
+    for (const link of links) {
+      const list = byAccount.get(String(link.accountId)) ?? [];
+      list.push(String(link.projectId));
+      byAccount.set(String(link.accountId), list);
+    }
+    return accounts.map((account) => {
+      const role = normalizeStaffAccountRole(account.role);
+      const projectIds = role === "Admin" ? [] : (byAccount.get(String(account.id)) ?? []);
+      return { ...account, role, projectIds };
+    });
   }
   if (resource === "customer-accounts") {
     await ensureCustomerAccountProjects();
@@ -331,7 +424,26 @@ async function getResource(resource: string, request: NextRequest) {
       );
     });
   }
-  if (resource === "projects") return getProjects(projectId);
+  if (resource === "projects") {
+    const projects = (await getProjects(projectId)) as Row[];
+    const session = await getServerSession();
+    if (
+      session?.portal === "admin" &&
+      normalizeStaffAccountRole(session.role) === "Manage"
+    ) {
+      await ensureAccountProjects();
+      const allowed = new Set(session.projectIds ?? []);
+      if (!allowed.size && session.userId) {
+        const links = await queryRows<{ projectId: string }>(
+          `SELECT project_id AS projectId FROM account_projects WHERE account_id = ?`,
+          [session.userId],
+        );
+        for (const link of links) allowed.add(String(link.projectId));
+      }
+      return projects.filter((project) => allowed.has(String(project.id)));
+    }
+    return projects;
+  }
   if (resource === "project-telemetry") return getProjectsListTelemetry();
   if (resource === "devices") {
     await ensureDeviceColumns();
@@ -410,6 +522,7 @@ async function getResource(resource: string, request: NextRequest) {
     }));
   }
   if (resource === "alert-events") {
+    await ensureAlertDeliveryColumns();
     const rows = await queryRows<Row>(
       `SELECT a.id, a.project_id AS projectId, a.meter_point_id AS meterPointId,
               DATE_FORMAT(a.occurred_at, '%Y-%m-%d %H:%i:%s') AS occurredAt,
@@ -417,6 +530,9 @@ async function getResource(resource: string, request: NextRequest) {
               a.category, a.message, a.threshold_value AS thresholdValue,
               a.acknowledged_by AS acknowledgedBy,
               DATE_FORMAT(a.acknowledged_at, '%Y-%m-%d %H:%i:%s') AS acknowledgedAt,
+              a.email_status AS emailStatus,
+              a.zalo_status AS zaloStatus,
+              a.telegram_status AS telegramStatus,
               p.code AS pointCode, p.name AS pointName, p.utility
          FROM alert_events a
          LEFT JOIN meter_points p ON p.id = a.meter_point_id
@@ -424,11 +540,20 @@ async function getResource(resource: string, request: NextRequest) {
         ORDER BY occurred_at DESC`,
       projectId ? [projectId] : [],
     );
-    return rows.map((row) => ({
-      ...row,
-      value: asNumber(row.value),
-      thresholdValue: row.thresholdValue == null ? undefined : asNumber(row.thresholdValue),
-    }));
+    return rows.map((row) => {
+      const emailStatus = normalizeAlertDeliveryStatus(row.emailStatus);
+      const zaloStatus = normalizeAlertDeliveryStatus(row.zaloStatus);
+      const telegramStatus = normalizeAlertDeliveryStatus(row.telegramStatus);
+      return {
+        ...row,
+        value: asNumber(row.value),
+        thresholdValue: row.thresholdValue == null ? undefined : asNumber(row.thresholdValue),
+        emailStatus,
+        zaloStatus,
+        telegramStatus,
+        delivery: { email: emailStatus, zalo: zaloStatus, telegram: telegramStatus },
+      };
+    });
   }
   if (resource === "meter-readings") {
     const meterPointId = request.nextUrl.searchParams.get("meterPointId") || undefined;
@@ -506,24 +631,48 @@ async function transaction<T>(work: (connection: PoolConnection) => Promise<T>) 
 
 async function saveResource(resource: string, body: Row) {
   if (resource === "accounts") {
+    await ensureAccountProjects();
     const items = Array.isArray(body.items) ? body.items : [body];
     for (const item of items as Row[]) {
       const password = asString(item.password, "123456");
-      await emsDb.execute(
-        `INSERT INTO accounts (id, username, email, role, password_hash, created_at)
-         VALUES (?, ?, ?, ?, SHA2(?, 256), STR_TO_DATE(?, '%d/%m/%Y'))
-         ON DUPLICATE KEY UPDATE username=VALUES(username), email=VALUES(email),
-           role=VALUES(role), created_at=VALUES(created_at),
-           password_hash=IF(? = '', password_hash, SHA2(?, 256))`,
-        [item.id, item.username, item.email, item.role, password, item.createdAt, password, password],
-      );
+      const role = normalizeStaffAccountRole(item.role);
+      const projectIds =
+        role === "Admin"
+          ? []
+          : Array.from(
+              new Set(
+                (Array.isArray(item.projectIds) ? item.projectIds.map(String) : [])
+                  .map((id) => id.trim())
+                  .filter(Boolean),
+              ),
+            );
+      if (role === "Manage" && !projectIds.length) {
+        throw new Error("Manage nội bộ cần chọn ít nhất một dự án được gán quyền.");
+      }
+      await transaction(async (connection) => {
+        await connection.execute(
+          `INSERT INTO accounts (id, username, email, role, password_hash, created_at)
+           VALUES (?, ?, ?, ?, SHA2(?, 256), STR_TO_DATE(?, '%d/%m/%Y'))
+           ON DUPLICATE KEY UPDATE username=VALUES(username), email=VALUES(email),
+             role=VALUES(role), created_at=VALUES(created_at),
+             password_hash=IF(? = '', password_hash, SHA2(?, 256))`,
+          [item.id, item.username, item.email, role, password, item.createdAt, password, password],
+        );
+        await connection.execute("DELETE FROM account_projects WHERE account_id = ?", [item.id]);
+        for (const projectId of projectIds) {
+          await connection.execute(
+            "INSERT INTO account_projects (account_id, project_id) VALUES (?, ?)",
+            [item.id, projectId],
+          );
+        }
+      });
     }
     return getResource(resource, new NextRequest("http://localhost/api/ems/accounts"));
   }
   if (resource === "customer-accounts") {
     await ensureCustomerAccountProjects();
     const password = asString(body.password, "123456");
-    const role = normalizeCustomerAccountRole(body.role ?? "Manage");
+    const role = normalizeCustomerAccountRole(body.role ?? "Edit");
     const projectIds = Array.from(
       new Set(
         [
@@ -608,6 +757,22 @@ async function saveResource(resource: string, body: Row) {
         );
       }
     });
+    // Manage nội bộ tạo dự án mới → tự gán vào phạm vi của họ
+    const session = await getServerSession();
+    if (
+      session?.portal === "admin" &&
+      normalizeStaffAccountRole(session.role) === "Manage" &&
+      session.userId &&
+      body.id
+    ) {
+      await ensureAccountProjects();
+      await emsDb
+        .execute("INSERT IGNORE INTO account_projects (account_id, project_id) VALUES (?, ?)", [
+          session.userId,
+          body.id,
+        ])
+        .catch(() => undefined);
+    }
     return getProjects(asString(body.id));
   }
   if (resource === "devices") {
@@ -732,18 +897,46 @@ async function saveResource(resource: string, body: Row) {
     return getResource(resource, new NextRequest(`http://localhost/api/ems/ghg-sources?projectId=${encodeURIComponent(projectId)}`));
   }
   if (resource === "alert-events") {
+    await ensureAlertDeliveryColumns();
     const id = asString(body.id);
     const projectId = asString(body.projectId);
     if (!id || !projectId) throw new Error("id and projectId are required");
+    const delivery =
+      body.delivery && typeof body.delivery === "object" && !Array.isArray(body.delivery)
+        ? (body.delivery as Row)
+        : {};
+    const emailStatus = normalizeAlertDeliveryStatus(
+      body.emailStatus ?? delivery.email,
+      true,
+    );
+    const zaloStatus = normalizeAlertDeliveryStatus(body.zaloStatus ?? delivery.zalo, true);
+    const telegramStatus = normalizeAlertDeliveryStatus(
+      body.telegramStatus ?? delivery.telegram,
+      true,
+    );
     await emsDb.execute(
       `UPDATE alert_events
           SET status = COALESCE(?, status), note = ?, category = COALESCE(?, category),
               message = COALESCE(?, message), threshold_value = COALESCE(?, threshold_value),
-              acknowledged_by = ?, acknowledged_at = ?
+              acknowledged_by = ?, acknowledged_at = ?,
+              email_status = COALESCE(?, email_status),
+              zalo_status = COALESCE(?, zalo_status),
+              telegram_status = COALESCE(?, telegram_status)
         WHERE id = ? AND project_id = ?`,
-      [body.status || null, body.note ?? null, body.category || null, body.message || null,
-        body.thresholdValue == null ? null : asNumber(body.thresholdValue), body.acknowledgedBy || null,
-        body.acknowledgedAt || null, id, projectId],
+      [
+        body.status || null,
+        body.note ?? null,
+        body.category || null,
+        body.message || null,
+        body.thresholdValue == null ? null : asNumber(body.thresholdValue),
+        body.acknowledgedBy || null,
+        body.acknowledgedAt || null,
+        emailStatus,
+        zaloStatus,
+        telegramStatus,
+        id,
+        projectId,
+      ],
     );
     return getResource(resource, new NextRequest(`http://localhost/api/ems/alert-events?projectId=${encodeURIComponent(projectId)}`));
   }
@@ -848,13 +1041,17 @@ async function canMutateCustomerAccounts(body?: Row, deletingId?: string | null)
     if (body) {
       const role = normalizeCustomerAccountRole(body.role);
       if (role === "Admin") {
-        return { ok: false as const, message: "Admin khách chỉ tạo được tài khoản Manage." };
+        return {
+          ok: false as const,
+          message: "Admin khách chỉ tạo được tài khoản nhánh: Chỉ xem hoặc Xem và chỉnh sửa.",
+        };
       }
-      body.role = "Manage";
+      // Giữ đúng quyền nhánh đã chọn (View | Edit), không ép Manage
+      body.role = role;
     }
     if (deletingId) {
       const rows = await queryRows<{ role: string }>(
-        `SELECT COALESCE(role, 'Manage') AS role FROM customer_accounts WHERE id = ? LIMIT 1`,
+        `SELECT COALESCE(role, 'Edit') AS role FROM customer_accounts WHERE id = ? LIMIT 1`,
         [deletingId],
       );
       if (normalizeCustomerAccountRole(rows[0]?.role) === "Admin") {
@@ -878,7 +1075,7 @@ export async function POST(request: NextRequest, context: Params) {
     if (resource === "customer-accounts") {
       const gate = await canMutateCustomerAccounts(body);
       if (!gate.ok) return forbidden(gate.message);
-      // Staff EMS được chọn Admin hoặc Manage; Admin khách chỉ tạo Manage (đã ép ở gate).
+      // Staff EMS được chọn Admin / View / Edit; Admin khách chỉ tạo View|Edit (đã ép ở gate).
       if (gate.session.portal === "admin") {
         body.role = normalizeCustomerAccountRole(body.role ?? "Admin");
       }

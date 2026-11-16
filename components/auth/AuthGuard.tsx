@@ -13,6 +13,7 @@ import {
   isClientPath,
 } from "@/lib/auth";
 import { canAccessPath } from "@/lib/permissions";
+import { matchProjectConfig } from "@/lib/project-config";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -43,6 +44,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (session?.portal === "admin") {
     if (!canAccessPath(session, pathname)) {
+      return <Forbidden role={session.role} />;
+    }
+    const config = matchProjectConfig(pathname);
+    if (config && !canViewClientProject(session, config.projectId)) {
       return <Forbidden role={session.role} />;
     }
     return children;

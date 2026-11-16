@@ -4,7 +4,9 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
 import { hydrateClientMeters } from "@/lib/client-meters";
+import { loadProjectGatewayEnergySlots, type GatewayEnergySlot } from "@/lib/gateway-series";
 import { hydrateGhgSources } from "@/lib/ghg-sources";
+import { hydrateProjectSettings } from "@/lib/project-settings";
 import { hydrateProjects } from "@/lib/projects";
 import {
   REPORT_TEMPLATE_NOTE,
@@ -14,15 +16,30 @@ import {
   type ReportId,
 } from "@/lib/report-defs";
 import {
+  aggregatePeriodMetrics,
+  bandLabel,
+  compareAnchorDate,
+  formatReportKw,
+  formatReportKwh,
+  formatReportVnd,
+  formatSignedDelta,
+  ratesFromCostConfig,
+  reportSpan,
+  type ReportPeriod,
+  type ReportRateConfig,
+} from "@/lib/report-metrics";
+import {
   formatCivilDate,
   formatStoredVietnam,
+  vietnamFromStored,
   vietnamNow,
 } from "@/lib/vietnam-time";
 
-type Period = "Ngày" | "Tuần" | "Tháng" | "Năm";
+type Period = ReportPeriod;
 
 type ReportAlert = {
   time: string;
+  occurredAt: string;
   point: string;
   pointId?: string;
   param: string;
@@ -44,6 +61,13 @@ type PreviewModel = {
   includeChart: boolean;
   note: string;
 };
+
+function inCivilRange(occurredAt: string, from: string, to: string) {
+  const parts = vietnamFromStored(occurredAt);
+  const day = parts?.date ?? occurredAt.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return true;
+  return day >= from && day <= to;
+}
 
 export function ClientReports({ initialId = "consumption" }: { initialId?: ReportId }) {
   const params = useParams<{ id: string }>();
@@ -68,11 +92,15 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
   const [selectedFields, setSelectedFields] = useState<string[]>(report.defaultFields);
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [points, setPoints] = useState<{ id: string; name: string; code: string }[]>([]);
+  const [points, setPoints] = useState<{ id: string; name: string; code: string; utility: string }[]>([]);
   const [alertRows, setAlertRows] = useState<ReportAlert[]>([]);
   const [ghgTons, setGhgTons] = useState(0);
   const [ghgSources, setGhgSources] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [rates, setRates] = useState<ReportRateConfig>(() => ratesFromCostConfig(null));
+  const [periodSlots, setPeriodSlots] = useState<GatewayEnergySlot[]>([]);
+  const [compareSlots, setCompareSlots] = useState<GatewayEnergySlot[]>([]);
+  const [metricsLoading, setMetricsLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -81,15 +109,18 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
       hydrateAlertEvents(projectId),
       hydrateGhgSources(projectId),
       hydrateProjects(),
+      hydrateProjectSettings(projectId, { force: true }),
     ])
-      .then(([meters, events, sources, projects]) => {
+      .then(([meters, events, sources, projects, settings]) => {
         if (!active) return;
         const project = projects.find((item) => item.id === projectId);
         setProjectName(project?.name ?? project?.customer ?? projectId);
+        setRates(ratesFromCostConfig(settings.costConfig));
         const nextPoints = meters.map((meter) => ({
           id: meter.id,
           code: meter.code,
           name: `(${meter.code}) ${meter.name}`,
+          utility: meter.utility || "Điện",
         }));
         setPoints(nextPoints);
         setSelectedPoints((current) => {
@@ -100,6 +131,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
         setAlertRows(
           events.map((event: AlertEvent) => ({
             time: formatStoredVietnam(event.occurredAt) ?? event.occurredAt,
+            occurredAt: event.occurredAt,
             point: event.pointName ?? event.meterPointId ?? "--",
             pointId: event.meterPointId,
             param: event.parameter,
@@ -120,6 +152,34 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
       active = false;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    let active = true;
+    const span = reportSpan(period, date);
+    const compareDateValue = report.needsComparePeriod ? compareDate : compareAnchorDate(period, date);
+    const compareSpan = reportSpan(period, compareDateValue);
+    setMetricsLoading(true);
+    void Promise.all([
+      loadProjectGatewayEnergySlots(projectId, span.from, span.to),
+      loadProjectGatewayEnergySlots(projectId, compareSpan.from, compareSpan.to),
+    ])
+      .then(([primary, compare]) => {
+        if (!active) return;
+        setPeriodSlots(primary.slots);
+        setCompareSlots(compare.slots);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPeriodSlots([]);
+        setCompareSlots([]);
+      })
+      .finally(() => {
+        if (active) setMetricsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, period, date, compareDate, report.needsComparePeriod]);
 
   const dateLabel = useMemo(() => formatCivilDate(date), [date]);
   const compareLabel = useMemo(() => formatCivilDate(compareDate), [compareDate]);
@@ -153,6 +213,32 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     .filter((point) => selectedPoints.includes(point.id))
     .map((point) => point.name);
 
+  const utilityByPointId = useMemo(
+    () => Object.fromEntries(points.map((point) => [point.id, point.utility])),
+    [points],
+  );
+
+  const metricsScopeIds = useMemo(() => {
+    if (!report.needsMeterPoints) return points.map((point) => point.id);
+    return selectedPoints.length ? selectedPoints : points.map((point) => point.id);
+  }, [report.needsMeterPoints, selectedPoints, points]);
+
+  const primaryMetrics = useMemo(
+    () => aggregatePeriodMetrics(periodSlots, metricsScopeIds, utilityByPointId, rates),
+    [periodSlots, metricsScopeIds, utilityByPointId, rates],
+  );
+
+  const compareMetrics = useMemo(
+    () => aggregatePeriodMetrics(compareSlots, metricsScopeIds, utilityByPointId, rates),
+    [compareSlots, metricsScopeIds, utilityByPointId, rates],
+  );
+
+  const periodRange = useMemo(() => reportSpan(period, date), [period, date]);
+  const compareRange = useMemo(
+    () => reportSpan(period, report.needsComparePeriod ? compareDate : compareAnchorDate(period, date)),
+    [period, date, compareDate, report.needsComparePeriod],
+  );
+
   const preview = useMemo((): PreviewModel => {
     const fieldDefs = report.fields.filter((field) => selectedFields.includes(field.id));
     const rows: { label: string; value: string }[] = [];
@@ -161,9 +247,16 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     const pointsLabel = report.needsMeterPoints
       ? selectedPointNames.join("; ") || "Chưa chọn điểm đo"
       : "Toàn dự án";
+    const metrics = primaryMetrics;
+    const compare = compareMetrics;
+
+    const alertsInPeriod = alertRows.filter((row) => inCivilRange(row.occurredAt, periodRange.from, periodRange.to));
+    const alertsInCompare = alertRows.filter((row) =>
+      inCivilRange(row.occurredAt, compareRange.from, compareRange.to),
+    );
 
     if (report.id === "alerts") {
-      const filtered = alertRows.filter(
+      const filtered = alertsInPeriod.filter(
         (row) =>
           !report.needsMeterPoints ||
           !selectedPoints.length ||
@@ -180,10 +273,24 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
           { label: "Thông tin", value: String(info) },
         );
       }
+      if (selectedFields.includes("by_category")) {
+        const categories = new Map<string, number>();
+        for (const row of filtered) {
+          const key = row.param || "Khác";
+          categories.set(key, (categories.get(key) ?? 0) + 1);
+        }
+        for (const [key, count] of [...categories.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)) {
+          rows.push({ label: `Danh mục ${key}`, value: String(count) });
+        }
+      }
       rows.push({ label: "Tổng sự kiện trong kỳ (lọc điểm đo)", value: String(filtered.length) });
-      if (selectedFields.includes("alert_list") || selectedFields.includes("detail_table") || selectedFields.includes("summary_table")) {
+      if (
+        selectedFields.includes("alert_list") ||
+        selectedFields.includes("detail_table") ||
+        selectedFields.includes("summary_table")
+      ) {
         tableHeaders.push("Thời điểm", "Điểm đo", "Tham số", "Giá trị", "Mức");
-        for (const row of filtered.slice(0, 50)) {
+        for (const row of filtered.slice(0, 200)) {
           tableRows.push([row.time, row.point, row.param, row.value, row.level]);
         }
       }
@@ -197,34 +304,90 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
       if (selectedFields.includes("by_source")) {
         rows.push({ label: "Số nguồn cấu hình", value: String(ghgSources) });
       }
+      rows.push(
+        { label: "Điện năng kỳ (Gateway)", value: formatReportKwh(metrics.totalKwh) },
+        { label: "Chi phí kỳ (ước tính)", value: formatReportVnd(metrics.totalCost) },
+      );
       if (selectedFields.includes("by_scope") || selectedFields.includes("summary_table")) {
         tableHeaders.push("Hạng mục", "Giá trị");
-        tableRows.push(["Tổng CO₂e", `${ghgTons.toFixed(2)} tấn`], ["Số nguồn", String(ghgSources)]);
+        tableRows.push(
+          ["Tổng CO₂e", `${ghgTons.toFixed(2)} tấn`],
+          ["Số nguồn", String(ghgSources)],
+          ["Điện năng (kWh)", formatReportKwh(metrics.totalKwh)],
+          ["Chi phí (VNĐ)", formatReportVnd(metrics.totalCost)],
+        );
       }
     } else if (report.id === "compare") {
       rows.push(
         { label: "Kỳ chính", value: periodLabel },
         { label: "Kỳ so sánh", value: `${period} · ${compareLabel}` },
       );
-      if (selectedFields.includes("energy_delta")) rows.push({ label: "Δ Điện năng", value: "— (chờ mẫu dữ liệu kỳ)" });
-      if (selectedFields.includes("cost_delta")) rows.push({ label: "Δ Chi phí", value: "— (chờ mẫu dữ liệu kỳ)" });
+      if (selectedFields.includes("energy_delta")) {
+        rows.push({
+          label: "Δ Điện năng",
+          value: formatSignedDelta(metrics.totalKwh, compare.totalKwh, "kwh"),
+        });
+        rows.push({ label: "Điện năng kỳ chính", value: formatReportKwh(metrics.totalKwh) });
+        rows.push({ label: "Điện năng kỳ so sánh", value: formatReportKwh(compare.totalKwh) });
+      }
+      if (selectedFields.includes("cost_delta")) {
+        rows.push({
+          label: "Δ Chi phí",
+          value: formatSignedDelta(metrics.totalCost, compare.totalCost, "vnd"),
+        });
+        rows.push({ label: "Chi phí kỳ chính", value: formatReportVnd(metrics.totalCost) });
+        rows.push({ label: "Chi phí kỳ so sánh", value: formatReportVnd(compare.totalCost) });
+      }
       if (selectedFields.includes("ghg_delta")) {
         rows.push({ label: "Δ GHG", value: `${ghgTons.toFixed(2)} tấn (kỳ hiện tại)` });
       }
       if (selectedFields.includes("alert_delta")) {
-        rows.push({ label: "Cảnh báo kỳ hiện tại", value: String(alertRows.length) });
+        rows.push({
+          label: "Δ Số cảnh báo",
+          value: `${alertsInPeriod.length - alertsInCompare.length >= 0 ? "+" : ""}${alertsInPeriod.length - alertsInCompare.length}`,
+        });
+        rows.push({ label: "Cảnh báo kỳ chính", value: String(alertsInPeriod.length) });
+        rows.push({ label: "Cảnh báo kỳ so sánh", value: String(alertsInCompare.length) });
       }
       if (selectedFields.includes("summary_table")) {
         tableHeaders.push("Chỉ tiêu", "Kỳ chính", "Kỳ so sánh", "Chênh lệch");
-        tableRows.push(["Điện năng (kWh)", "—", "—", "—"], ["Chi phí (VND)", "—", "—", "—"]);
+        tableRows.push(
+          [
+            "Điện năng (kWh)",
+            formatReportKwh(metrics.totalKwh),
+            formatReportKwh(compare.totalKwh),
+            formatSignedDelta(metrics.totalKwh, compare.totalKwh, "kwh"),
+          ],
+          [
+            "Chi phí (VNĐ)",
+            formatReportVnd(metrics.totalCost),
+            formatReportVnd(compare.totalCost),
+            formatSignedDelta(metrics.totalCost, compare.totalCost, "vnd"),
+          ],
+          [
+            "Số cảnh báo",
+            String(alertsInPeriod.length),
+            String(alertsInCompare.length),
+            String(alertsInPeriod.length - alertsInCompare.length),
+          ],
+        );
       }
     } else {
-      // summary / consumption / cost — khung sẵn, gắn số GHG/alert có sẵn
       if (selectedFields.includes("energy_total") || selectedFields.includes("kwh_total")) {
-        rows.push({ label: "Tổng điện năng", value: "— (lấy từ bản tin gateway khi xuất mẫu chính thức)" });
+        rows.push({ label: "Tổng điện năng", value: formatReportKwh(metrics.totalKwh) });
       }
       if (selectedFields.includes("cost_total")) {
-        rows.push({ label: "Tổng chi phí", value: "— (theo cấu hình biểu giá TOU)" });
+        rows.push({ label: "Tổng chi phí (trước VAT)", value: formatReportVnd(metrics.totalCost) });
+      }
+      if (selectedFields.includes("peak_demand")) {
+        rows.push({ label: "Công suất đỉnh (ước tính)", value: formatReportKw(metrics.peakKw) });
+      }
+      if (selectedFields.includes("cost_by_band")) {
+        rows.push(
+          { label: bandLabel("normal"), value: formatReportVnd(metrics.costByBand.normal) },
+          { label: bandLabel("off"), value: formatReportVnd(metrics.costByBand.off) },
+          { label: bandLabel("peak"), value: formatReportVnd(metrics.costByBand.peak) },
+        );
       }
       if (selectedFields.includes("ghg_total")) {
         rows.push({
@@ -233,17 +396,43 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
         });
       }
       if (selectedFields.includes("alert_count")) {
-        rows.push({ label: "Số cảnh báo", value: String(alertRows.length) });
+        rows.push({ label: "Số cảnh báo trong kỳ", value: String(alertsInPeriod.length) });
       }
-      if (selectedFields.includes("kwh_by_point") || selectedFields.includes("cost_by_point")) {
-        tableHeaders.push("Điểm đo", "Giá trị");
-        for (const point of points.filter((item) => selectedPoints.includes(item.id))) {
-          tableRows.push([point.name, "—"]);
+
+      if (selectedFields.includes("kwh_by_point")) {
+        tableHeaders.push("Điểm đo", "Điện năng (kWh)");
+        for (const point of points.filter((item) => metricsScopeIds.includes(item.id))) {
+          const row = metrics.byPoint.find((item) => item.meterPointId === point.id);
+          tableRows.push([point.name, formatReportKwh(row?.kwh ?? 0)]);
         }
-      } else if (selectedFields.includes("summary_table") || selectedFields.includes("detail_table")) {
+      } else if (selectedFields.includes("cost_by_point")) {
+        tableHeaders.push("Điểm đo", "Chi phí (VNĐ)");
+        for (const point of points.filter((item) => metricsScopeIds.includes(item.id))) {
+          const row = metrics.byPoint.find((item) => item.meterPointId === point.id);
+          tableRows.push([point.name, formatReportVnd(row?.cost ?? 0)]);
+        }
+      } else if (selectedFields.includes("detail_table")) {
+        tableHeaders.push("Ngày", "Điện năng (kWh)", "Chi phí (VNĐ)");
+        for (const day of metrics.byDay) {
+          tableRows.push([day.day, formatReportKwh(day.kwh), formatReportVnd(day.cost)]);
+        }
+        if (!metrics.byDay.length) {
+          tableRows.push(["Không có dữ liệu Gateway trong kỳ", formatReportKwh(0), formatReportVnd(0)]);
+        }
+      } else if (selectedFields.includes("summary_table") || selectedFields.includes("cost_by_band")) {
         tableHeaders.push("Chỉ tiêu", "Giá trị");
         for (const row of rows) tableRows.push([row.label, row.value]);
+        if (!tableRows.length) {
+          tableRows.push(
+            ["Tổng điện năng", formatReportKwh(metrics.totalKwh)],
+            ["Tổng chi phí", formatReportVnd(metrics.totalCost)],
+          );
+        }
       }
+    }
+
+    if (metricsLoading && !rows.some((row) => /điện năng|chi phí/i.test(row.label))) {
+      rows.push({ label: "Trạng thái dữ liệu", value: "Đang tải số liệu Gateway…" });
     }
 
     return {
@@ -258,7 +447,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
       tableHeaders,
       tableRows,
       includeChart: selectedFields.includes("chart"),
-      note: REPORT_TEMPLATE_NOTE,
+      note: `${REPORT_TEMPLATE_NOTE} Số liệu kWh/chi phí tính từ bản tin Gateway (Δ EPaed × biểu giá TOU/phẳng).`,
     };
   }, [
     report,
@@ -274,6 +463,12 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     title,
     projectName,
     points,
+    primaryMetrics,
+    compareMetrics,
+    periodRange,
+    compareRange,
+    metricsScopeIds,
+    metricsLoading,
   ]);
 
   const buildHtml = (model: PreviewModel) => {
@@ -291,7 +486,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
             .join("")}</tbody></table>`
         : "";
     const chartBlock = model.includeChart
-      ? `<div class="chart">[Vùng biểu đồ — gắn theo mẫu PDF/Excel chính thức]</div>`
+      ? `<div class="chart">Biểu đồ tổng quan: dùng các chỉ tiêu kWh / chi phí phía trên (mẫu đồ họa sẽ đồng bộ sau).</div>`
       : "";
 
     return `<!doctype html><html><head><meta charset="utf-8"><title>${model.title}</title>
@@ -377,8 +572,34 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
   };
 
   return (
-    <div className="flex h-full min-h-0 bg-[#f4f6f9]">
-      <aside className="flex w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white">
+    <div className="flex h-full min-h-0 flex-col bg-[#f4f6f9] lg:flex-row">
+      {/* Mobile: chọn loại báo cáo ngang */}
+      <div className="shrink-0 border-b border-slate-200 bg-white px-2 py-2 lg:hidden">
+        <p className="mb-1.5 px-1 text-[10px] font-semibold tracking-wider text-slate-400 uppercase">
+          Loại báo cáo
+        </p>
+        <div className="flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {REPORTS.map((item) => {
+            const active = item.id === reportId;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => pickReport(item.id)}
+                className={`inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-[12px] font-semibold whitespace-nowrap transition-colors ${
+                  active
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
+                }`}
+              >
+                {item.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <aside className="hidden w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
         <div className="border-b border-slate-100 px-5 py-4">
           <h1 className="text-[16px] font-bold text-slate-800">Danh sách báo cáo</h1>
           <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
@@ -404,10 +625,12 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
         </nav>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-6">
-        <section className="rounded-lg border border-slate-200 bg-white px-6 py-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
+        <section className="rounded-lg border border-slate-200 bg-white px-4 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:px-6 sm:py-5">
           <div className="relative mb-1">
-            <h2 className="text-center text-[20px] font-semibold text-slate-800">{report.name}</h2>
+            <h2 className="pr-16 text-center text-[18px] font-semibold text-slate-800 sm:pr-0 sm:text-[20px]">
+              {report.name}
+            </h2>
             <div className="absolute top-0 right-0 flex items-center gap-1">
               <IconBtn label="Xem trước" onClick={() => setPreviewOpen(true)}>
                 <EyeIcon />
@@ -540,8 +763,10 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
             ) : null}
           </ol>
 
-          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[12px] leading-relaxed text-amber-900">
-            {REPORT_TEMPLATE_NOTE} Hiện tại xem trước dùng khung tạm; xuất PDF mở hộp thoại in, Excel tải CSV tương thích.
+          <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-[12px] leading-relaxed text-emerald-900">
+            Điện năng và chi phí trong xem trước/xuất lấy từ Gateway (Δ EPaed × biểu giá TOU hoặc đơn giá phẳng).
+            PDF mở hộp thoại in; Excel tải CSV UTF-8. {REPORT_TEMPLATE_NOTE}
+            {metricsLoading ? " Đang đồng bộ số liệu kỳ…" : ""}
           </div>
 
           <div className="mt-6 flex flex-wrap items-center justify-end gap-2">

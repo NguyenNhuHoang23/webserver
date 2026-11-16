@@ -43,6 +43,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
   const [draftUnit, setDraftUnit] = useState("lít");
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -166,18 +167,47 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
       ? visibleRows[0]?.name ?? "Nguồn phát thải"
       : "Tất cả nguồn phát thải";
 
+  const pickSelection = (next: GreenhouseSelection) => {
+    setSelection(next);
+    setSourcesOpen(false);
+  };
+
   return (
     <div className="flex h-full min-h-0 overflow-hidden bg-[#f4f6f9]">
-      <aside className="hidden w-[250px] shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
+      {sourcesOpen ? (
+        <button
+          type="button"
+          aria-label="Đóng danh sách nguồn"
+          className="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
+          onClick={() => setSourcesOpen(false)}
+        />
+      ) : null}
+      <aside
+        className={`${
+          sourcesOpen ? "fixed inset-y-0 left-0 z-40 flex" : "hidden"
+        } w-[min(250px,88vw)] shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl md:relative md:z-0 md:flex md:w-[250px] md:shadow-none`}
+      >
         <div className="border-b border-slate-100 px-4 py-4">
-          <p className="text-[11px] font-bold tracking-[0.08em] text-slate-500">PHẠM VI & NGUỒN PHÁT THẢI</p>
-          <p className="mt-1 text-xs text-slate-400">{rows.length} nguồn đang cấu hình</p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[11px] font-bold tracking-[0.08em] text-slate-500">PHẠM VI & NGUỒN PHÁT THẢI</p>
+              <p className="mt-1 text-xs text-slate-400">{rows.length} nguồn đang cấu hình</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSourcesOpen(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 md:hidden"
+              aria-label="Đóng"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <button
             type="button"
-            onClick={() => setSelection({ kind: "all" })}
+            onClick={() => pickSelection({ kind: "all" })}
             className={`mb-3 flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-colors ${
               selection.kind === "all"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-800"
@@ -196,7 +226,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
                 <section key={scope.id}>
                   <button
                     type="button"
-                    onClick={() => setSelection({ kind: "scope", scope: scope.id })}
+                    onClick={() => pickSelection({ kind: "scope", scope: scope.id })}
                     className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors ${
                       scopeActive ? "bg-slate-100" : "hover:bg-slate-50"
                     }`}
@@ -216,7 +246,7 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
                           <button
                             key={row.id}
                             type="button"
-                            onClick={() => setSelection({ kind: "source", sourceId: row.id })}
+                            onClick={() => pickSelection({ kind: "source", sourceId: row.id })}
                             className={`flex w-full items-start justify-between gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                               sourceActive
                                 ? "bg-emerald-50 text-emerald-800"
@@ -248,10 +278,10 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
+      <div className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[20px] font-bold tracking-tight text-slate-800 sm:text-[22px]">
+        <div className="min-w-0">
+          <h2 className="text-[18px] font-bold tracking-tight text-slate-800 sm:text-[22px]">
             Tổng quan phát thải khí nhà kính
           </h2>
           <p className="mt-0.5 text-xs text-slate-500">
@@ -259,7 +289,16 @@ export function GreenhouseCharts({ projectId }: { projectId: string }) {
             <span className="ml-2 text-slate-400">· {selectionLabel}</span>
           </p>
         </div>
-        <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSourcesOpen(true)}
+            className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 md:hidden"
+          >
+            Nguồn / Scope
+          </button>
+          <TimeFilterBar value={timeFilter} onChange={setTimeFilter} />
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">

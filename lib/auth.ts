@@ -1,3 +1,4 @@
+import { normalizeAccountRole } from "@/lib/accounts";
 import { AUTH_EVENT, AUTH_STORAGE_KEY, DEFAULT_PASSWORD } from "@/lib/auth-constants";
 
 export { DEFAULT_PASSWORD, AUTH_EVENT, AUTH_STORAGE_KEY };
@@ -12,7 +13,7 @@ export type AuthSession = {
   email: string;
   role: string;
   projectId?: string;
-  /** Các dự án tài khoản khách được quản trị. */
+  /** Dự án được gán (khách hoặc Manage nội bộ). */
   projectIds?: string[];
 };
 
@@ -115,19 +116,26 @@ export function clientProjectId(pathname: string) {
 
 export function canViewClientProject(session: AuthSession | null, projectId?: string) {
   if (!session || !projectId) return false;
-  if (session.portal === "admin") return true;
+  if (session.portal === "admin") {
+    if (normalizeAccountRole(session.role) === "Admin") return true;
+    return Boolean(session.projectIds?.includes(projectId));
+  }
   if (session.portal !== "customer") return false;
   if (session.role === "Admin") return true;
   if (session.projectIds?.includes(projectId)) return true;
   return session.projectId === projectId;
 }
 
-/** Khách hàng được chỉnh sửa cấu hình dự án (Admin / Manage). */
-export function canEditCustomerConfig(session: AuthSession | null | undefined) {
+/** Khách hàng / nhân sự nội bộ được chỉnh sửa cấu hình (Admin / Edit; View bị khóa). */
+export function canEditCustomerConfig(session: AuthSession | null | undefined, projectId?: string) {
   if (!session) return false;
-  if (session.portal === "admin") return true;
+  if (session.portal === "admin") {
+    if (normalizeAccountRole(session.role) === "Admin") return true;
+    if (!projectId) return normalizeAccountRole(session.role) === "Manage";
+    return Boolean(session.projectIds?.includes(projectId));
+  }
   if (session.portal !== "customer") return false;
-  return session.role === "Admin" || session.role === "Manage";
+  return session.role === "Admin" || session.role === "Edit";
 }
 
 export function getAuthRedirect(session: AuthSession | null, pathname: string): string | null {

@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
+import { normalizeAccountRole } from "@/lib/accounts";
+import { normalizeCustomerRole } from "@/lib/customer-accounts";
 import { emsDb, queryRows } from "@/lib/server-db";
 
 const SESSION_COOKIE = "ems-session";
@@ -23,6 +25,43 @@ async function loadCustomerProjectIds(accountId: string) {
     [accountId],
   );
   return rows.map((row) => String(row.projectId)).filter(Boolean);
+}
+
+async function ensureStaffAccountProjectsTable() {
+  await emsDb
+    .query(
+      `CREATE TABLE IF NOT EXISTS account_projects (
+         account_id VARCHAR(64) NOT NULL,
+         project_id VARCHAR(64) NOT NULL,
+         PRIMARY KEY (account_id, project_id)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    )
+    .catch(() => undefined);
+}
+
+async function loadStaffProjectIds(accountId: string) {
+  await ensureStaffAccountProjectsTable();
+  const rows = await queryRows<{ projectId: string }>(
+    `SELECT project_id AS projectId FROM account_projects WHERE account_id = ?`,
+    [accountId],
+  );
+  return rows.map((row) => String(row.projectId)).filter(Boolean);
+}
+
+async function findStaffAccount(identifier: string, password: string) {
+  const rows = await queryRows<Record<string, any>>(
+    `SELECT id, username, email, role, username AS displayName, NULL AS projectId
+       FROM accounts
+      WHERE (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
+        AND password_hash = SHA2(?, 256)
+      LIMIT 1`,
+    [identifier, identifier, password],
+  );
+  const account = rows[0];
+  if (!account) return null;
+  const role = normalizeAccountRole(account.role);
+  const projectIds = role === "Admin" ? [] : await loadStaffProjectIds(String(account.id));
+  return { ...account, role, projectIds };
 }
 
 async function findCustomerAccount(identifier: string, password: string, projectId?: string) {
@@ -55,8 +94,7 @@ async function findCustomerAccount(identifier: string, password: string, project
   const account = rows[0];
   if (!account) return null;
 
-  const rawRole = String(account.role ?? "Manage");
-  const role = rawRole === "Admin" ? "Admin" : "Manage";
+  const role = normalizeCustomerRole(account.role);
   let projectIds = await loadCustomerProjectIds(String(account.id));
   if (!projectIds.length && account.projectId) {
     projectIds = [String(account.projectId)];
@@ -101,30 +139,14 @@ export async function POST(request: Request) {
     let resolvedPortal: "admin" | "customer" = body.portal ?? "admin";
 
     if (body.portal === "admin") {
-      const rows = await queryRows<Record<string, any>>(
-        `SELECT id, username, email, role, username AS displayName, NULL AS projectId
-           FROM accounts
-          WHERE (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
-            AND password_hash = SHA2(?, 256)
-          LIMIT 1`,
-        [identifier, identifier, password],
-      );
-      account = rows[0];
+      account = (await findStaffAccount(identifier, password)) ?? undefined;
       resolvedPortal = "admin";
     } else if (body.portal === "customer") {
       account = (await findCustomerAccount(identifier, password, body.projectId)) ?? undefined;
       resolvedPortal = "customer";
     } else {
-      const adminRows = await queryRows<Record<string, any>>(
-        `SELECT id, username, email, role, username AS displayName, NULL AS projectId
-           FROM accounts
-          WHERE (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
-            AND password_hash = SHA2(?, 256)
-          LIMIT 1`,
-        [identifier, identifier, password],
-      );
-      if (adminRows[0]) {
-        account = adminRows[0];
+      account = (await findStaffAccount(identifier, password)) ?? undefined;
+      if (account) {
         resolvedPortal = "admin";
       } else {
         account = (await findCustomerAccount(identifier, password, body.projectId)) ?? undefined;

@@ -14,12 +14,17 @@ import {
   type DeviceExtraField,
   type DeviceRegister,
 } from "@/lib/devices";
+import { METER_MODEL_BY_CODE } from "@/lib/gateway-protocol";
 
 type ExtraField = DeviceExtraField;
 type RegisterRow = DeviceRegister;
 
 const protocols = ["Modbus TCP", "Modbus RTU", "M-Bus", "BACnet", "MQTT"];
 const dataTypes = ["UINT16", "UINT32", "INT32", "FLOAT32", "FLOAT64"];
+/** Chỉ model thực tế gateway đang map (không gợi ý PM5000 / catalog ảo). */
+const REAL_METER_MODELS = Array.from(
+  new Set(Object.values(METER_MODEL_BY_CODE).map((item) => item.trim()).filter(Boolean)),
+);
 
 function nextId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
@@ -54,7 +59,13 @@ export function AddCustomDeviceForm() {
 
   const lastEdited = useMemo(() => "Vừa xong", []);
   const categorySuggestions = useMemo(
-    () => Array.from(new Set(knownCategories.map((item) => item.trim()).filter(Boolean))).sort(),
+    () =>
+      Array.from(
+        new Set([
+          ...REAL_METER_MODELS,
+          ...knownCategories.map((item) => item.trim()).filter(Boolean),
+        ]),
+      ).sort(),
     [knownCategories],
   );
 
@@ -184,7 +195,9 @@ export function AddCustomDeviceForm() {
             {isEdit ? "Cập nhật loại đồng hồ" : "Thêm loại đồng hồ"}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Chỉ khai báo loại đồng hồ thực tế đang dùng / sẽ lắp. Category phải trùng <code className="text-[12px]">meterModel</code> gửi từ gateway.
+            Chỉ khai báo loại đồng hồ thực tế đang dùng / sẽ lắp (hiện tại:{" "}
+            <strong className="font-semibold text-slate-800">{REAL_METER_MODELS.join(", ") || "PM2230"}</strong>
+            ). Category phải trùng <code className="text-[12px]">meterModel</code> gửi từ gateway — không dùng model mẫu như PM5000.
           </p>
         </div>
       </div>
@@ -210,7 +223,7 @@ export function AddCustomDeviceForm() {
               list="device-category-suggestions"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              placeholder="Nhập đúng model gateway đang gửi"
+              placeholder={REAL_METER_MODELS[0] ?? "PM2230"}
               className="input"
               required
             />
@@ -233,7 +246,7 @@ export function AddCustomDeviceForm() {
             <input
               value={brand}
               onChange={(e) => setBrand(e.target.value)}
-              placeholder="Thương hiệu thực tế"
+              placeholder="Thương hiệu trên đồng hồ thực tế"
               className="input"
             />
           </Field>
@@ -241,7 +254,7 @@ export function AddCustomDeviceForm() {
             <input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="Tên model đang dùng"
+              placeholder={REAL_METER_MODELS[0] ?? "PM2230"}
               className="input"
             />
           </Field>

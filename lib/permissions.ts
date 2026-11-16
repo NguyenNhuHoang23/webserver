@@ -1,5 +1,5 @@
 import type { AuthSession } from "@/lib/auth";
-import type { AccountRole } from "@/lib/accounts";
+import { normalizeAccountRole, type AccountRole } from "@/lib/accounts";
 
 export type Permission =
   | "manageUsers"
@@ -9,8 +9,9 @@ export type Permission =
   | "manageEmissionFactors"
   | "viewProjects";
 
+/** Admin: toàn hệ thống. Manage: đủ quyền cấu hình (không quản lý user nội bộ). */
 const ROLE_PERMISSIONS: Record<AccountRole, Permission[]> = {
-  "Quản trị viên": [
+  Admin: [
     "manageUsers",
     "manageProjects",
     "manageDevices",
@@ -18,19 +19,18 @@ const ROLE_PERMISSIONS: Record<AccountRole, Permission[]> = {
     "manageEmissionFactors",
     "viewProjects",
   ],
-  "Quản lý dự án": [
+  Manage: [
     "manageProjects",
     "manageDevices",
+    "manageGateway",
     "manageEmissionFactors",
     "viewProjects",
   ],
-  "Kỹ sư vận hành": ["manageDevices", "manageGateway", "viewProjects"],
-  "Nhân viên kỹ thuật": ["viewProjects", "manageDevices"],
 };
 
 export function permissionsForRole(role: string | undefined | null): Permission[] {
   if (!role) return [];
-  return ROLE_PERMISSIONS[role as AccountRole] ?? [];
+  return ROLE_PERMISSIONS[normalizeAccountRole(role)] ?? [];
 }
 
 export function hasPermission(session: AuthSession | null | undefined, permission: Permission) {

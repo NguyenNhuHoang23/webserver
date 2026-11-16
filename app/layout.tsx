@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { AppFrame } from "@/components/layout/AppFrame";
 import "./globals.css";
@@ -11,6 +11,12 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "EMS Console",
   description: "Hệ thống giám sát và quản lý năng lượng công nghiệp",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

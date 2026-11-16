@@ -68,7 +68,7 @@ export function CustomerAccountDetailForm() {
       setUsername(found.username);
       setEmail(found.email);
       setDisplayName(found.displayName);
-      setRole(found.role === "Admin" ? "Admin" : "Manage");
+      setRole(found.role);
       setProjectIds(normalized.projectIds);
       setPrimaryProjectId(normalized.projectId);
       setPassword("");
@@ -152,7 +152,7 @@ export function CustomerAccountDetailForm() {
           {isEdit ? "Cập nhật tài khoản khách" : "Thêm tài khoản khách"}
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Chọn phân cấp <strong>Admin</strong> hoặc <strong>Manage</strong> — không gán cứng một quyền.
+          Admin (tài khoản chính) · nhánh: <strong>Chỉ xem</strong> hoặc <strong>Xem và chỉnh sửa</strong>.
         </p>
       </div>
 
@@ -165,7 +165,7 @@ export function CustomerAccountDetailForm() {
       >
         <div className="mb-5">
           <p className="mb-2 text-[11px] font-semibold tracking-wide text-slate-500">PHÂN CẤP QUYỀN</p>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-3">
             {CUSTOMER_ACCOUNT_ROLES.map((item) => {
               const active = role === item;
               return (
@@ -177,7 +177,9 @@ export function CustomerAccountDetailForm() {
                     active
                       ? item === "Admin"
                         ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-emerald-500 bg-emerald-50 text-emerald-900"
+                        : item === "View"
+                          ? "border-slate-400 bg-slate-100 text-slate-800"
+                          : "border-emerald-500 bg-emerald-50 text-emerald-900"
                       : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                   }`}
                 >

@@ -41,6 +41,20 @@ CREATE TABLE IF NOT EXISTS projects (
 ALTER TABLE projects
   ADD COLUMN IF NOT EXISTS logo_url MEDIUMTEXT NULL AFTER address;
 
+-- Dự án được gán cho tài khoản nội bộ Manage
+CREATE TABLE IF NOT EXISTS account_projects (
+  account_id VARCHAR(64) NOT NULL,
+  project_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY (account_id, project_id),
+  KEY idx_account_projects_project (project_id),
+  CONSTRAINT fk_account_projects_account
+    FOREIGN KEY (account_id) REFERENCES accounts (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_account_projects_project
+    FOREIGN KEY (project_id) REFERENCES projects (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS meter_types (
   name VARCHAR(100) NOT NULL,
   description VARCHAR(255) NOT NULL,
@@ -246,6 +260,9 @@ ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS message VARCHAR(500) NULL AFTE
 ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS threshold_value DECIMAL(18,6) NULL AFTER message;
 ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(150) NULL AFTER threshold_value;
 ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS acknowledged_at DATETIME NULL AFTER acknowledged_by;
+ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS email_status VARCHAR(20) NULL AFTER acknowledged_at;
+ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS zalo_status VARCHAR(20) NULL AFTER email_status;
+ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS telegram_status VARCHAR(20) NULL AFTER zalo_status;
 
 CREATE TABLE IF NOT EXISTS meter_readings (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

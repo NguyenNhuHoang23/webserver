@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { useAuth } from "@/components/auth/useAuth";
 import { DEFAULT_PASSWORD } from "@/lib/auth-constants";
 import {
+  BRANCH_ACCOUNT_ROLES,
   CUSTOMER_ACCOUNT_ROLE_META,
   accountManagesProject,
   canEditClientConfig,
@@ -14,6 +15,7 @@ import {
   normalizeCustomerRole,
   removeCustomerAccount,
   upsertCustomerAccount,
+  type BranchAccountRole,
   type CustomerAccount,
 } from "@/lib/customer-accounts";
 import {
@@ -89,7 +91,7 @@ export function ClientConfig() {
   const params = useParams<{ id: string }>();
   const projectId = params?.id ?? "default";
   const { session } = useAuth();
-  const canEditConfig = canEditClientConfig(session);
+  const canEditConfig = canEditClientConfig(session, projectId);
   const canManageUsers = canManageBranchAccounts(session) || session?.portal === "admin";
   const [tab, setTab] = useState<TabId>("meters");
   const [openParams, setOpenParams] = useState(true);
@@ -122,6 +124,11 @@ export function ClientConfig() {
   const [threshold, setThreshold] = useState("");
   const [dailyLimit, setDailyLimit] = useState(0);
   const [peakWarn, setPeakWarn] = useState(true);
+  const [frequencyMinHz, setFrequencyMinHz] = useState("");
+  const [frequencyMaxHz, setFrequencyMaxHz] = useState("");
+  const [voltageMin, setVoltageMin] = useState("");
+  const [voltageMax, setVoltageMax] = useState("");
+  const [currentMaxA, setCurrentMaxA] = useState("");
   const [severityByCategory, setSeverityByCategory] = useState(DEFAULT_SEVERITY_BY_CATEGORY);
 
   function applyCostSettings(settings: ProjectSettingsPayload, types: string[] = utilities) {
@@ -153,6 +160,11 @@ export function ClientConfig() {
     setThreshold(config.overConsumptionKwh ?? "");
     setDailyLimit(config.dailyLimit ?? 0);
     setPeakWarn(config.peakHourWarning ?? true);
+    setFrequencyMinHz(config.frequencyMinHz ?? "");
+    setFrequencyMaxHz(config.frequencyMaxHz ?? "");
+    setVoltageMin(config.voltageMin ?? "");
+    setVoltageMax(config.voltageMax ?? "");
+    setCurrentMaxA(config.currentMaxA ?? "");
   }
 
   useEffect(() => {
@@ -219,6 +231,11 @@ export function ClientConfig() {
           overConsumptionKwh: threshold,
           dailyLimit,
           peakHourWarning: peakWarn,
+          frequencyMinHz,
+          frequencyMaxHz,
+          voltageMin,
+          voltageMax,
+          currentMaxA,
         };
         const stored = await saveProjectSettings(projectId, { alertConfig: payload });
         applyAlertSettings(stored);
@@ -249,17 +266,38 @@ export function ClientConfig() {
     cost: { title: "Cấu hình chi phí", hint: "Quản lý các thiết lập chi phí năng lượng cho nhà máy" },
     alerts: {
       title: "Cấu hình cảnh báo",
-      hint: "Chọn mức độ (nghiêm trọng / cảnh báo / thông tin) theo từng loại lỗi. Nhật ký chỉ hiển thị thời điểm phát sinh.",
+      hint: "Chọn mức độ (Nghiêm trọng / Cảnh báo) theo từng loại lỗi và đặt ngưỡng vận hành. Nhật ký chỉ hiển thị thời điểm phát sinh.",
     },
     accounts: {
       title: "Quản lý tài khoản",
-      hint: "Admin khách tạo tài khoản Manage để xem & chỉnh sửa cấu hình dự án",
+      hint: "Admin khách thêm/sửa/xóa tài khoản nhánh: Chỉ xem hoặc Xem và chỉnh sửa",
     },
   }[tab];
 
   return (
-    <div className="flex h-full min-h-0 bg-[#f4f6f9]">
-      <aside className="flex w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white">
+    <div className="flex h-full min-h-0 flex-col bg-[#f4f6f9] lg:flex-row">
+      {/* Mobile: horizontal tabs — không chiếm cột trái */}
+      <div className="shrink-0 border-b border-slate-200 bg-white px-2 py-2 lg:hidden">
+        <div className="flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {NAV.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold whitespace-nowrap transition-colors ${
+                tab === item.id
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
+              }`}
+            >
+              <NavIcon type={item.icon} className="h-3.5 w-3.5" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <aside className="hidden w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
         <div className="border-b border-slate-100 px-5 py-4">
           <h1 className="text-[16px] font-bold text-slate-800">Danh Sách Cấu Hình</h1>
         </div>
@@ -290,12 +328,12 @@ export function ClientConfig() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-5">
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-6">
+      <div className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-5">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-5 lg:p-6">
           <div className="mb-5 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-[22px] font-bold text-slate-800">{meta.title}</h2>
-              <p className="mt-1 text-sm text-slate-500">{meta.hint}</p>
+            <div className="min-w-0">
+              <h2 className="text-[18px] font-bold text-slate-800 sm:text-[22px]">{meta.title}</h2>
+              <p className="mt-1 text-xs text-slate-500 sm:text-sm">{meta.hint}</p>
             </div>
             {tab !== "accounts" ? (
               <button
@@ -385,6 +423,16 @@ export function ClientConfig() {
               onDailyLimit={setDailyLimit}
               peakWarn={peakWarn}
               onPeakWarn={setPeakWarn}
+              frequencyMinHz={frequencyMinHz}
+              onFrequencyMinHz={setFrequencyMinHz}
+              frequencyMaxHz={frequencyMaxHz}
+              onFrequencyMaxHz={setFrequencyMaxHz}
+              voltageMin={voltageMin}
+              onVoltageMin={setVoltageMin}
+              voltageMax={voltageMax}
+              onVoltageMax={setVoltageMax}
+              currentMaxA={currentMaxA}
+              onCurrentMaxA={setCurrentMaxA}
             />
           ) : null}
 
@@ -1064,6 +1112,16 @@ function AlertsPanel({
   onDailyLimit,
   peakWarn,
   onPeakWarn,
+  frequencyMinHz,
+  onFrequencyMinHz,
+  frequencyMaxHz,
+  onFrequencyMaxHz,
+  voltageMin,
+  onVoltageMin,
+  voltageMax,
+  onVoltageMax,
+  currentMaxA,
+  onCurrentMaxA,
 }: {
   severityByCategory: Record<AlertCategoryId, AlertSeverityLevel>;
   onSeverity: (category: AlertCategoryId, level: AlertSeverityLevel) => void;
@@ -1073,13 +1131,25 @@ function AlertsPanel({
   onDailyLimit: (v: number) => void;
   peakWarn: boolean;
   onPeakWarn: (v: boolean) => void;
+  frequencyMinHz: string;
+  onFrequencyMinHz: (v: string) => void;
+  frequencyMaxHz: string;
+  onFrequencyMaxHz: (v: string) => void;
+  voltageMin: string;
+  onVoltageMin: (v: string) => void;
+  voltageMax: string;
+  onVoltageMax: (v: string) => void;
+  currentMaxA: string;
+  onCurrentMaxA: (v: string) => void;
 }) {
   return (
     <div>
       <p className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
-        Trang Cảnh báo chỉ ghi nhận thời điểm phát sinh. Chọn mức độ cho từng loại lỗi bên dưới — loại đánh dấu
+        Trang Cảnh báo chỉ ghi nhận thời điểm phát sinh. Phân loại theo 2 mức độ —
         <span className="font-semibold text-rose-700"> Nghiêm trọng </span>
-        sẽ được thống kê riêng.
+        và
+        <span className="font-semibold text-amber-700"> Cảnh báo</span>
+        . Đặt ngưỡng vận hành bên dưới để đối chiếu khi phát sinh sự kiện.
       </p>
 
       <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">
@@ -1101,14 +1171,11 @@ function AlertsPanel({
               className={`h-9 rounded-lg border px-2.5 text-xs font-semibold outline-none focus:ring-1 focus:ring-emerald-500 ${
                 severityByCategory[option.id] === "critical"
                   ? "border-rose-200 bg-rose-50 text-rose-700"
-                  : severityByCategory[option.id] === "warning"
-                    ? "border-amber-200 bg-amber-50 text-amber-800"
-                    : "border-slate-200 bg-slate-50 text-slate-700"
+                  : "border-amber-200 bg-amber-50 text-amber-800"
               }`}
             >
               <option value="critical">Nghiêm trọng</option>
               <option value="warning">Cảnh báo</option>
-              <option value="info">Thông tin</option>
             </select>
           </div>
         ))}
@@ -1116,17 +1183,18 @@ function AlertsPanel({
 
       <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-slate-400">NGƯỠNG VẬN HÀNH</p>
       <div className="divide-y divide-slate-100">
-        <Field title="Over-consumption threshold" hint="Ngưỡng tiêu thụ vượt mức cho phép (kWh)">
+        <Field title="Ngưỡng tiêu thụ vượt mức" hint="Khi tiêu thụ vượt giá trị này (kWh) sẽ tạo cảnh báo">
           <input
             value={threshold}
             onChange={(e) => onThreshold(e.target.value)}
+            placeholder="kWh"
             className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-500"
           />
         </Field>
-        <Field title="Daily limit" hint="Giới hạn tiêu thụ hàng ngày tối đa">
+        <Field title="Giới hạn tiêu thụ ngày" hint="Giới hạn tiêu thụ hàng ngày tối đa (kWh)">
           <Stepper value={dailyLimit} min={0} onChange={onDailyLimit} />
         </Field>
-        <Field title="Peak Hour Warning" hint="Cảnh báo khi tiêu thụ cao trong giờ cao điểm">
+        <Field title="Cảnh báo giờ cao điểm" hint="Cảnh báo khi tiêu thụ cao trong giờ cao điểm">
           <label className="inline-flex items-center gap-2 text-sm text-slate-600">
             <button
               type="button"
@@ -1142,6 +1210,46 @@ function AlertsPanel({
             </button>
             Kích hoạt
           </label>
+        </Field>
+        <Field title="Ngưỡng tần số thấp" hint="Tần số tối thiểu cho phép (Hz)">
+          <input
+            value={frequencyMinHz}
+            onChange={(e) => onFrequencyMinHz(e.target.value)}
+            placeholder="Hz"
+            className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+          />
+        </Field>
+        <Field title="Ngưỡng tần số cao" hint="Tần số tối đa cho phép (Hz)">
+          <input
+            value={frequencyMaxHz}
+            onChange={(e) => onFrequencyMaxHz(e.target.value)}
+            placeholder="Hz"
+            className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+          />
+        </Field>
+        <Field title="Ngưỡng điện áp thấp" hint="Điện áp tối thiểu cho phép (% hoặc V)">
+          <input
+            value={voltageMin}
+            onChange={(e) => onVoltageMin(e.target.value)}
+            placeholder="V / %"
+            className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+          />
+        </Field>
+        <Field title="Ngưỡng điện áp cao" hint="Điện áp tối đa cho phép (% hoặc V)">
+          <input
+            value={voltageMax}
+            onChange={(e) => onVoltageMax(e.target.value)}
+            placeholder="V / %"
+            className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+          />
+        </Field>
+        <Field title="Ngưỡng quá dòng" hint="Dòng điện tối đa cho phép (A)">
+          <input
+            value={currentMaxA}
+            onChange={(e) => onCurrentMaxA(e.target.value)}
+            placeholder="A"
+            className="h-10 w-28 rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-emerald-500"
+          />
         </Field>
       </div>
     </div>
@@ -1173,6 +1281,7 @@ function AccountsPanel({
     fullName: "",
     email: "",
     password: "",
+    role: "Edit" as BranchAccountRole,
   };
   const [draft, setDraft] = useState(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1194,12 +1303,14 @@ function AccountsPanel({
   function startEdit(row: CustomerAccount) {
     onAdding(false);
     setEditingId(row.id);
+    const role = normalizeCustomerRole(row.role);
     setDraft({
       id: row.id,
       username: row.username,
       fullName: row.displayName,
       email: row.email,
       password: "",
+      role: role === "View" ? "View" : "Edit",
     });
   }
 
@@ -1211,7 +1322,7 @@ function AccountsPanel({
       username: draft.username.trim(),
       displayName: draft.fullName.trim() || draft.username.trim(),
       email: draft.email.trim(),
-      role: "Manage",
+      role: draft.role,
       projectId,
       projectIds: [projectId],
       password: draft.password.trim() || (isEdit ? "" : DEFAULT_PASSWORD),
@@ -1223,9 +1334,9 @@ function AccountsPanel({
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-[15px] font-semibold text-slate-800">Tài khoản Manage truy cập ứng dụng</h3>
+          <h3 className="text-[15px] font-semibold text-slate-800">Tài khoản nhánh truy cập ứng dụng</h3>
           <p className="mt-0.5 text-[12px] text-slate-500">
-            Admin khách tạo / sửa / xóa tài khoản Manage để xem &amp; chỉnh sửa cấu hình dự án này.
+            Admin khách thêm / sửa / xóa tài khoản nhánh với 2 quyền: Chỉ xem hoặc Xem và chỉnh sửa.
           </p>
         </div>
         {canManage ? (
@@ -1235,7 +1346,7 @@ function AccountsPanel({
             className="inline-flex h-10 items-center gap-1.5 rounded-md bg-emerald-600 px-3.5 text-sm font-medium text-white hover:bg-emerald-700 shadow-xs transition-colors"
           >
             <UserPlusIcon />
-            + Thêm tài khoản Manage
+            + Thêm tài khoản nhánh
           </button>
         ) : (
           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
@@ -1246,9 +1357,9 @@ function AccountsPanel({
       {formOpen && canManage ? (
         <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
           <p className="mb-2 text-[12px] font-semibold text-slate-700">
-            {isEdit ? `Sửa tài khoản: ${draft.username || editingId}` : "Thêm tài khoản Manage mới"}
+            {isEdit ? `Sửa tài khoản: ${draft.username || editingId}` : "Thêm tài khoản nhánh mới"}
           </p>
-          <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-5">
+          <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-6">
             <input
               value={draft.username}
               onChange={(e) => setDraft({ ...draft, username: e.target.value })}
@@ -1267,6 +1378,18 @@ function AccountsPanel({
               placeholder="Email"
               className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
             />
+            <select
+              value={draft.role}
+              onChange={(e) => setDraft({ ...draft, role: e.target.value as BranchAccountRole })}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
+              title="Phân quyền nhánh"
+            >
+              {BRANCH_ACCOUNT_ROLES.map((item) => (
+                <option key={item} value={item}>
+                  {CUSTOMER_ACCOUNT_ROLE_META[item].label}
+                </option>
+              ))}
+            </select>
             <input
               type="password"
               value={draft.password}
@@ -1287,6 +1410,7 @@ function AccountsPanel({
               </button>
             </div>
           </div>
+          <p className="mt-2 text-[11px] text-slate-500">{CUSTOMER_ACCOUNT_ROLE_META[draft.role].hint}</p>
         </div>
       ) : null}
       {error ? <p className="mb-3 text-[12px] text-rose-600">{error}</p> : null}
@@ -1304,6 +1428,10 @@ function AccountsPanel({
             {accounts.map((row) => {
               const role = normalizeCustomerRole(row.role);
               const editing = editingId === row.id;
+              const tone =
+                role === "View"
+                  ? "bg-slate-100 text-slate-600"
+                  : "bg-emerald-50 text-emerald-700";
               return (
                 <tr
                   key={row.id}
@@ -1315,7 +1443,7 @@ function AccountsPanel({
                   </td>
                   <td className="py-3">
                     <span
-                      className="inline-flex rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700"
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${tone}`}
                       title={CUSTOMER_ACCOUNT_ROLE_META[role].hint}
                     >
                       {CUSTOMER_ACCOUNT_ROLE_META[role].label}
@@ -1342,7 +1470,7 @@ function AccountsPanel({
             {accounts.length === 0 ? (
               <tr>
                 <td colSpan={4} className="py-10 text-center text-[12px] text-slate-400">
-                  Chưa có tài khoản Manage. Admin hãy thêm tài khoản Manage cho dự án này.
+                  Chưa có tài khoản nhánh. Admin hãy thêm tài khoản Chỉ xem hoặc Xem và chỉnh sửa.
                 </td>
               </tr>
             ) : null}

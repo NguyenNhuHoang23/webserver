@@ -86,7 +86,7 @@ export function CustomerAccountList() {
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Phân cấp 2 quyền: <strong>Admin</strong> và <strong>Manage</strong>. Mở chi tiết để chọn / đổi quyền.
+            Admin (tài khoản chính) · nhánh: <strong>Chỉ xem</strong> / <strong>Xem và chỉnh sửa</strong>.
           </p>
         </div>
         {canManage ? (
@@ -145,7 +145,9 @@ export function CustomerAccountList() {
                         className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
                           role === "Admin"
                             ? "bg-slate-900 text-white"
-                            : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                            : role === "View"
+                              ? "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                              : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
                         }`}
                         title={CUSTOMER_ACCOUNT_ROLE_META[role].hint}
                       >
@@ -198,7 +200,7 @@ export function CustomerAccountList() {
               {pageRows.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-5 py-12 text-center text-xs text-slate-400">
-                    Chưa có tài khoản khách. Thêm mới và chọn phân cấp Admin hoặc Manage.
+                    Chưa có tài khoản khách. Thêm mới và chọn Admin / Chỉ xem / Xem và chỉnh sửa.
                   </td>
                 </tr>
               ) : null}

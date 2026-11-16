@@ -1,11 +1,8 @@
 import { dbFetch, emitDbChange } from "@/lib/db-client";
 import { vietnamTodayLabel } from "@/lib/vietnam-time";
 
-export type AccountRole =
-  | "Quản trị viên"
-  | "Kỹ sư vận hành"
-  | "Quản lý dự án"
-  | "Nhân viên kỹ thuật";
+/** Phân cấp tài khoản nội bộ cổng quản trị: Admin | Manage. */
+export type AccountRole = "Admin" | "Manage";
 
 export type Account = {
   id: string;
@@ -14,33 +11,33 @@ export type Account = {
   role: AccountRole;
   createdAt: string;
   password?: string;
+  /** Dự án được gán (bắt buộc với Manage; Admin = tất cả). */
+  projectIds: string[];
 };
 
-export const ACCOUNT_ROLES: AccountRole[] = [
-  "Quản trị viên",
-  "Kỹ sư vận hành",
-  "Quản lý dự án",
-  "Nhân viên kỹ thuật",
-];
+export const ACCOUNT_ROLES: AccountRole[] = ["Admin", "Manage"];
 
 export const ACCOUNT_ROLE_META: Record<AccountRole, { label: string; hint: string }> = {
-  "Quản trị viên": {
-    label: "Quản trị viên",
-    hint: "Toàn quyền EMS: người dùng, dự án, thiết bị, gateway, hệ số phát thải",
+  Admin: {
+    label: "Admin",
+    hint: "Toàn quyền EMS trên mọi dự án: người dùng nội bộ, dự án, thiết bị, cấu hình.",
   },
-  "Quản lý dự án": {
-    label: "Quản lý dự án",
-    hint: "Quản lý dự án, thiết bị và hệ số phát thải",
-  },
-  "Kỹ sư vận hành": {
-    label: "Kỹ sư vận hành",
-    hint: "Vận hành thiết bị và gateway",
-  },
-  "Nhân viên kỹ thuật": {
-    label: "Nhân viên kỹ thuật",
-    hint: "Xem dự án và cấu hình thiết bị",
+  Manage: {
+    label: "Manage",
+    hint: "Đầy đủ quyền cấu hình trong các dự án được tích chọn gán quyền.",
   },
 };
+
+/** Chuẩn hóa role cũ (4 chức danh) → Admin | Manage. */
+export function normalizeAccountRole(role: unknown): AccountRole {
+  if (role === "Admin" || role === "Quản trị viên") return "Admin";
+  return "Manage";
+}
+
+export function normalizeAccountProjectIds(role: AccountRole, projectIds?: string[]) {
+  if (role === "Admin") return [] as string[];
+  return Array.from(new Set((projectIds ?? []).map((item) => item.trim()).filter(Boolean)));
+}
 
 let accountsCache: Account[] = [];
 let accountsHydration: Promise<Account[]> | null = null;
@@ -53,12 +50,25 @@ export function todayLabel() {
   return vietnamTodayLabel();
 }
 
+function mapAccount(row: Partial<Account> & { id: string }): Account {
+  const role = normalizeAccountRole(row.role);
+  return {
+    id: row.id,
+    username: String(row.username ?? ""),
+    email: String(row.email ?? ""),
+    role,
+    createdAt: String(row.createdAt ?? todayLabel()),
+    password: row.password,
+    projectIds: normalizeAccountProjectIds(role, row.projectIds),
+  };
+}
+
 export function hydrateAccounts() {
   if (typeof window === "undefined") return Promise.resolve(loadAccounts());
   if (accountsHydration) return accountsHydration;
   accountsHydration = dbFetch<Account[]>("accounts")
     .then((accounts) => {
-      accountsCache = Array.isArray(accounts) ? accounts : [];
+      accountsCache = Array.isArray(accounts) ? accounts.map((item) => mapAccount(item)) : [];
       emitDbChange("accounts");
       return accountsCache;
     })
@@ -69,11 +79,17 @@ export function hydrateAccounts() {
 }
 
 export async function upsertAccount(account: Account) {
+  const role = normalizeAccountRole(account.role);
+  const payload = {
+    ...account,
+    role,
+    projectIds: normalizeAccountProjectIds(role, account.projectIds),
+  };
   const rows = await dbFetch<Account[]>("accounts", {
     method: "POST",
-    body: JSON.stringify(account),
+    body: JSON.stringify(payload),
   });
-  accountsCache = Array.isArray(rows) ? rows : [];
+  accountsCache = Array.isArray(rows) ? rows.map((item) => mapAccount(item)) : [];
   emitDbChange("accounts");
   return accountsCache;
 }
@@ -87,10 +103,10 @@ export async function removeAccount(id: string) {
 
 /** @deprecated Dùng upsertAccount / removeAccount */
 export function saveAccounts(accounts: Account[]) {
-  accountsCache = accounts;
+  accountsCache = accounts.map((item) => mapAccount(item));
   emitDbChange("accounts");
   void dbFetch("accounts", {
     method: "POST",
-    body: JSON.stringify({ items: accounts }),
+    body: JSON.stringify({ items: accountsCache }),
   }).catch((error) => console.error("Không thể lưu tài khoản", error));
 }

@@ -361,13 +361,13 @@ export function ClientDashboard({ project }: { project: Project }) {
       : "Chưa có nguồn phát thải trong cấu hình GHG";
 
   return (
-    <div className="mx-auto h-full max-w-[1480px] overflow-y-auto px-5 py-5 lg:px-6">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[28px] font-bold tracking-tight text-slate-800">
+    <div className="mx-auto h-full max-w-[1480px] overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-5 sm:py-5 lg:px-6">
+      <div className="mb-4 flex flex-col gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate text-[22px] font-bold tracking-tight text-slate-800 sm:text-[28px]">
             {project.customer}
           </h1>
-          <p className="mt-1 text-[13px] text-slate-500">Kỳ xem: {periodLabel}</p>
+          <p className="mt-1 text-[12px] text-slate-500 sm:text-[13px]">Kỳ xem: {periodLabel}</p>
         </div>
         <TimeFilterBar
           value={timeFilter}
@@ -375,13 +375,12 @@ export function ClientDashboard({ project }: { project: Project }) {
             filterTouched.current = true;
             setTimeFilter(next);
           }}
-          className="justify-end"
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <DashboardCard title="ĐIỆN NĂNG TIÊU THỤ" className="xl:col-span-2">
-          <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+      <div className="grid gap-3 sm:gap-4 xl:grid-cols-3">
+        <DashboardCard title="ĐIỆN NĂNG TIÊU THỤ" className="min-w-0 xl:col-span-2">
+          <div className="mb-3 grid grid-cols-1 gap-1 text-sm sm:flex sm:flex-wrap sm:gap-x-6 sm:gap-y-1">
             <p>
               Lớn nhất:{" "}
               <span className="font-semibold text-emerald-700">{formatKwh(energyMax)} kWh</span>
@@ -402,7 +401,7 @@ export function ClientDashboard({ project }: { project: Project }) {
           </div>
           {latest ? <LatestReading sample={latest} /> : null}
           <EnergyChart data={chartSeries} />
-          <p className="mt-2 text-center text-[12px] text-slate-500">
+          <p className="mt-2 break-words text-center text-[11px] leading-relaxed text-slate-500 sm:text-[12px]">
             {energyMomCaption}
             {energyMom && energyMom.pct != null ? (
               <span className={`ml-1 ${energyMom.delta <= 0 ? "text-emerald-600" : "text-amber-600"}`}>
@@ -412,7 +411,7 @@ export function ClientDashboard({ project }: { project: Project }) {
           </p>
         </DashboardCard>
 
-        <DashboardCard title="PHÁT THẢI CO2">
+        <DashboardCard title="PHÁT THẢI CO2" className="min-w-0 overflow-hidden">
           <DonutChart
             color="#1e6b45"
             value={co2.toFixed(2)}
@@ -422,8 +421,8 @@ export function ClientDashboard({ project }: { project: Project }) {
         </DashboardCard>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        <DashboardCard title="CHI PHÍ">
+      <div className="mt-3 grid gap-3 sm:mt-4 sm:gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <DashboardCard title="CHI PHÍ" className="min-w-0 overflow-hidden">
           <DonutChart
             color="#1e5f8a"
             value={periodCostThousands.toLocaleString("vi-VN", {
@@ -463,10 +462,10 @@ function DashboardCard({
 }) {
   return (
     <section
-      className={`rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] ${className}`}
+      className={`min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-4 ${className}`}
     >
-      <div className="mb-2 flex items-start justify-between">
-        <h2 className="text-[12px] font-semibold tracking-[0.08em] text-slate-400">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <h2 className="text-[11px] font-semibold tracking-[0.08em] text-slate-400 sm:text-[12px]">
           {title}
         </h2>
         <button
@@ -506,29 +505,31 @@ function LatestReading({ sample }: { sample: ProjectGatewaySample }) {
 function EnergyChart({ data }: { data: { day: string; kwh: number; hasSample?: boolean }[] }) {
   if (!data.length) {
     return (
-      <div className="flex h-[250px] items-center justify-center text-sm text-slate-400">
+      <div className="flex h-[200px] items-center justify-center text-sm text-slate-400 sm:h-[250px]">
         Chưa có dữ liệu
       </div>
     );
   }
   const max = Math.max(...data.map((item) => item.kwh), 0.001);
+  const labelStep = data.length > 16 ? 5 : data.length > 10 ? 3 : 1;
 
   return (
-    <div className="flex h-[250px] items-end gap-[2px] overflow-x-auto pb-1">
+    <div className="flex h-[200px] items-end gap-px overflow-hidden pb-1 sm:h-[250px] sm:gap-[2px]">
       {data.map((item, index) => {
         const heightPct = item.kwh > 0 ? Math.max((item.kwh / max) * 100, 4) : 0;
+        const showLabel = index % labelStep === 0 || index === data.length - 1;
         return (
-          <div key={`${item.day}-${index}`} className="flex min-w-[10px] flex-1 flex-col items-center">
-            <div className="flex h-[210px] w-full items-end justify-center">
+          <div key={`${item.day}-${index}`} className="flex min-w-0 flex-1 flex-col items-center">
+            <div className="flex h-[165px] w-full items-end justify-center sm:h-[210px]">
               {heightPct > 0 ? (
                 <div
-                  className="w-[7px] rounded-t-sm bg-emerald-600 transition-all hover:bg-emerald-500"
+                  className="w-full max-w-[10px] rounded-t-sm bg-emerald-600 transition-all hover:bg-emerald-500"
                   style={{ height: `${heightPct}%` }}
                   title={`${item.day}: ${formatKwh(item.kwh)} kWh`}
                 />
               ) : (
                 <div
-                  className={`h-[2px] w-[7px] rounded-sm ${item.hasSample ? "bg-emerald-300" : "bg-slate-200"}`}
+                  className={`h-[2px] w-full max-w-[10px] rounded-sm ${item.hasSample ? "bg-emerald-300" : "bg-slate-200"}`}
                   title={
                     item.hasSample
                       ? `${item.day}: có bản tin, sản lượng 0 kWh`
@@ -537,7 +538,13 @@ function EnergyChart({ data }: { data: { day: string; kwh: number; hasSample?: b
                 />
               )}
             </div>
-            <span className="mt-1 text-[9px] leading-none text-slate-400">{item.day}</span>
+            <span
+              className={`mt-1 max-w-full truncate text-[8px] leading-none text-slate-400 sm:text-[9px] ${
+                showLabel ? "opacity-100" : "opacity-0 sm:opacity-100"
+              }`}
+            >
+              {showLabel ? item.day : "·"}
+            </span>
           </div>
         );
       })}
@@ -622,8 +629,8 @@ function DonutChart({
   const filled = circumference * 0.82;
 
   return (
-    <div className="flex flex-col items-center pt-1">
-      <div className="relative h-[210px] w-[210px]">
+    <div className="flex w-full min-w-0 flex-col items-center overflow-hidden pt-1">
+      <div className="relative h-[160px] w-[160px] sm:h-[210px] sm:w-[210px]">
         <svg viewBox="0 0 160 160" className="h-full w-full -rotate-90">
           <circle
             cx="80"
@@ -644,12 +651,14 @@ function DonutChart({
             strokeLinecap="butt"
           />
         </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <p className="text-[26px] font-bold leading-none text-slate-800">{value}</p>
-          <p className="mt-1.5 text-xs text-slate-400">{unit}</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-3 text-center">
+          <p className="text-[22px] leading-none font-bold text-slate-800 sm:text-[26px]">{value}</p>
+          <p className="mt-1.5 text-[11px] text-slate-400 sm:text-xs">{unit}</p>
         </div>
       </div>
-      <p className="mt-1 text-center text-[12px] text-slate-400">{caption}</p>
+      <p className="mt-1 max-w-full break-words px-1 text-center text-[11px] leading-relaxed text-slate-400 sm:text-[12px]">
+        {caption}
+      </p>
     </div>
   );
 }

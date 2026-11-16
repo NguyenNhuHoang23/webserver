@@ -1,22 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/useAuth";
 import { logout } from "@/lib/auth";
 import { hydrateProjects, type Project } from "@/lib/projects";
 
 const navItems = [
-  { href: "", label: "Trang chủ", icon: HomeIcon },
-  { href: "/so-do", label: "Sơ đồ", icon: DiagramIcon },
-  { href: "/bieu-do", label: "Biểu đồ", icon: TrendIcon },
-  { href: "/chi-phi", label: "Chi phí", icon: CostIcon },
-  { href: "/khi-nha-kinh", label: "Khí nhà kính", icon: LeafIcon },
-  { href: "/canh-bao", label: "Cảnh báo", icon: AlertIcon },
-  { href: "/bao-cao", label: "Báo cáo", icon: ReportIcon },
-  { href: "/cau-hinh", label: "Cấu hình", icon: ConfigIcon },
-];
+  { href: "", label: "Trang chủ", short: "Chủ", icon: HomeIcon },
+  { href: "/so-do", label: "Sơ đồ", short: "Sơ đồ", icon: DiagramIcon },
+  { href: "/bieu-do", label: "Biểu đồ", short: "Biểu đồ", icon: TrendIcon },
+  { href: "/chi-phi", label: "Chi phí", short: "Chi phí", icon: CostIcon },
+  { href: "/khi-nha-kinh", label: "Khí nhà kính", short: "GHG", icon: LeafIcon },
+  { href: "/canh-bao", label: "Cảnh báo", short: "Cảnh báo", icon: AlertIcon },
+  { href: "/bao-cao", label: "Báo cáo", short: "Báo cáo", icon: ReportIcon },
+  { href: "/cau-hinh", label: "Cấu hình", short: "Cấu hình", icon: ConfigIcon },
+] as const;
+
+const MOBILE_PRIMARY_HREFS = ["", "/so-do", "/bieu-do", "/chi-phi"] as const;
 
 export function ClientShell({
   project,
@@ -29,6 +31,7 @@ export function ClientShell({
   const router = useRouter();
   const { session } = useAuth();
   const [resolved, setResolved] = useState(project);
+  const [moreOpen, setMoreOpen] = useState(false);
   const base = `/du-an/${project.id}`;
 
   useEffect(() => {
@@ -41,17 +44,48 @@ export function ClientShell({
     };
   }, [project]);
 
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [pathname]);
+
+  const isActive = (href: string) =>
+    href === ""
+      ? pathname === base
+      : pathname === `${base}${href}` || pathname.startsWith(`${base}${href}/`);
+
+  const primaryMobile = useMemo(
+    () => navItems.filter((item) => (MOBILE_PRIMARY_HREFS as readonly string[]).includes(item.href)),
+    [],
+  );
+  const moreMobile = useMemo(
+    () => navItems.filter((item) => !(MOBILE_PRIMARY_HREFS as readonly string[]).includes(item.href)),
+    [],
+  );
+  const moreActive = moreMobile.some((item) => isActive(item.href));
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[#f8fafc] font-sans">
-      <header className="flex min-h-[56px] shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white px-3 sm:px-6">
-        <div className="flex items-center gap-4 sm:gap-6 min-w-0">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 sm:h-14 sm:gap-3 sm:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
+          {session?.portal === "admin" ? (
+            <Link
+              href="/"
+              title="Quay lại danh sách dự án"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:h-8 sm:w-auto sm:gap-1.5 sm:px-2.5"
+            >
+              <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden text-[11px] font-medium sm:inline lg:hidden">Dự án</span>
+              <span className="hidden text-[11px] font-medium lg:inline">Quay lại danh sách dự án</span>
+            </Link>
+          ) : null}
+
           <Link
             href={base}
             title={resolved.customer}
             aria-label={resolved.customer}
-            className="flex items-center shrink-0"
+            className="flex min-w-0 items-center gap-2.5"
           >
-            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-emerald-600 text-[10px] font-bold text-white shadow-xs">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-emerald-600 text-[10px] font-bold text-white shadow-xs">
               {resolved.logoUrl ? (
                 <img
                   src={resolved.logoUrl}
@@ -62,19 +96,18 @@ export function ClientShell({
                 resolved.initials
               )}
             </div>
+            <div className="min-w-0 sm:hidden">
+              <p className="truncate text-sm font-semibold text-slate-800">{resolved.name}</p>
+            </div>
           </Link>
 
-          {/* Desktop/Tablet Nav */}
           <nav
-            className="hidden sm:flex min-h-[56px] items-stretch gap-1 overflow-x-auto"
+            className="hidden h-14 items-stretch gap-1 overflow-x-auto sm:flex"
             aria-label="Điều hướng dự án"
           >
             {navItems.map((item) => {
               const href = `${base}${item.href}`;
-              const active =
-                item.href === ""
-                  ? pathname === base
-                  : pathname === href || pathname.startsWith(`${href}/`);
+              const active = isActive(item.href);
               const Icon = item.icon;
 
               return (
@@ -84,7 +117,7 @@ export function ClientShell({
                   title={item.label}
                   className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-xs font-medium whitespace-nowrap transition-colors ${
                     active
-                      ? "border-emerald-600 text-emerald-800 font-semibold"
+                      ? "border-emerald-600 font-semibold text-emerald-800"
                       : "border-transparent text-slate-500 hover:text-slate-900"
                   }`}
                 >
@@ -96,32 +129,20 @@ export function ClientShell({
           </nav>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          {session?.portal === "admin" ? (
-            <Link
-              href="/"
-              title="Quay lại danh sách dự án"
-              className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 px-2 text-[11px] font-medium text-slate-600 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
-            >
-              <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden lg:inline">Quay lại danh sách dự án</span>
-              <span className="lg:hidden">Dự án</span>
-            </Link>
-          ) : null}
-
-          <div className="hidden sm:inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/70 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+          <div className="hidden items-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/70 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 sm:inline-flex">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             <span>SCADA Online</span>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+          <div className="hidden h-4 w-px bg-slate-200 sm:block" />
 
-          <div className="flex items-center gap-2 sm:gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-700 font-semibold text-white text-[11px]">
+          <div className="flex items-center gap-1.5 sm:gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-700 text-[11px] font-semibold text-white sm:h-7 sm:w-7">
               {(session?.displayName ?? session?.username ?? resolved.customer).slice(0, 2).toUpperCase()}
             </div>
             <div className="hidden text-left leading-tight md:block">
-              <p className="text-xs font-semibold text-slate-800 truncate max-w-[140px]">
+              <p className="max-w-[140px] truncate text-xs font-semibold text-slate-800">
                 {session?.displayName ?? session?.username ?? resolved.customer}
               </p>
               <p className="text-[10px] tracking-wide text-slate-400 uppercase">
@@ -130,52 +151,112 @@ export function ClientShell({
             </div>
             <button
               type="button"
+              title="Đăng xuất"
               onClick={() => {
                 const portal = session?.portal;
                 logout();
                 if (portal === "admin") router.replace("/");
               }}
-              className="inline-flex h-7 items-center rounded-lg border border-slate-200 px-2 text-[11px] font-medium text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors ml-0.5"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 sm:h-7 sm:w-auto sm:px-2"
             >
-              Đăng xuất
+              <LogoutIcon className="h-3.5 w-3.5 sm:hidden" />
+              <span className="hidden text-[11px] font-medium sm:inline">Đăng xuất</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* Mobile Navigation Strip */}
+      <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-[4.75rem] sm:pb-0">
+        {children}
+      </main>
+
+      {moreOpen ? (
+        <button
+          type="button"
+          aria-label="Đóng menu thêm"
+          className="fixed inset-0 z-40 bg-slate-900/40 sm:hidden"
+          onClick={() => setMoreOpen(false)}
+        />
+      ) : null}
+
+      {moreOpen ? (
+        <div className="fixed inset-x-3 bottom-[4.75rem] z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl sm:hidden">
+          <p className="px-2 py-1.5 text-[10px] font-semibold tracking-wider text-slate-400 uppercase">
+            Thêm mục
+          </p>
+          <div className="grid grid-cols-2 gap-1">
+            {moreMobile.map((item) => {
+              const href = `${base}${item.href}`;
+              const active = isActive(item.href);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={href}
+                  onClick={() => setMoreOpen(false)}
+                  className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold transition-colors ${
+                    active
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 ${active ? "text-emerald-600" : "text-slate-400"}`} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       <nav
-        className="flex sm:hidden overflow-x-auto border-b border-slate-200/80 bg-white px-2.5 py-1.5 gap-1 shrink-0 scrollbar-none"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/80 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.06)] backdrop-blur-md sm:hidden"
         aria-label="Điều hướng dự án mobile"
       >
-        {navItems.map((item) => {
-          const href = `${base}${item.href}`;
-          const active =
-            item.href === ""
-              ? pathname === base
-              : pathname === href || pathname.startsWith(`${href}/`);
-          const Icon = item.icon;
-
-          return (
-            <Link
-              key={item.href || "home"}
-              href={href}
-              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
-                active
-                  ? "bg-emerald-600 text-white font-semibold shadow-xs"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+        <div className="grid h-16 grid-cols-5">
+          {primaryMobile.map((item) => {
+            const href = `${base}${item.href}`;
+            const active = isActive(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href || "home"}
+                href={href}
+                className={`flex flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium ${
+                  active ? "font-semibold text-emerald-700" : "text-slate-500"
+                }`}
+              >
+                <span
+                  className={`flex h-8 w-8 items-center justify-center rounded-full ${
+                    active ? "bg-emerald-50" : ""
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 ${active ? "text-emerald-600" : "text-slate-400"}`} />
+                </span>
+                <span className="leading-none">{item.short}</span>
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMoreOpen((open) => !open)}
+            className={`flex flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium ${
+              moreActive || moreOpen ? "font-semibold text-emerald-700" : "text-slate-500"
+            }`}
+          >
+            <span
+              className={`flex h-8 w-8 items-center justify-center rounded-full ${
+                moreActive || moreOpen ? "bg-emerald-50" : ""
               }`}
             >
-              <Icon className={`h-3.5 w-3.5 shrink-0 ${active ? "text-white" : "text-slate-400"}`} />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
+              <MoreIcon className={`h-4 w-4 ${moreActive || moreOpen ? "text-emerald-600" : "text-slate-400"}`} />
+            </span>
+            <span className="leading-none">Thêm</span>
+          </button>
+        </div>
       </nav>
 
-      <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
-
-      <footer className="flex h-9 shrink-0 items-center justify-between gap-4 border-t border-slate-200/80 bg-white px-4 text-[11px] text-slate-400 sm:px-6">
+      <footer className="hidden h-9 shrink-0 items-center justify-between gap-4 border-t border-slate-200/80 bg-white px-4 text-[11px] text-slate-400 sm:flex sm:px-6">
         <p className="truncate">
           © 2026 {resolved.customer} • EMS Telemetry Gateway
         </p>
@@ -200,6 +281,26 @@ function ArrowLeftIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function LogoutIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="16 17 21 12 16 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MoreIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
     </svg>
   );
 }

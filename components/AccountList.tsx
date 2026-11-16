@@ -13,6 +13,7 @@ import {
   type AccountRole,
 } from "@/lib/accounts";
 import { hasPermission } from "@/lib/permissions";
+import { hydrateProjects, loadProjects, type Project } from "@/lib/projects";
 
 const PAGE_SIZE = 8;
 
@@ -20,31 +21,48 @@ export function AccountList() {
   const { session } = useAuth();
   const canManage = hasPermission(session, "manageUsers");
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
   useEffect(() => {
     setAccounts(loadAccounts());
+    setProjects(loadProjects());
     let active = true;
-    void hydrateAccounts().then((items) => {
-      if (active) setAccounts(items);
+    void Promise.all([hydrateAccounts(), hydrateProjects()]).then(([items, projectRows]) => {
+      if (!active) return;
+      setAccounts(items);
+      setProjects(projectRows);
     });
     return () => {
       active = false;
     };
   }, []);
 
+  const projectName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const project of projects) map.set(project.id, project.name);
+    return map;
+  }, [projects]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return accounts;
-    return accounts.filter(
-      (item) =>
+    return accounts.filter((item) => {
+      const projectLabel = (item.projectIds ?? [])
+        .map((id) => projectName.get(id) ?? id)
+        .join(" ")
+        .toLowerCase();
+      return (
         item.username.toLowerCase().includes(q) ||
         item.email.toLowerCase().includes(q) ||
-        item.role.toLowerCase().includes(q),
-    );
-  }, [accounts, query]);
+        item.role.toLowerCase().includes(q) ||
+        ACCOUNT_ROLE_META[item.role]?.label.toLowerCase().includes(q) ||
+        projectLabel.includes(q)
+      );
+    });
+  }, [accounts, query, projectName]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -65,8 +83,7 @@ export function AccountList() {
             </span>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Tài khoản nhân sự công ty đăng nhập cổng quản trị EMS. Tài khoản khách hàng quản lý trong từng dự án
-            (Cấu hình → Quản lý tài khoản).
+            Tài khoản nhân sự công ty · phân cấp Admin (mọi dự án) / Manage (dự án được gán).
           </p>
         </div>
         {canManage ? (
@@ -90,19 +107,20 @@ export function AccountList() {
             setQuery(e.target.value);
             setPage(1);
           }}
-          placeholder="Tìm theo tên đăng nhập, email hoặc vai trò..."
+          placeholder="Tìm theo tên đăng nhập, email, quyền hoặc dự án..."
           className="h-10 w-full rounded-xl border border-slate-200 bg-white pr-3 pl-9 text-xs text-slate-800 shadow-xs outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
         />
       </div>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-xs">
+          <table className="w-full min-w-[860px] text-left text-xs">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
                 <th className="px-5 py-3">Tài khoản</th>
                 <th className="px-5 py-3">Email</th>
-                <th className="px-5 py-3">Vai trò</th>
+                <th className="px-5 py-3">Phân cấp</th>
+                <th className="px-5 py-3">Dự án được gán</th>
                 <th className="px-5 py-3">Ngày tạo</th>
                 <th className="px-5 py-3 text-right">Thao tác</th>
               </tr>
@@ -121,6 +139,17 @@ export function AccountList() {
                   <td className="px-5 py-3.5 font-mono text-[11px] text-slate-600">{account.email}</td>
                   <td className="px-5 py-3.5">
                     <RoleBadge role={account.role} />
+                  </td>
+                  <td className="px-5 py-3.5 text-slate-600">
+                    {account.role === "Admin" ? (
+                      <span className="text-[11px] font-medium text-slate-500">Tất cả dự án</span>
+                    ) : account.projectIds?.length ? (
+                      <span className="line-clamp-2 text-[11px]">
+                        {account.projectIds.map((id) => projectName.get(id) ?? id).join(", ")}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-amber-600">Chưa gán dự án</span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-slate-500">{account.createdAt}</td>
                   <td className="px-5 py-3.5 text-right">
@@ -150,8 +179,8 @@ export function AccountList() {
               ))}
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center text-xs text-slate-400">
-                    Chưa có tài khoản nội bộ. Thêm Quản trị viên hoặc nhân sự công ty để đăng nhập cổng quản trị.
+                  <td colSpan={6} className="px-5 py-12 text-center text-xs text-slate-400">
+                    Chưa có tài khoản nội bộ. Thêm Admin hoặc Manage để đăng nhập cổng quản trị.
                   </td>
                 </tr>
               ) : null}
@@ -191,9 +220,8 @@ export function AccountList() {
           i
         </span>
         <p className="leading-relaxed">
-          <strong className="font-semibold text-slate-800">Phân tách:</strong> trang này quản lý nhân sự nội bộ
-          (bảng <code className="rounded bg-white px-1">accounts</code>). Tài khoản khách (Admin / Chỉ xem / Xem &amp;
-          chỉnh sửa) nằm trong từng dự án — không hiển thị ở đây.
+          <strong className="font-semibold text-slate-800">Cổng Admin:</strong> chỉ quản lý tài khoản nội bộ
+          (Admin / Manage). Tài khoản khách hàng tạo trong từng dự án (Cấu hình → Quản lý tài khoản).
         </p>
       </div>
 
@@ -218,13 +246,9 @@ export function AccountList() {
 function RoleBadge({ role }: { role: AccountRole }) {
   const meta = ACCOUNT_ROLE_META[role] ?? { label: role, hint: role };
   const tone =
-    role === "Quản trị viên"
+    role === "Admin"
       ? "bg-slate-900 text-white"
-      : role === "Quản lý dự án"
-        ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-        : role === "Kỹ sư vận hành"
-          ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
-          : "bg-slate-100 text-slate-600 ring-1 ring-slate-200";
+      : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
   return (
     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${tone}`} title={meta.hint}>
       {meta.label}

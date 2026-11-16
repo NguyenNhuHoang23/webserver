@@ -11,6 +11,7 @@ import {
   hydrateCustomerAccounts,
   type CustomerAccount,
 } from "@/lib/customer-accounts";
+import { canViewClientProject } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import {
   emptyTelemetry,
@@ -103,6 +104,7 @@ export function ProjectList() {
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return items.filter((p) => {
+      if (!canViewClientProject(session, p.id)) return false;
       const admins = adminsByProject.get(p.id) ?? [];
       const matchCustomer = customer === "all" || p.customer === customer;
       const matchStatus = status === "all" || p.status === status;
@@ -118,7 +120,7 @@ export function ProjectList() {
         );
       return matchCustomer && matchStatus && matchSearch;
     });
-  }, [customer, status, searchQuery, items, adminsByProject]);
+  }, [customer, status, searchQuery, items, adminsByProject, session]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);

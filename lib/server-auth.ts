@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
+import { normalizeAccountRole } from "@/lib/accounts";
 import type { AuthSession } from "@/lib/auth";
+import { normalizeCustomerRole } from "@/lib/customer-accounts";
 import { hasPermission, type Permission } from "@/lib/permissions";
 import { queryRows } from "@/lib/server-db";
 
@@ -24,7 +26,7 @@ export async function getServerSession(): Promise<AuthSession | null> {
               COALESCE(a.username, c.username) AS username,
               COALESCE(a.email, c.email) AS email,
               COALESCE(a.username, c.display_name) AS displayName,
-              COALESCE(a.role, c.role, 'View') AS role,
+              COALESCE(a.role, c.role, 'Manage') AS role,
               s.project_id AS projectId
          FROM auth_sessions s
          LEFT JOIN accounts a ON s.portal = 'admin' AND a.id = s.user_id
@@ -35,6 +37,12 @@ export async function getServerSession(): Promise<AuthSession | null> {
     );
     const row = rows[0];
     if (!row) return null;
+    const rawRole = String(row.role ?? "");
+    const role =
+      row.portal === "customer"
+        ? normalizeCustomerRole(rawRole)
+        : normalizeAccountRole(rawRole);
+
     let projectIds: string[] | undefined;
     if (row.portal === "customer") {
       const links = await queryRows<{ projectId: string }>(
@@ -43,10 +51,13 @@ export async function getServerSession(): Promise<AuthSession | null> {
       );
       projectIds = links.map((item) => String(item.projectId)).filter(Boolean);
       if (!projectIds.length && row.projectId) projectIds = [String(row.projectId)];
+    } else if (role === "Manage") {
+      const links = await queryRows<{ projectId: string }>(
+        `SELECT project_id AS projectId FROM account_projects WHERE account_id = ?`,
+        [String(row.userId)],
+      );
+      projectIds = links.map((item) => String(item.projectId)).filter(Boolean);
     }
-    const rawRole = String(row.role ?? "");
-    const role =
-      row.portal === "customer" ? (rawRole === "Admin" ? "Admin" : "Manage") : rawRole;
 
     return {
       portal: row.portal,

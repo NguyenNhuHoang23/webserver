@@ -1,4 +1,6 @@
 import { cookies } from "next/headers";
+import { normalizeAccountRole } from "@/lib/accounts";
+import { normalizeCustomerRole } from "@/lib/customer-accounts";
 import { queryRows } from "@/lib/server-db";
 
 const SESSION_COOKIE = "ems-session";
@@ -13,7 +15,7 @@ export async function GET() {
               COALESCE(a.username, c.username) AS username,
               COALESCE(a.email, c.email) AS email,
               COALESCE(a.username, c.display_name) AS displayName,
-              COALESCE(a.role, c.role, 'View') AS role,
+              COALESCE(a.role, c.role, 'Manage') AS role,
               s.project_id AS projectId
          FROM auth_sessions s
          LEFT JOIN accounts a ON s.portal = 'admin' AND a.id = s.user_id
@@ -29,18 +31,28 @@ export async function GET() {
     }
 
     let projectIds: string[] | undefined;
-    if (session.portal === "customer" && session.userId) {
-      const links = await queryRows<{ projectId: string }>(
-        `SELECT project_id AS projectId FROM customer_account_projects WHERE account_id = ?`,
-        [String(session.userId)],
-      );
-      projectIds = links.map((row) => String(row.projectId)).filter(Boolean);
-      if (!projectIds.length && session.projectId) projectIds = [String(session.projectId)];
-    }
-
     const rawRole = String(session.role ?? "");
     const role =
-      session.portal === "customer" ? (rawRole === "Admin" ? "Admin" : "Manage") : rawRole;
+      session.portal === "customer"
+        ? normalizeCustomerRole(rawRole)
+        : normalizeAccountRole(rawRole);
+
+    if (session.userId) {
+      if (session.portal === "customer") {
+        const links = await queryRows<{ projectId: string }>(
+          `SELECT project_id AS projectId FROM customer_account_projects WHERE account_id = ?`,
+          [String(session.userId)],
+        );
+        projectIds = links.map((row) => String(row.projectId)).filter(Boolean);
+        if (!projectIds.length && session.projectId) projectIds = [String(session.projectId)];
+      } else if (session.portal === "admin" && role === "Manage") {
+        const links = await queryRows<{ projectId: string }>(
+          `SELECT project_id AS projectId FROM account_projects WHERE account_id = ?`,
+          [String(session.userId)],
+        );
+        projectIds = links.map((row) => String(row.projectId)).filter(Boolean);
+      }
+    }
 
     return Response.json({
       session: {

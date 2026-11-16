@@ -11,8 +11,12 @@ import {
 } from "@/lib/alert-config";
 import {
   alertCategory,
+  alertDelivery,
+  deliveryStatusLabel,
   hydrateAlertEvents,
   loadAlertEvents,
+  type AlertDelivery,
+  type AlertDeliveryStatus,
   type AlertEvent,
 } from "@/lib/alert-events";
 import { hydrateProjectSettings } from "@/lib/project-settings";
@@ -43,6 +47,7 @@ export interface AlertItem {
   severity: AlertSeverityLevel;
   category: AlertCategory;
   message: string;
+  delivery: AlertDelivery;
 }
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -80,6 +85,7 @@ function dbAlertToItem(event: AlertEvent, config: AlertConfig): AlertItem {
     severity: resolveConfiguredSeverity(category, storedSeverity, config),
     category,
     message: event.message ?? `Sự kiện ${event.parameter} tại ${event.pointName ?? "điểm đo"}`,
+    delivery: alertDelivery(event),
   };
 }
 
@@ -93,8 +99,36 @@ function inMonth(occurredAt: string, year: number, month: number) {
 
 function severityLabel(severity: AlertSeverityLevel) {
   if (severity === "critical") return "Nghiêm trọng";
-  if (severity === "info") return "Thông tin";
   return "Cảnh báo";
+}
+
+function deliveryTone(status: AlertDeliveryStatus) {
+  if (status === "sent") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700";
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+function DeliveryBadges({ delivery }: { delivery: AlertDelivery }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {(
+        [
+          ["Email", delivery.email],
+          ["Zalo", delivery.zalo],
+          ["Telegram", delivery.telegram],
+        ] as const
+      ).map(([channel, status]) => (
+        <span
+          key={channel}
+          title={`${channel}: ${deliveryStatusLabel(status)}`}
+          className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${deliveryTone(status)}`}
+        >
+          <span className="opacity-70">{channel}</span>
+          {deliveryStatusLabel(status)}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 export function ClientAlerts({ project }: { project: Project }) {
@@ -169,9 +203,14 @@ export function ClientAlerts({ project }: { project: Project }) {
   const stats = useMemo(() => {
     const total = monthAlerts.length;
     const critical = monthAlerts.filter((a) => a.severity === "critical").length;
-    const warning = monthAlerts.filter((a) => a.severity === "warning").length;
-    const info = monthAlerts.filter((a) => a.severity === "info").length;
-    return { total, critical, warning, info };
+    const warning = monthAlerts.filter((a) => a.severity !== "critical").length;
+    const deliveryFailed = monthAlerts.filter(
+      (a) =>
+        a.delivery.email === "failed" ||
+        a.delivery.zalo === "failed" ||
+        a.delivery.telegram === "failed",
+    ).length;
+    return { total, critical, warning, deliveryFailed };
   }, [monthAlerts]);
 
   const exportCsv = () => {
@@ -186,6 +225,9 @@ export function ClientAlerts({ project }: { project: Project }) {
       "Đơn vị",
       "Mức độ",
       "Nội dung",
+      "Email",
+      "Zalo",
+      "Telegram",
     ];
     const rows = filteredAlerts.map((a) => [
       a.id,
@@ -198,6 +240,9 @@ export function ClientAlerts({ project }: { project: Project }) {
       a.unit,
       severityLabel(a.severity),
       `"${a.message}"`,
+      deliveryStatusLabel(a.delivery.email),
+      deliveryStatusLabel(a.delivery.zalo),
+      deliveryStatusLabel(a.delivery.telegram),
     ]);
     const csvContent =
       "data:text/csv;charset=utf-8,\uFEFF" +
@@ -215,15 +260,15 @@ export function ClientAlerts({ project }: { project: Project }) {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[#f8fafc]">
-      <div className="shrink-0 border-b border-slate-200/80 bg-white px-5 py-4 lg:px-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+      <div className="shrink-0 border-b border-slate-200/80 bg-white px-3 py-3 sm:px-5 sm:py-4 lg:px-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
               <AlertBellIcon className="h-5 w-5" />
             </span>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">Nhật ký cảnh báo</h1>
-              <p className="mt-0.5 text-xs text-slate-500">
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl">Nhật ký cảnh báo</h1>
+              <p className="mt-0.5 truncate text-xs text-slate-500">
                 Theo dõi thời điểm phát sinh cảnh báo trong tháng · {project.name}
               </p>
             </div>
@@ -298,19 +343,19 @@ export function ClientAlerts({ project }: { project: Project }) {
 
           <div className="rounded-xl border border-slate-200/80 bg-white p-3">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-              Thông tin
+              Gửi thất bại
             </span>
             <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-slate-800">{stats.info}</span>
-              <span className="text-[11px] text-slate-500">trong tháng</span>
+              <span className="text-2xl font-bold text-slate-800">{stats.deliveryFailed}</span>
+              <span className="text-[11px] text-slate-500">Email/Zalo/Telegram</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-3 lg:px-8">
+      <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5 lg:px-8">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[220px] max-w-[320px] flex-1">
+          <div className="relative min-w-0 max-w-none flex-1 basis-full sm:min-w-[220px] sm:max-w-[320px] sm:basis-auto">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -328,7 +373,6 @@ export function ClientAlerts({ project }: { project: Project }) {
             <option value="all">Tất cả mức độ</option>
             <option value="critical">Nghiêm trọng</option>
             <option value="warning">Cảnh báo</option>
-            <option value="info">Thông tin</option>
           </select>
 
           <select
@@ -385,10 +429,10 @@ export function ClientAlerts({ project }: { project: Project }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 lg:px-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4 lg:px-8">
         <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-xs">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px] text-left text-xs">
+            <table className="w-full min-w-[1100px] text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
                   <th className="px-4 py-3.5">Mức độ</th>
@@ -397,13 +441,14 @@ export function ClientAlerts({ project }: { project: Project }) {
                   <th className="px-3 py-3.5">Thông số</th>
                   <th className="px-3 py-3.5">Thực tế / Ngưỡng</th>
                   <th className="px-3 py-3.5">Nội dung</th>
+                  <th className="px-3 py-3.5">Gửi tin</th>
                   <th className="px-4 py-3.5 text-right">Chi tiết</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredAlerts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center text-slate-400">
+                    <td colSpan={8} className="py-16 text-center text-slate-400">
                       <div className="flex flex-col items-center justify-center">
                         <CheckCircleIcon className="mb-2 h-10 w-10 text-emerald-500 opacity-80" />
                         <p className="text-sm font-semibold text-slate-700">
@@ -423,9 +468,7 @@ export function ClientAlerts({ project }: { project: Project }) {
                           className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase ${
                             item.severity === "critical"
                               ? "border-rose-200 bg-rose-100 text-rose-700"
-                              : item.severity === "warning"
-                                ? "border-amber-200 bg-amber-100 text-amber-800"
-                                : "border-slate-200 bg-slate-100 text-slate-700"
+                              : "border-amber-200 bg-amber-100 text-amber-800"
                           }`}
                         >
                           {severityLabel(item.severity)}
@@ -450,11 +493,7 @@ export function ClientAlerts({ project }: { project: Project }) {
                       <td className="px-3 py-3.5 whitespace-nowrap">
                         <span
                           className={`text-sm font-bold ${
-                            item.severity === "critical"
-                              ? "text-rose-600"
-                              : item.severity === "warning"
-                                ? "text-amber-600"
-                                : "text-slate-800"
+                            item.severity === "critical" ? "text-rose-600" : "text-amber-600"
                           }`}
                         >
                           {item.actualValue}
@@ -464,6 +503,9 @@ export function ClientAlerts({ project }: { project: Project }) {
                       </td>
                       <td className="max-w-[280px] px-3 py-3.5">
                         <p className="line-clamp-2 leading-relaxed text-slate-700">{item.message}</p>
+                      </td>
+                      <td className="px-3 py-3.5">
+                        <DeliveryBadges delivery={item.delivery} />
                       </td>
                       <td className="px-4 py-3.5 text-right whitespace-nowrap">
                         <button
@@ -498,9 +540,7 @@ export function ClientAlerts({ project }: { project: Project }) {
                   className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold tracking-wider uppercase ${
                     inspectAlert.severity === "critical"
                       ? "bg-rose-100 text-rose-700"
-                      : inspectAlert.severity === "warning"
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-slate-100 text-slate-700"
+                      : "bg-amber-100 text-amber-800"
                   }`}
                 >
                   {severityLabel(inspectAlert.severity)}
@@ -553,6 +593,15 @@ export function ClientAlerts({ project }: { project: Project }) {
               <p className="mt-1 rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed font-medium text-slate-800">
                 {inspectAlert.message}
               </p>
+            </div>
+
+            <div className="mt-4">
+              <span className="text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                Trạng thái gửi tin
+              </span>
+              <div className="mt-2">
+                <DeliveryBadges delivery={inspectAlert.delivery} />
+              </div>
             </div>
 
             <div className="mt-5 flex justify-end border-t border-slate-100 pt-4">

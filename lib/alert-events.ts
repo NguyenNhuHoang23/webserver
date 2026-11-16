@@ -1,5 +1,14 @@
 import { dbFetch, emitDbChange } from "@/lib/db-client";
 
+/** Trạng thái gửi tin qua kênh thông báo. */
+export type AlertDeliveryStatus = "sent" | "failed" | "pending";
+
+export type AlertDelivery = {
+  email: AlertDeliveryStatus;
+  zalo: AlertDeliveryStatus;
+  telegram: AlertDeliveryStatus;
+};
+
 export type AlertEvent = {
   id: string;
   projectId: string;
@@ -19,10 +28,41 @@ export type AlertEvent = {
   pointCode?: string;
   pointName?: string;
   utility?: string;
+  /** Trạng thái gửi Email / Zalo / Telegram. */
+  delivery?: AlertDelivery;
+  emailStatus?: AlertDeliveryStatus | null;
+  zaloStatus?: AlertDeliveryStatus | null;
+  telegramStatus?: AlertDeliveryStatus | null;
 };
 
 const cache: Record<string, AlertEvent[]> = {};
 const hydration: Record<string, Promise<AlertEvent[]> | undefined> = {};
+
+export function normalizeDeliveryStatus(value: unknown): AlertDeliveryStatus {
+  if (value === "sent" || value === "failed") return value;
+  return "pending";
+}
+
+export function alertDelivery(event: Pick<AlertEvent, "delivery" | "emailStatus" | "zaloStatus" | "telegramStatus">): AlertDelivery {
+  if (event.delivery) {
+    return {
+      email: normalizeDeliveryStatus(event.delivery.email),
+      zalo: normalizeDeliveryStatus(event.delivery.zalo),
+      telegram: normalizeDeliveryStatus(event.delivery.telegram),
+    };
+  }
+  return {
+    email: normalizeDeliveryStatus(event.emailStatus),
+    zalo: normalizeDeliveryStatus(event.zaloStatus),
+    telegram: normalizeDeliveryStatus(event.telegramStatus),
+  };
+}
+
+export function deliveryStatusLabel(status: AlertDeliveryStatus) {
+  if (status === "sent") return "Đã gửi";
+  if (status === "failed") return "Thất bại";
+  return "Chưa gửi";
+}
 
 export function loadAlertEvents(projectId: string): AlertEvent[] {
   return cache[projectId] ?? [];
@@ -33,8 +73,10 @@ export function hydrateAlertEvents(projectId: string) {
   if (!hydration[projectId]) {
     hydration[projectId] = dbFetch<AlertEvent[]>("alert-events", { query: { projectId } })
       .then((events) => {
-        cache[projectId] = events;
-        return events;
+        cache[projectId] = Array.isArray(events)
+          ? events.map((event) => ({ ...event, delivery: alertDelivery(event) }))
+          : [];
+        return cache[projectId];
       })
       .finally(() => {
         hydration[projectId] = undefined;
@@ -50,15 +92,17 @@ export async function updateAlertEvent(
 ) {
   const current = loadAlertEvents(projectId);
   cache[projectId] = current.map((event) =>
-    event.id === id ? { ...event, ...patch } : event,
+    event.id === id ? { ...event, ...patch, delivery: alertDelivery({ ...event, ...patch }) } : event,
   );
   const events = await dbFetch<AlertEvent[]>("alert-events", {
     method: "POST",
     body: JSON.stringify({ projectId, id, ...patch }),
   });
-  cache[projectId] = events;
+  cache[projectId] = Array.isArray(events)
+    ? events.map((event) => ({ ...event, delivery: alertDelivery(event) }))
+    : [];
   emitDbChange("alert-events");
-  return events;
+  return cache[projectId];
 }
 
 export function alertStatus(status: AlertEvent["status"]): "active" | "acknowledged" | "resolved" {

@@ -289,6 +289,7 @@ function SystemDiagramInner() {
   const [diagramVersion, setDiagramVersion] = useState(0);
   const [diagramStateReady, setDiagramStateReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pointsOpen, setPointsOpen] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [displays, setDisplays] = useState<Record<string, DiagramNodeDisplay>>({});
   const [liveById, setLiveById] = useState<Record<string, ProjectGatewaySample>>({});
@@ -568,26 +569,49 @@ function SystemDiagramInner() {
   return (
     <DiagramActionsContext.Provider value={diagramActions}>
       <div className="flex h-full min-h-0 bg-white font-sans">
-        {/* Left Sidebar: Points List */}
-        <aside className="flex w-[280px] shrink-0 flex-col border-r border-slate-200/80 bg-slate-50/70">
-          <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-slate-200/60 bg-white">
+        {pointsOpen ? (
+          <button
+            type="button"
+            aria-label="Đóng danh sách điểm đo"
+            className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden"
+            onClick={() => setPointsOpen(false)}
+          />
+        ) : null}
+
+        {/* Left Sidebar: Points List — drawer trên mobile */}
+        <aside
+          className={`${
+            pointsOpen ? "fixed inset-y-0 left-0 z-40 flex" : "hidden"
+          } w-[min(280px,88vw)] shrink-0 flex-col border-r border-slate-200/80 bg-slate-50/70 shadow-xl lg:relative lg:z-0 lg:flex lg:w-[280px] lg:shadow-none`}
+        >
+          <div className="flex items-center justify-between border-b border-slate-200/60 bg-white px-4 pt-4 pb-3">
             <div>
-              <h2 className="text-xs font-bold tracking-wider uppercase text-slate-700">
+              <h2 className="text-xs font-bold tracking-wider text-slate-700 uppercase">
                 Danh sách điểm đo
               </h2>
             </div>
-            <button
-              type="button"
-              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:opacity-40 transition-colors"
-              aria-label="Cài đặt điểm đo"
-              disabled={!selectedNode}
-              onClick={() => selectedNode && setSettingsOpen(true)}
-              title="Tùy chỉnh hiển thị & thông số"
-            >
-              <GearIcon className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800 disabled:opacity-40"
+                aria-label="Cài đặt điểm đo"
+                disabled={!selectedNode}
+                onClick={() => selectedNode && setSettingsOpen(true)}
+                title="Tùy chỉnh hiển thị & thông số"
+              >
+                <GearIcon className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPointsOpen(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 lg:hidden"
+                aria-label="Đóng"
+              >
+                ×
+              </button>
+            </div>
           </div>
-          <ul className="min-h-0 flex-1 overflow-y-auto p-2 space-y-1">
+          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
             {listedPoints.length === 0 ? (
               <li className="px-3 py-8 text-center text-xs text-slate-400">
                 Chưa có điểm đo nào cho loại {energy}.
@@ -599,7 +623,10 @@ function SystemDiagramInner() {
                   <li key={point.id}>
                     <button
                       type="button"
-                      onClick={() => selectPoint(point.id)}
+                      onClick={() => {
+                        selectPoint(point.id);
+                        setPointsOpen(false);
+                      }}
                       className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs transition-colors ${
                         active
                           ? "bg-slate-900 font-semibold text-white shadow-xs"
@@ -643,15 +670,22 @@ function SystemDiagramInner() {
         {/* Center: SCADA Canvas */}
         <section className="flex min-w-0 flex-1 flex-col">
           {/* Top Canvas Bar */}
-          <div className="flex flex-wrap items-center justify-start gap-4 border-b border-slate-200/80 bg-white px-6 py-3">
+          <div className="flex flex-wrap items-center justify-start gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
+            <button
+              type="button"
+              onClick={() => setPointsOpen(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] font-semibold text-slate-700 lg:hidden"
+            >
+              Điểm đo ({listedPoints.length})
+            </button>
             {/* Energy Utility Selector */}
-            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/60 p-1">
+            <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/60 p-1">
               {energyFilters.map((item) => (
                 <button
                   key={item}
                   type="button"
                   onClick={() => setEnergy(item)}
-                  className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${
+                  className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors sm:px-3 ${
                     energy === item
                       ? "bg-emerald-600 text-white shadow-xs"
                       : "text-slate-600 hover:bg-white hover:text-slate-900"
@@ -803,10 +837,17 @@ function NodeSettingsPanel({
   };
 
   return (
-    <aside className="flex w-[320px] shrink-0 flex-col border-l border-slate-200 bg-white font-sans shadow-lg">
+    <>
+      <button
+        type="button"
+        aria-label="Đóng tùy chỉnh điểm đo"
+        className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
+        onClick={onClose}
+      />
+      <aside className="fixed inset-y-0 right-0 z-50 flex w-[min(320px,92vw)] shrink-0 flex-col border-l border-slate-200 bg-white font-sans shadow-2xl lg:relative lg:z-0 lg:w-[320px] lg:shadow-lg">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5">
         <div>
-          <h2 className="text-xs font-bold uppercase tracking-wide text-slate-800">Tùy chỉnh điểm đo</h2>
+          <h2 className="text-xs font-bold tracking-wide text-slate-800 uppercase">Tùy chỉnh điểm đo</h2>
           <p className="text-[11px] text-slate-400">Chọn thông số thực hiển thị trên sơ đồ</p>
         </div>
         <button
@@ -963,6 +1004,7 @@ function NodeSettingsPanel({
         </SettingsField>
       </div>
     </aside>
+    </>
   );
 }
 
@@ -975,7 +1017,7 @@ function SettingsField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+      <span className="mb-1.5 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
         {label}
       </span>
       {children}

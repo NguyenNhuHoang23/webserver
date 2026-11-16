@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   civilDatePart,
   civilTimePart,
@@ -293,11 +293,9 @@ export function TimeFilterBar({
     { id: "custom_date", label: "Tùy chọn" },
   ];
 
-  const years = useMemo(() => [2023, 2024, 2025, 2026, 2027], []);
-
   return (
-    <div className={`flex w-full flex-wrap items-center gap-2 font-sans sm:gap-2.5 ${className}`}>
-      <div className="inline-flex max-w-full overflow-x-auto rounded-xl border border-slate-200/90 bg-white p-1 shadow-xs">
+    <div className={`flex w-full flex-col gap-2 font-sans sm:flex-row sm:flex-wrap sm:items-center sm:gap-2.5 ${className}`}>
+      <div className="inline-flex w-full max-w-full overflow-x-auto rounded-xl border border-slate-200/90 bg-white p-1 shadow-xs sm:w-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {modes.map((item) => {
           const active = value.mode === item.id;
           return (
@@ -305,7 +303,7 @@ export function TimeFilterBar({
               key={item.id}
               type="button"
               onClick={() => onChange({ ...value, mode: item.id })}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all sm:px-3 ${
                 active
                   ? "bg-slate-900 text-white shadow-xs"
                   : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
@@ -317,7 +315,7 @@ export function TimeFilterBar({
         })}
       </div>
 
-      <div className="inline-flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+      <div className="flex w-full min-w-0 flex-nowrap items-center gap-1.5 sm:w-auto sm:flex-1">
         <button
           type="button"
           aria-label="Kỳ trước"
@@ -326,68 +324,47 @@ export function TimeFilterBar({
         >
           ‹
         </button>
-        {value.mode === "day" && (
-          <div className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-700 shadow-xs">
-            <StepButton
-              label="Ngày trước"
-              onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, -1)))}
-            />
-            <VietnamDateInput
-              value={value.date}
+        <div className="min-w-0 flex-1 sm:flex-none">
+          {value.mode === "day" && (
+            <DayField
+              date={/^\d{4}-\d{2}-\d{2}$/.test(value.date) ? value.date : vietnamNow().date}
               onChange={(date) => onChange(withCivilDate(value, date))}
-              className="min-w-[4.5rem] border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none"
             />
-            <StepButton
-              label="Ngày sau"
-              onClick={() => onChange(withCivilDate(value, shiftCivilDate(value.date, 1)))}
+          )}
+
+          {value.mode === "month" && (
+            <MonthField
+              month={/^\d{4}-\d{2}$/.test(value.month) ? value.month : vietnamNow().monthKey}
+              onChange={(month) => onChange({ ...value, month, year: Number(month.slice(0, 4)) })}
             />
-          </div>
-        )}
+          )}
 
-        {value.mode === "month" && (
-          <MonthField
-            month={/^\d{4}-\d{2}$/.test(value.month) ? value.month : vietnamNow().monthKey}
-            onChange={(month) => onChange({ ...value, month, year: Number(month.slice(0, 4)) })}
-          />
-        )}
+          {value.mode === "year" && (
+            <YearField
+              year={value.year || vietnamNow().year}
+              onChange={(year) => onChange({ ...value, year })}
+            />
+          )}
 
-        {value.mode === "year" && (
-          <div className="relative">
-            <select
-              value={value.year}
-              onChange={(e) => onChange({ ...value, year: Number(e.target.value) })}
-              className="h-9 cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white pr-8 pl-3 text-xs font-semibold text-slate-900 shadow-xs outline-none transition-colors hover:border-slate-300 focus:border-emerald-500"
-            >
-              {years.map((y) => (
-                <option key={y} value={y}>
-                  Năm {y}
-                </option>
-              ))}
-            </select>
-            <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-slate-400">
-              ▾
-            </span>
-          </div>
-        )}
-
-        {value.mode === "custom_date" && (
-          <DateSelectionControl
-            mode={value.customDateMode}
-            onModeChange={(customDateMode) => onChange({ ...value, customDateMode })}
-            date={value.customDate}
-            onDateChange={(customDate) =>
-              onChange(withCivilDate({ ...value, customDate }, civilDatePart(customDate)))
-            }
-            startDate={value.startDate}
-            endDate={value.endDate}
-            onStartDateChange={(startDate) =>
-              onChange(withCivilDate({ ...value, startDate }, civilDatePart(startDate)))
-            }
-            onEndDateChange={(endDate) =>
-              onChange(withCivilDate({ ...value, endDate }, civilDatePart(endDate)))
-            }
-          />
-        )}
+          {value.mode === "custom_date" && (
+            <DateSelectionControl
+              mode={value.customDateMode}
+              onModeChange={(customDateMode) => onChange({ ...value, customDateMode })}
+              date={value.customDate}
+              onDateChange={(customDate) =>
+                onChange(withCivilDate({ ...value, customDate }, civilDatePart(customDate)))
+              }
+              startDate={value.startDate}
+              endDate={value.endDate}
+              onStartDateChange={(startDate) =>
+                onChange(withCivilDate({ ...value, startDate }, civilDatePart(startDate)))
+              }
+              onEndDateChange={(endDate) =>
+                onChange(withCivilDate({ ...value, endDate }, civilDatePart(endDate)))
+              }
+            />
+          )}
+        </div>
         <button
           type="button"
           aria-label="Kỳ sau"
@@ -429,7 +406,7 @@ export function DateSelectionControl({
 
   return (
     <div
-      className={`inline-flex min-h-9 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 ${textClass} font-medium text-slate-700 shadow-xs transition-colors hover:border-slate-300`}
+      className={`inline-flex min-h-9 w-full flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 sm:w-auto sm:px-3 sm:py-0 ${textClass} font-medium text-slate-700 shadow-xs transition-colors hover:border-slate-300`}
     >
       <CalendarSmallIcon className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
       <span className="whitespace-nowrap text-slate-500">Tùy chọn:</span>
@@ -468,13 +445,12 @@ export function DateSelectionControl({
 }
 
 const MONTH_LABELS = ["Th1", "Th2", "Th3", "Th4", "Th5", "Th6", "Th7", "Th8", "Th9", "Th10", "Th11", "Th12"];
+const WEEKDAY_LABELS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
 
-function MonthField({ month, onChange }: { month: string; onChange: (month: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const year = Number(month.slice(0, 4)) || vietnamNow().year;
-  const monthIndex = Number(month.slice(5, 7)) || vietnamNow().month;
+const periodTriggerClass =
+  "inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 shadow-xs transition-colors hover:border-slate-300 sm:w-auto sm:justify-start";
 
+function useDismissibleOpen(open: boolean, setOpen: (open: boolean) => void, rootRef: React.RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: MouseEvent) => {
@@ -489,20 +465,113 @@ function MonthField({ month, onChange }: { month: string; onChange: (month: stri
       document.removeEventListener("mousedown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, rootRef, setOpen]);
+}
+
+function DayField({ date, onChange }: { date: string; onChange: (date: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const safe = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : vietnamNow().date;
+  const [y, m, d] = safe.split("-").map(Number);
+  const [viewYear, setViewYear] = useState(y);
+  const [viewMonth, setViewMonth] = useState(m);
+  useDismissibleOpen(open, setOpen, rootRef);
+
+  useEffect(() => {
+    if (!open) return;
+    setViewYear(y);
+    setViewMonth(m);
+  }, [open, y, m]);
+
+  const daysInMonth = new Date(Date.UTC(viewYear, viewMonth, 0)).getUTCDate();
+  // Monday-first grid: UTC weekday 0=Sun → offset
+  const firstWeekday = new Date(Date.UTC(viewYear, viewMonth - 1, 1)).getUTCDay();
+  const leading = firstWeekday === 0 ? 6 : firstWeekday - 1;
+
+  const shiftView = (delta: number) => {
+    const next = new Date(Date.UTC(viewYear, viewMonth - 1 + delta, 1));
+    setViewYear(next.getUTCFullYear());
+    setViewMonth(next.getUTCMonth() + 1);
+  };
+
+  return (
+    <div ref={rootRef} className="relative w-full sm:w-auto">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-label="Chọn ngày"
+        className={periodTriggerClass}
+      >
+        <CalendarSmallIcon className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+        Ngày {String(d).padStart(2, "0")}/{String(m).padStart(2, "0")}/{y}
+      </button>
+      {open ? (
+        <div className="absolute left-0 z-40 mt-1 w-[260px] rounded-xl border border-slate-200 bg-white p-3 shadow-lg sm:left-auto sm:right-0">
+          <div className="mb-2 flex items-center justify-between">
+            <StepButton label="Tháng trước" onClick={() => shiftView(-1)} />
+            <span className="text-sm font-semibold text-slate-900">
+              Tháng {String(viewMonth).padStart(2, "0")}/{viewYear}
+            </span>
+            <StepButton label="Tháng sau" onClick={() => shiftView(1)} />
+          </div>
+          <div className="mb-1 grid grid-cols-7 gap-1">
+            {WEEKDAY_LABELS.map((label) => (
+              <span key={label} className="text-center text-[10px] font-semibold text-slate-400">
+                {label}
+              </span>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: leading }).map((_, index) => (
+              <span key={`pad-${index}`} />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const day = index + 1;
+              const value = `${viewYear}-${String(viewMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const active = value === safe;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    onChange(value);
+                    setOpen(false);
+                  }}
+                  className={`h-8 rounded-lg text-xs font-semibold ${
+                    active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MonthField({ month, onChange }: { month: string; onChange: (month: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const year = Number(month.slice(0, 4)) || vietnamNow().year;
+  const monthIndex = Number(month.slice(5, 7)) || vietnamNow().month;
+  useDismissibleOpen(open, setOpen, rootRef);
 
   const choose = (nextYear: number, nextMonth: number) => {
     onChange(`${nextYear}-${String(nextMonth).padStart(2, "0")}`);
   };
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative w-full sm:w-auto">
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-label="Chọn tháng"
-        className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 shadow-xs transition-colors hover:border-slate-300"
+        className={periodTriggerClass}
       >
         <CalendarSmallIcon className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
         Tháng {String(monthIndex).padStart(2, "0")}/{year}
@@ -530,6 +599,67 @@ function MonthField({ month, onChange }: { month: string; onChange: (month: stri
                   }`}
                 >
                   {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function YearField({ year, onChange }: { year: number; onChange: (year: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const safeYear = Number.isFinite(year) ? year : vietnamNow().year;
+  const [rangeStart, setRangeStart] = useState(safeYear - 4);
+  useDismissibleOpen(open, setOpen, rootRef);
+
+  useEffect(() => {
+    if (!open) return;
+    setRangeStart(safeYear - 4);
+  }, [open, safeYear]);
+
+  const years = Array.from({ length: 12 }, (_, index) => rangeStart + index);
+
+  return (
+    <div ref={rootRef} className="relative w-full sm:w-auto">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-label="Chọn năm"
+        className={periodTriggerClass}
+      >
+        <CalendarSmallIcon className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+        Năm {safeYear}
+      </button>
+      {open ? (
+        <div className="absolute left-0 z-40 mt-1 w-[232px] rounded-xl border border-slate-200 bg-white p-3 shadow-lg sm:left-auto sm:right-0">
+          <div className="mb-2 flex items-center justify-between">
+            <StepButton label="Kỳ trước" onClick={() => setRangeStart((current) => current - 12)} />
+            <span className="text-sm font-semibold text-slate-900">
+              {rangeStart}–{rangeStart + 11}
+            </span>
+            <StepButton label="Kỳ sau" onClick={() => setRangeStart((current) => current + 12)} />
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {years.map((item) => {
+              const active = item === safeYear;
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => {
+                    onChange(item);
+                    setOpen(false);
+                  }}
+                  className={`h-8 rounded-lg text-xs font-semibold ${
+                    active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {item}
                 </button>
               );
             })}
