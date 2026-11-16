@@ -66,11 +66,19 @@ const nodeTypes: NodeTypes = {
   meter: MeterNode,
 };
 
-const edgeStyle = { stroke: "#cbd5e1", strokeWidth: 2 };
+/** Đường nối kiểu single-line: thẳng góc, đậm, màu bus. */
+const edgeStyle = {
+  stroke: "#334155",
+  strokeWidth: 2.25,
+};
 
-const NODE_W = 248;
-const H_GAP = 48;
-const V_GAP = 120;
+const NODE_W = 152;
+const H_GAP = 56;
+const V_GAP = 148;
+
+function meterIsLinked(meter: Pick<ClientMeter, "deviceId" | "serialNumber">) {
+  return Boolean(meter.deviceId || meter.serialNumber?.trim());
+}
 
 function waitForViewportPaint() {
   return new Promise<void>((resolve) => {
@@ -177,7 +185,7 @@ function nodeDataForMeter(
 ): MeterNodeData {
   const metricKeys = normalizeMetricKeys(display?.metricKeys);
   const live = buildLiveMetrics(metricKeys, sample?.values, {
-    hasDevice: Boolean(meter.deviceId),
+    hasDevice: meterIsLinked(meter),
     online: isSampleOnline(sample?.at),
     code: meter.code,
   });
@@ -245,7 +253,7 @@ function buildFlowFromMeters(
         sourceHandle: "child",
         target: child.id,
         targetHandle: "parent",
-        type: "smoothstep",
+        type: "step",
         style: edgeStyle,
       });
       cursor += w + H_GAP;
@@ -512,7 +520,7 @@ function SystemDiagramInner() {
           normalizeMetricKeys(display?.metricKeys),
           liveById[meter.id]?.values,
           {
-            hasDevice: Boolean(meter.deviceId),
+            hasDevice: meterIsLinked(meter),
             online: isSampleOnline(liveById[meter.id]?.at),
             code: meter.code,
           },
@@ -701,10 +709,11 @@ function SystemDiagramInner() {
           <div ref={wrapperRef} className="relative flex min-h-0 flex-1">
             <div className="relative min-h-0 min-w-0 flex-1">
               <ReactFlow
-                className="diagram-flow bg-[#f8fafc]"
+                className="diagram-flow bg-[#eef2f6]"
                 nodes={nodes}
                 edges={edges}
                 nodeTypes={nodeTypes}
+                defaultEdgeOptions={{ type: "step", style: edgeStyle }}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onNodeClick={(_, node) => {
@@ -738,7 +747,7 @@ function SystemDiagramInner() {
                 maxZoom={2.0}
                 proOptions={{ hideAttribution: true }}
               >
-                <Background gap={24} size={1} color="#cbd5e1" />
+                <Background id="sld-grid" gap={20} size={1} color="#c5ced9" />
 
                 {/* Status Notice on drag/save */}
                 {savedNotice && (

@@ -56,12 +56,7 @@ export function DeviceList() {
   const start = (currentPage - 1) * PAGE_SIZE;
   const rows = filtered.slice(start, start + PAGE_SIZE);
 
-  const stats = useMemo(() => {
-    const mapped = devices.filter((d) => (d.registers?.length ?? 0) > 0).length;
-    const withImage = devices.filter((d) => Boolean(d.image)).length;
-    const brandsCount = new Set(devices.map((d) => d.brand)).size;
-    return { total: devices.length, mapped, withImage, brandsCount };
-  }, [devices]);
+  const totalDevices = devices.length;
 
   async function removeDevice(id: string) {
     setDeleteError("");
@@ -78,17 +73,9 @@ export function DeviceList() {
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Thư viện loại đồng hồ
-            </h1>
-            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
-              {devices.length} models
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-slate-500">
-            Danh mục trống mặc định — chỉ thêm loại đồng hồ thực tế (ví dụ PM2230 khớp gateway). Không dùng model mẫu như PM5000.
-          </p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            Thư viện loại đồng hồ
+          </h1>
         </div>
         <Link
           href="/thiet-bi/them-moi"
@@ -99,36 +86,13 @@ export function DeviceList() {
         </Link>
       </div>
 
-      {/* KPI Cards */}
-      <div className="mb-6 sm:mb-8 grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+      {/* KPI Card */}
+      <div className="mb-6 sm:mb-8 max-w-sm">
         <StatCard
           label="TỔNG LOẠI ĐỒNG HỒ"
-          value={String(stats.total)}
+          value={String(totalDevices)}
           hint="Catalog tiêu chuẩn"
           icon={<BoxIcon className="h-5 w-5 text-slate-700" />}
-          iconWrap="bg-slate-100"
-        />
-        <StatCard
-          label="ĐÃ CẤU HÌNH THANH GHI"
-          value={String(stats.mapped)}
-          valueClass="text-emerald-700"
-          hint="Sẵn sàng đọc Modbus/MQTT"
-          icon={<CheckIcon className="h-5 w-5 text-emerald-600" />}
-          iconWrap="bg-emerald-50"
-        />
-        <StatCard
-          label="CÓ ẢNH NHẬN DIỆN"
-          value={String(stats.withImage)}
-          valueClass="text-cyan-700"
-          hint="Hỗ trợ hiển thị trực quan"
-          icon={<CameraIcon className="h-5 w-5 text-cyan-600" />}
-          iconWrap="bg-cyan-50"
-        />
-        <StatCard
-          label="THƯƠNG HIỆU HỖ TRỢ"
-          value={String(stats.brandsCount)}
-          hint="Hãng sản xuất thiết bị"
-          icon={<TagIcon className="h-5 w-5 text-slate-600" />}
           iconWrap="bg-slate-100"
         />
       </div>
@@ -336,15 +300,6 @@ export function DeviceList() {
           />
         </div>
 
-        {/* Subtle Tip Banner */}
-        <div className="flex items-start gap-2.5 border-t border-emerald-100 bg-emerald-50/40 px-5 py-3 text-xs text-emerald-800">
-          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-          <p>
-            <strong className="font-semibold">Lưu ý:</strong> Chỉ thêm đúng loại đồng hồ thực tế đang lắp (PM2230).
-            Category phải trùng <code className="text-[11px]">meterModel</code> từ gateway; không dùng placeholder PM5000.
-            Khi thêm điểm đo trong dự án chỉ cần chọn loại đã khai báo.
-          </p>
-        </div>
       </section>
 
       <ConfirmDialog
@@ -544,32 +499,6 @@ function BoxIcon({ className }: { className?: string }) {
   );
 }
 
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function CameraIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-      <circle cx="12" cy="13" r="3" />
-    </svg>
-  );
-}
-
-function TagIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" />
-      <path d="M7 7h.01" />
-    </svg>
-  );
-}
-
 function FilterIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -610,15 +539,6 @@ function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-    </svg>
-  );
-}
-
-function InfoIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 16v-4M12 8h.01" />
     </svg>
   );
 }

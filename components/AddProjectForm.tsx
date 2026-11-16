@@ -4,14 +4,17 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  ALERT_CHANNEL_OPTIONS,
   hydrateProjects,
   nextProjectId,
+  normalizeAlertChannels,
   projectAccent,
   projectInitials,
   resolveMeterTypes,
   upsertProject,
+  type AlertChannel,
   type AlertRecipient,
   type MeterType,
   type Project,
@@ -19,16 +22,33 @@ import {
 } from "@/lib/projects";
 import { ensureCustomerAccount } from "@/lib/customer-accounts";
 import {
+  hydrateAccounts,
+  loadAccounts,
+  upsertAccount,
+  type Account,
+} from "@/lib/accounts";
+import {
   loadMeterTypeDefs,
   hydrateMeterTypeDefs,
-  removeMeterTypeDef,
-  upsertMeterTypeDef,
   type MeterTypeDef,
   type MeterTypeIconId,
 } from "@/lib/meter-types";
 
 function nextRecipient(): AlertRecipient {
-  return { id: `rcpt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: "", email: "", phone: "" };
+  return {
+    id: `rcpt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name: "",
+    email: "",
+    phone: "",
+    channels: ["email"],
+  };
+}
+
+function normalizeRecipient(item: AlertRecipient): AlertRecipient {
+  return {
+    ...item,
+    channels: normalizeAlertChannels(item.channels),
+  };
 }
 
 function todayIso() {
@@ -50,9 +70,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
 
   const [code, setCode] = useState(() => initialProject?.id ?? nextProjectId());
   const [name, setName] = useState(() => initialProject?.name ?? "");
-  const [customer, setCustomer] = useState(() => initialProject?.customer ?? "");
-  const [contactName, setContactName] = useState(() => initialProject?.contactName ?? "");
-  const [email, setEmail] = useState(() => initialProject?.email ?? "");
+  const [managerId, setManagerId] = useState("");
   const [phone, setPhone] = useState(() => initialProject?.phone ?? "");
   const [address, setAddress] = useState(() => initialProject?.address ?? "");
   const [logoUrl, setLogoUrl] = useState(() => initialProject?.logoUrl ?? "");
@@ -62,18 +80,19 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
     initialProject ? resolveMeterTypes(initialProject) : ["Điện"],
   );
   const [meterCatalog, setMeterCatalog] = useState<MeterTypeDef[]>(loadMeterTypeDefs);
-  const [meterEditor, setMeterEditor] = useState<"add" | string | null>(null);
-  const [draftName, setDraftName] = useState("");
-  const [draftDescription, setDraftDescription] = useState("");
-  const [meterError, setMeterError] = useState("");
+  const [managers, setManagers] = useState<Account[]>(() => loadAccounts());
   const [recipients, setRecipients] = useState<AlertRecipient[]>(() =>
     initialProject?.recipients?.length
-      ? initialProject.recipients
+      ? initialProject.recipients.map(normalizeRecipient)
       : [nextRecipient()],
   );
   const [error, setError] = useState("");
-  const [meterTypeToDelete, setMeterTypeToDelete] = useState<MeterTypeDef | null>(null);
   const [recipientToDelete, setRecipientToDelete] = useState<AlertRecipient | null>(null);
+
+  const selectedManager = useMemo(
+    () => managers.find((item) => item.id === managerId) ?? null,
+    [managers, managerId],
+  );
 
   function handleLogoChange(file?: File) {
     if (!file) return;
@@ -98,11 +117,28 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
   }
 
   useEffect(() => {
-    void Promise.all([hydrateProjects(), hydrateMeterTypeDefs()]).then(([projects, meterTypes]) => {
-      if (!initialProject) setCode(nextProjectId(projects));
-      setMeterCatalog(meterTypes);
-    });
-  }, []);
+    void Promise.all([hydrateProjects(), hydrateMeterTypeDefs(), hydrateAccounts()]).then(
+      ([projects, meterTypes, accounts]) => {
+        if (!initialProject) setCode(nextProjectId(projects));
+        setMeterCatalog(meterTypes);
+        setManagers(accounts);
+        if (initialProject) {
+          const matched =
+            accounts.find(
+              (item) =>
+                (initialProject.email && item.email === initialProject.email) ||
+                (initialProject.contactName && item.username === initialProject.contactName),
+            ) ?? null;
+          if (matched) setManagerId(matched.id);
+        }
+      },
+    );
+  }, [initialProject]);
+
+  function applyManager(accountId: string) {
+    setManagerId(accountId);
+    setPhone("");
+  }
 
   function toggleMeter(type: MeterType) {
     setMeterTypes((current) =>
@@ -110,67 +146,33 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
     );
   }
 
-  function openAddMeterType() {
-    setMeterEditor("add");
-    setDraftName("");
-    setDraftDescription("");
-    setMeterError("");
-  }
-
-  function openEditMeterType(item: MeterTypeDef) {
-    setMeterEditor(item.name);
-    setDraftName(item.name);
-    setDraftDescription(item.description);
-    setMeterError("");
-  }
-
-  function cancelMeterEditor() {
-    setMeterEditor(null);
-    setDraftName("");
-    setDraftDescription("");
-    setMeterError("");
-  }
-
-  function saveMeterType() {
-    try {
-      const previous = meterEditor === "add" ? undefined : meterEditor ?? undefined;
-      const next = upsertMeterTypeDef({ name: draftName, description: draftDescription }, previous);
-      setMeterCatalog(next);
-      const savedName = draftName.trim();
-      if (previous && previous !== savedName) {
-        setMeterTypes((current) => current.map((item) => (item === previous ? savedName : item)));
-      }
-      if (meterEditor === "add" && savedName && !meterTypes.includes(savedName)) {
-        setMeterTypes((current) => [...current, savedName]);
-      }
-      cancelMeterEditor();
-    } catch (err) {
-      setMeterError(err instanceof Error ? err.message : "Không thể lưu loại điểm đo.");
-    }
-  }
-
-  function deleteMeterType(item: MeterTypeDef) {
-    try {
-      const next = removeMeterTypeDef(item.name);
-      setMeterCatalog(next);
-      setMeterTypes((current) => current.filter((type) => type !== item.name));
-      if (meterEditor === item.name) cancelMeterEditor();
-    } catch (err) {
-      setMeterError(err instanceof Error ? err.message : "Không thể xóa loại điểm đo.");
-    }
-  }
-
   function updateRecipient(id: string, patch: Partial<AlertRecipient>) {
     setRecipients((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
+  function toggleRecipientChannel(id: string, channel: AlertChannel) {
+    setRecipients((current) =>
+      current.map((item) => {
+        if (item.id !== id) return item;
+        const channels = item.channels.includes(channel)
+          ? item.channels.filter((value) => value !== channel)
+          : [...item.channels, channel];
+        return { ...item, channels: channels.length ? channels : item.channels };
+      }),
+    );
+  }
+
   async function handleSubmit() {
     const projectName = name.trim();
-    const customerName = customer.trim();
+    const customerName = projectName;
     const projectCode = (initialProject?.id ?? code.trim().toUpperCase()) || nextProjectId();
 
-    if (!projectName || !customerName) {
-      setError("Vui lòng nhập tên dự án và tên khách hàng.");
+    if (!projectName) {
+      setError("Vui lòng nhập tên dự án.");
+      return;
+    }
+    if (!managerId || !selectedManager) {
+      setError("Vui lòng chọn người quản lý dự án.");
       return;
     }
     if (meterTypes.length === 0) {
@@ -184,6 +186,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         name: item.name.trim(),
         email: item.email.trim(),
         phone: item.phone.trim(),
+        channels: normalizeAlertChannels(item.channels),
       }))
       .filter((item) => item.name || item.email || item.phone);
 
@@ -192,6 +195,25 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
     );
     if (invalid) {
       setError("Email người nhận cảnh báo không hợp lệ.");
+      return;
+    }
+
+    const missingEmail = cleanedRecipients.find(
+      (item) => item.channels.includes("email") && !item.email,
+    );
+    if (missingEmail) {
+      setError("Người nhận chọn Email cần có địa chỉ email.");
+      return;
+    }
+    const missingPhone = cleanedRecipients.find(
+      (item) =>
+        (item.channels.includes("sms") ||
+          item.channels.includes("zalo") ||
+          item.channels.includes("telegram")) &&
+        !item.phone,
+    );
+    if (missingPhone) {
+      setError("Người nhận chọn Zalo / Telegram / SMS cần có số điện thoại.");
       return;
     }
 
@@ -206,13 +228,19 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         logoUrl: logoUrl || undefined,
         status,
         startDate,
-        contactName: contactName.trim(),
+        contactName: selectedManager.username,
         phone: phone.trim(),
-        email: email.trim(),
+        email: selectedManager.email,
         address: address.trim(),
         meterTypes,
         recipients: cleanedRecipients,
       });
+      if (selectedManager.role === "Manage") {
+        await upsertAccount({
+          ...selectedManager,
+          projectIds: Array.from(new Set([...selectedManager.projectIds, projectCode])),
+        });
+      }
       if (!initialProject) ensureCustomerAccount({ id: projectCode, customer: customerName });
       router.push("/");
     } catch (err) {
@@ -226,11 +254,6 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">
           {initialProject ? "Sửa thông tin dự án" : "Tạo dự án mới"}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {initialProject
-            ? "Cập nhật thông tin khách hàng, loại điểm đo và người nhận thông báo cảnh báo."
-            : "Cấu hình thông tin khách hàng, loại điểm đo và người nhận thông báo cảnh báo."}
-        </p>
       </div>
 
       <form
@@ -243,9 +266,6 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-8">
           <div className="mb-6">
             <h2 className="text-[15px] font-semibold text-slate-800">Thông tin khách hàng</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Thông tin định danh dự án và liên hệ của khách hàng sử dụng hệ thống.
-            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -262,50 +282,41 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
             <Field label="TÊN DỰ ÁN">
               <input
                 value={name}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setName(value);
-                  if (!initialProject) setCustomer(value);
-                }}
+                onChange={(e) => setName(e.target.value)}
                 placeholder="VD: Công ty TNHH ABC"
                 className="input"
                 required
               />
             </Field>
-            <Field label="TÊN KHÁCH HÀNG">
-              <input
-                value={customer}
-                onChange={(e) => setCustomer(e.target.value)}
-                placeholder="Tự điền theo tên dự án"
-                className="input"
-                required
-              />
+            <Field label="NGƯỜI QUẢN LÝ DỰ ÁN">
+              <div className="relative">
+                <select
+                  value={managerId}
+                  onChange={(e) => applyManager(e.target.value)}
+                  className="input appearance-none pr-9"
+                  required
+                >
+                  <option value="">Chọn người quản lý...</option>
+                  {managers.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.username} · {account.role}
+                    </option>
+                  ))}
+                </select>
+                <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              </div>
             </Field>
-            <Field label="NGƯỜI LIÊN HỆ">
-              <input
-                value={contactName}
-                onChange={(e) => setContactName(e.target.value)}
-                placeholder="Họ và tên người phụ trách"
-                className="input"
-              />
-            </Field>
-            <Field label="EMAIL">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="contact@company.com"
-                className="input"
-              />
-            </Field>
-            <Field label="SỐ ĐIỆN THOẠI">
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="VD: 0901 234 567"
-                className="input"
-              />
+            <Field label="THÔNG TIN LIÊN HỆ">
+              <div className="input flex min-h-10 flex-col justify-center gap-0.5 bg-slate-50 text-sm text-slate-700">
+                {selectedManager ? (
+                  <>
+                    <span className="font-semibold text-slate-800">{selectedManager.username}</span>
+                    <span className="text-xs text-slate-500">{selectedManager.email}</span>
+                  </>
+                ) : (
+                  <span className="text-slate-400">Tự lấy sau khi chọn người quản lý</span>
+                )}
+              </div>
             </Field>
             <Field label="NGÀY BẮT ĐẦU">
               <input
@@ -351,9 +362,9 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
                   style={{ backgroundColor: initialProject?.accent ?? "#059669" }}
                 >
                   {logoUrl ? (
-                    <img src={logoUrl} alt={`Logo ${customer || name || "công ty"}`} className="h-full w-full object-contain bg-white" />
+                    <img src={logoUrl} alt={`Logo ${name || "công ty"}`} className="h-full w-full object-contain bg-white" />
                   ) : (
-                    projectInitials(customer || name)
+                    projectInitials(name)
                   )}
                 </div>
                 <div className="min-w-[220px] flex-1">
@@ -390,139 +401,50 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
             <div>
               <h2 className="text-[15px] font-semibold text-slate-800">Loại điểm đo</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Chọn các loại năng lượng sẽ được giám sát trong dự án này. Có thể thêm loại mới ngoài 4 loại mặc định.
+                Chọn các loại năng lượng giám sát cho dự án. Thêm / sửa / xóa thư viện tại{" "}
+                <Link href="/loai-diem-do" className="font-semibold text-emerald-700 hover:underline">
+                  Cấu hình → Loại điểm đo
+                </Link>
+                .
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openAddMeterType}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100/70 transition-colors"
-            >
-              <span className="text-lg leading-none">+</span>
-              Thêm loại điểm đo
-            </button>
           </div>
-
-          {meterEditor ? (
-            <div className="mb-4 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50/30 p-4 sm:grid-cols-[1fr_1fr_auto]">
-              <Field label="TÊN LOẠI ĐIỂM ĐO">
-                <input
-                  value={draftName}
-                  onChange={(e) => {
-                    setDraftName(e.target.value);
-                    setMeterError("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      saveMeterType();
-                    }
-                    if (e.key === "Escape") cancelMeterEditor();
-                  }}
-                  placeholder="VD: Khí nén"
-                  className="input"
-                  disabled={meterEditor !== "add" && meterCatalog.find((item) => item.name === meterEditor)?.builtin}
-                />
-              </Field>
-              <Field label="MÔ TẢ LOẠI ĐIỂM ĐO">
-                <input
-                  value={draftDescription}
-                  onChange={(e) => {
-                    setDraftDescription(e.target.value);
-                    setMeterError("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      saveMeterType();
-                    }
-                    if (e.key === "Escape") cancelMeterEditor();
-                  }}
-                  placeholder="VD: Áp suất và lưu lượng khí nén"
-                  className="input"
-                />
-              </Field>
-              <div className="flex items-end gap-2">
-                <button
-                  type="button"
-                  onClick={saveMeterType}
-                  className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors shadow-xs"
-                >
-                  {meterEditor === "add" ? "Thêm" : "Lưu"}
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelMeterEditor}
-                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                >
-                  Hủy
-                </button>
-              </div>
-              {meterError ? <p className="text-sm font-medium text-red-500 sm:col-span-3">{meterError}</p> : null}
-            </div>
-          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
             {meterCatalog.map((item) => {
               const active = meterTypes.includes(item.name);
               return (
-                <div
+                <button
                   key={item.name}
+                  type="button"
+                  onClick={() => toggleMeter(item.name)}
                   className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors ${
                     active
                       ? "border-emerald-600 bg-emerald-50/70 ring-1 ring-emerald-500/20"
                       : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
                   }`}
                 >
-                  <button
-                    type="button"
-                    onClick={() => toggleMeter(item.name)}
-                    className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                  <span
+                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                      active ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-100 text-slate-500"
+                    }`}
                   >
-                    <span
-                      className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                        active ? "bg-emerald-600 text-white shadow-xs" : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      <MeterTypeIcon type={item.icon} className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-slate-800">{item.name}</span>
-                        <span
-                          className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
-                            active ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white"
-                          }`}
-                        >
-                          {active ? <CheckIcon className="h-3 w-3" /> : null}
-                        </span>
-                      </span>
-                      <span className="mt-0.5 block text-xs text-slate-500">{item.description}</span>
-                    </span>
-                  </button>
-                  <div className="flex shrink-0 flex-col gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openEditMeterType(item)}
-                      className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-emerald-600"
-                      aria-label={`Sửa ${item.name}`}
-                      title="Sửa"
-                    >
-                      <EditIcon className="h-3.5 w-3.5" />
-                    </button>
-                    {item.builtin ? null : (
-                      <button
-                        type="button"
-                        onClick={() => setMeterTypeToDelete(item)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
-                        aria-label={`Xóa ${item.name}`}
-                        title="Xóa"
+                    <MeterTypeIcon type={item.icon} className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-slate-800">{item.name}</span>
+                      <span
+                        className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+                          active ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white"
+                        }`}
                       >
-                        <TrashIcon className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
+                        {active ? <CheckIcon className="h-3 w-3" /> : null}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-500">{item.description}</span>
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -533,7 +455,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
             <div>
               <h2 className="text-[15px] font-semibold text-slate-800">Người nhận thông báo cảnh báo</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Danh sách email và số điện thoại nhận cảnh báo khi hệ thống vượt ngưỡng.
+                Chọn người nhận và các kênh gửi (Email, Zalo, Telegram, SMS) — có thể chọn nhiều kênh.
               </p>
             </div>
             <button
@@ -547,50 +469,69 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
           </div>
 
           <div className="space-y-3">
-            {recipients.map((item, index) => (
-              <div
-                key={item.id}
-                className="grid gap-3 rounded-xl border border-slate-100 bg-[#f8fafc] p-4 sm:grid-cols-[1fr_1fr_1fr_auto]"
-              >
-                <Field label={index === 0 ? "HỌ TÊN" : undefined}>
-                  <input
-                    value={item.name}
-                    onChange={(e) => updateRecipient(item.id, { name: e.target.value })}
-                    placeholder="Nguyễn Văn A"
-                    className="input"
-                  />
-                </Field>
-                <Field label={index === 0 ? "EMAIL" : undefined}>
-                  <input
-                    type="email"
-                    value={item.email}
-                    onChange={(e) => updateRecipient(item.id, { email: e.target.value })}
-                    placeholder="alert@company.com"
-                    className="input"
-                  />
-                </Field>
-                <Field label={index === 0 ? "SỐ ĐIỆN THOẠI" : undefined}>
-                  <input
-                    type="tel"
-                    value={item.phone}
-                    onChange={(e) => updateRecipient(item.id, { phone: e.target.value })}
-                    placeholder="0901 234 567"
-                    className="input"
-                  />
-                </Field>
-                <div className={index === 0 ? "flex items-end" : "flex items-center"}>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRecipients((current) =>
-                        current.length === 1 ? [nextRecipient()] : current.filter((row) => row.id !== item.id),
-                      )
-                    }
-                    className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
-                    aria-label="Xóa người nhận"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
+            {recipients.map((item) => (
+              <div key={item.id} className="rounded-xl border border-slate-100 bg-[#f8fafc] p-4">
+                <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                  <Field label="HỌ TÊN">
+                    <input
+                      value={item.name}
+                      onChange={(e) => updateRecipient(item.id, { name: e.target.value })}
+                      placeholder="Nguyễn Văn A"
+                      className="input"
+                    />
+                  </Field>
+                  <Field label="EMAIL">
+                    <input
+                      type="email"
+                      value={item.email}
+                      onChange={(e) => updateRecipient(item.id, { email: e.target.value })}
+                      placeholder="alert@company.com"
+                      className="input"
+                    />
+                  </Field>
+                  <Field label="SỐ ĐIỆN THOẠI">
+                    <input
+                      type="tel"
+                      value={item.phone}
+                      onChange={(e) => updateRecipient(item.id, { phone: e.target.value })}
+                      placeholder="0901 234 567"
+                      className="input"
+                    />
+                  </Field>
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={() => setRecipientToDelete(item)}
+                      className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500"
+                      aria-label="Xóa người nhận"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-slate-500">
+                    KÊNH GỬI THÔNG BÁO
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {ALERT_CHANNEL_OPTIONS.map((channel) => {
+                      const active = item.channels.includes(channel.id);
+                      return (
+                        <button
+                          key={channel.id}
+                          type="button"
+                          onClick={() => toggleRecipientChannel(item.id, channel.id)}
+                          className={`inline-flex h-8 items-center rounded-lg border px-3 text-xs font-semibold transition-colors ${
+                            active
+                              ? "border-emerald-600 bg-emerald-50 text-emerald-700"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                        >
+                          {channel.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             ))}
@@ -616,20 +557,6 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
       </form>
 
       <ConfirmDialog
-        open={Boolean(meterTypeToDelete)}
-        title="Xác nhận xóa loại điểm đo"
-        description={`Bạn có chắc chắn muốn xóa loại điểm đo "${meterTypeToDelete?.name}" không?`}
-        confirmText="Xác nhận xóa"
-        onConfirm={() => {
-          if (meterTypeToDelete) {
-            deleteMeterType(meterTypeToDelete);
-            setMeterTypeToDelete(null);
-          }
-        }}
-        onCancel={() => setMeterTypeToDelete(null)}
-      />
-
-      <ConfirmDialog
         open={Boolean(recipientToDelete)}
         title="Xác nhận xóa người nhận"
         description={`Bạn có chắc chắn muốn xóa người nhận thông báo "${recipientToDelete?.name || "này"}" không?`}
@@ -637,7 +564,9 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         onConfirm={() => {
           if (recipientToDelete) {
             setRecipients((current) =>
-              current.length === 1 ? [nextRecipient()] : current.filter((row) => row.id !== recipientToDelete.id)
+              current.length === 1
+                ? [nextRecipient()]
+                : current.filter((row) => row.id !== recipientToDelete.id),
             );
             setRecipientToDelete(null);
           }
@@ -714,20 +643,6 @@ function MeterTypeIcon({
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <path d="M13 2 4.5 13.5h6.2L9.2 22 19.5 10h-6.2L13 2Z" />
-    </svg>
-  );
-}
-
-function EditIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 17.5V20h2.5L18 8.5 15.5 6 4 17.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path d="M13.8 7.7 16.3 10.2" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }

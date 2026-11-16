@@ -82,3 +82,75 @@ export function industrialEnergyCost(kwh: TouPrices, prices: TouPrices) {
   const peak = kwh.peak * prices.peak;
   return { normal, off, peak, total: normal + off + peak };
 }
+
+export type CivilClock = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+};
+
+function emptyTouKwh(): TouPrices {
+  return { normal: 0, off: 0, peak: 0 };
+}
+
+/**
+ * Khi mất bản tin giữa 2 mốc chỉ số, chia ΔkWh theo tỷ lệ phút thực tế
+ * của từng khung giờ (BT / TD / CD) trong khoảng (from, to].
+ *
+ * Ví dụ: mất data 17:00→18:30 (BT→CD) thì phần kWh gap được chia
+ * theo số phút bình thường vs cao điểm, không gán hết vào khung lúc có lại bản tin.
+ */
+export function allocateKwhAcrossTouBands(
+  from: CivilClock,
+  to: CivilClock,
+  deltaKwh: number,
+): TouPrices {
+  const result = emptyTouKwh();
+  if (!(deltaKwh > 0)) return result;
+
+  const startMs = Date.UTC(from.year, from.month - 1, from.day, from.hour, from.minute);
+  const endMs = Date.UTC(to.year, to.month - 1, to.day, to.hour, to.minute);
+  if (!(endMs > startMs)) {
+    // Không có khoảng trống — gán vào khung của mốc `to`.
+    const band = industrialBand(civilWeekday(to.year, to.month, to.day), to.hour, to.minute);
+    result[band] = deltaKwh;
+    return result;
+  }
+
+  // Giới hạn 7 ngày để tránh vòng lặp khi timestamp lỗi.
+  const cappedEnd = Math.min(endMs, startMs + 7 * 24 * 60 * 60 * 1000);
+  const minutes: TouPrices = emptyTouKwh();
+  let totalMinutes = 0;
+  for (let t = startMs + 60_000; t <= cappedEnd; t += 60_000) {
+    const dt = new Date(t);
+    const year = dt.getUTCFullYear();
+    const month = dt.getUTCMonth() + 1;
+    const day = dt.getUTCDate();
+    const hour = dt.getUTCHours();
+    const minute = dt.getUTCMinutes();
+    const band = industrialBand(civilWeekday(year, month, day), hour, minute);
+    minutes[band] += 1;
+    totalMinutes += 1;
+  }
+
+  if (totalMinutes <= 0) {
+    const band = industrialBand(civilWeekday(to.year, to.month, to.day), to.hour, to.minute);
+    result[band] = deltaKwh;
+    return result;
+  }
+
+  let assigned = 0;
+  const bands: TouBand[] = ["normal", "off", "peak"];
+  for (let i = 0; i < bands.length; i += 1) {
+    const band = bands[i];
+    const share =
+      i === bands.length - 1
+        ? Math.max(0, deltaKwh - assigned)
+        : (deltaKwh * minutes[band]) / totalMinutes;
+    result[band] = share;
+    assigned += share;
+  }
+  return result;
+}

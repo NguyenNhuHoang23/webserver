@@ -104,13 +104,16 @@ export function EmissionFactors() {
                 group.gases.map((gas, index) => {
                   const first = index === 0;
                   const last = index === group.gases.length - 1;
-                  const gasMeta = (GAS_META as Record<string, { label: string; className: string }>)[gas.key] ?? {
-                    label: gas.label || String(gas.key || "GAS").toUpperCase(),
-                    className: "bg-slate-50 text-slate-700 border-slate-200/60",
-                  };
+                  const gasMeta = (GAS_META as Record<string, { label: string; className: string } | undefined>)[
+                    gas.key
+                  ];
+                  const displayLabel =
+                    gas.label?.trim() || gasMeta?.label || String(gas.key || "GAS").toUpperCase();
+                  const chipClass =
+                    gasMeta?.className ?? "bg-slate-50 text-slate-700 border-slate-200/60";
                   return (
                     <tr
-                      key={`${group.id}-${gas.key}`}
+                      key={`${group.id}-${gas.key}-${index}`}
                       className={`hover:bg-slate-50/80 transition-colors ${
                         last ? "border-b border-slate-100" : ""
                       }`}
@@ -126,9 +129,9 @@ export function EmissionFactors() {
                       <td className="px-5 py-3">
                         <div className="inline-flex items-center gap-3">
                           <span
-                            className={`inline-flex min-w-11 justify-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${gasMeta.className}`}
+                            className={`inline-flex min-w-11 justify-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${chipClass}`}
                           >
-                            {gasMeta.label}
+                            {displayLabel}
                           </span>
                           <span className="font-mono font-semibold text-slate-800 text-xs">
                             {formatFactorValue(gas.value)}

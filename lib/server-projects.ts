@@ -1,6 +1,24 @@
 import "server-only";
-import type { Project } from "@/lib/projects";
-import { queryRows } from "@/lib/server-db";
+import { normalizeAlertChannels, type Project } from "@/lib/projects";
+import { emsDb, jsonField, queryRows } from "@/lib/server-db";
+
+let recipientChannelsReady: Promise<void> | null = null;
+
+function ensureRecipientChannels() {
+  if (!recipientChannelsReady) {
+    recipientChannelsReady = emsDb
+      .query(
+        `ALTER TABLE alert_recipients
+           ADD COLUMN IF NOT EXISTS channels JSON NULL AFTER phone`,
+      )
+      .then(() => undefined)
+      .catch((error) => {
+        recipientChannelsReady = null;
+        throw error;
+      });
+  }
+  return recipientChannelsReady;
+}
 
 export async function getProjectFromDb(id: string): Promise<Project | undefined> {
   const rows = await queryRows<Record<string, unknown>>(
@@ -17,8 +35,9 @@ export async function getProjectFromDb(id: string): Promise<Project | undefined>
       WHERE project_id = ? ORDER BY meter_type_name`,
     [id],
   );
+  await ensureRecipientChannels();
   const recipients = await queryRows<Record<string, unknown>>(
-    `SELECT id, name, email, phone FROM alert_recipients
+    `SELECT id, name, email, phone, channels FROM alert_recipients
       WHERE project_id = ? ORDER BY id`,
     [id],
   );
@@ -36,11 +55,18 @@ export async function getProjectFromDb(id: string): Promise<Project | undefined>
     address: row.address as string | undefined,
     logoUrl: row.logoUrl as string | undefined,
     meterTypes: meterTypes.map((item) => item.name as string),
-    recipients: recipients.map((item) => ({
-      id: item.id as string,
-      name: item.name as string,
-      email: item.email as string,
-      phone: item.phone as string,
-    })),
+    recipients: recipients.map((item) => {
+      const email = String(item.email ?? "");
+      const phone = String(item.phone ?? "");
+      return {
+        id: item.id as string,
+        name: item.name as string,
+        email,
+        phone,
+        channels: normalizeAlertChannels(jsonField(item.channels, null) ?? (
+          email ? ["email"] : phone ? ["sms"] : ["email"]
+        )),
+      };
+    }),
   };
 }

@@ -20,25 +20,26 @@ type GasRow = {
   unit: string;
 };
 
-const defaultRows: GasRow[] = [
-  { id: "row-co2", key: "co2", label: "CO2", value: "74.100", unit: "kg CO2/TJ" },
-  { id: "row-ch4", key: "ch4", label: "CH4", value: "3", unit: "kg CH4/TJ" },
-  { id: "row-n2o", key: "n2o", label: "N2O", value: "0.6", unit: "kg N2O/TJ" },
-];
+function emptyRow(): GasRow {
+  return {
+    id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    key: "",
+    label: "",
+    value: "",
+    unit: "",
+  };
+}
+
+function keyFromLabel(label: string, fallback = "") {
+  return label.trim().toLowerCase().replace(/[^a-z0-9]/g, "") || fallback;
+}
 
 function rowsFromGroup(group: FactorGroup): GasRow[] {
+  if (!group.gases.length) return [emptyRow()];
   return group.gases.map((gas, index) => ({
     id: `row-${gas.key || "gas"}-${index}-${Date.now()}`,
     key: gas.key,
-    label:
-      gas.label ||
-      (gas.key === "co2"
-        ? "CO2"
-        : gas.key === "ch4"
-          ? "CH4"
-          : gas.key === "n2o"
-            ? "N2O"
-            : gas.key),
+    label: gas.label || gas.key || "",
     value: formatFactorValue(gas.value),
     unit: gas.unit.replaceAll("₂", "2").replaceAll("₄", "4"),
   }));
@@ -51,7 +52,7 @@ export function AddEmissionFactorForm() {
 
   const [name, setName] = useState("");
   const [source, setSource] = useState("");
-  const [rows, setRows] = useState<GasRow[]>(defaultRows);
+  const [rows, setRows] = useState<GasRow[]>(() => [emptyRow()]);
   const [isEdit, setIsEdit] = useState(false);
   const [rowToDelete, setRowToDelete] = useState<GasRow | null>(null);
 
@@ -85,17 +86,7 @@ export function AddEmissionFactorForm() {
   }
 
   function addRow() {
-    const newId = `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setRows((current) => [
-      ...current,
-      {
-        id: newId,
-        key: "",
-        label: "",
-        value: "",
-        unit: "kg/TJ",
-      },
-    ]);
+    setRows((current) => [...current, emptyRow()]);
   }
 
   function removeRow(id: string) {
@@ -112,16 +103,16 @@ export function AddEmissionFactorForm() {
       return;
     }
 
+    const usedKeys = new Set<string>();
     upsertFactorGroup({
       id: editingId && isEdit ? editingId : `ef-${Date.now()}`,
       name: trimmed,
       source: source.trim(),
       gases: validRows.map((row, idx) => {
         const cleanLabel = row.label.trim();
-        const cleanKey =
-          (row.key && row.key.trim()) ||
-          cleanLabel.toLowerCase().replace(/[^a-z0-9]/g, "") ||
-          `gas_${idx + 1}`;
+        let cleanKey = keyFromLabel(cleanLabel, `gas_${idx + 1}`);
+        if (usedKeys.has(cleanKey)) cleanKey = `${cleanKey}_${idx + 1}`;
+        usedKeys.add(cleanKey);
         return {
           key: cleanKey,
           label: cleanLabel,
@@ -229,7 +220,10 @@ export function AddEmissionFactorForm() {
                   <div>
                     <input
                       value={row.label}
-                      onChange={(e) => updateRow(row.id, { label: e.target.value })}
+                      onChange={(e) => {
+                        const label = e.target.value;
+                        updateRow(row.id, { label, key: keyFromLabel(label) });
+                      }}
                       placeholder="VD: CO2, CH4, N2O, SF6..."
                       className="input font-semibold text-slate-800"
                       required
@@ -284,15 +278,6 @@ export function AddEmissionFactorForm() {
           </button>
         </div>
       </form>
-
-      <div className="mt-5 flex gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm text-slate-700">
-        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white shadow-xs">
-          i
-        </span>
-        <p>
-          <span className="font-semibold text-emerald-900">Mẹo:</span> Bạn có thể thêm, bớt hoặc chỉnh sửa bất kỳ thành phần phát thải nào (CO2, CH4, N2O, SF6...) theo đúng quy định và tài liệu viện dẫn kỹ thuật của cơ sở.
-        </p>
-      </div>
 
       <ConfirmDialog
         open={Boolean(rowToDelete)}

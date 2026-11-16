@@ -49,9 +49,20 @@ const navGroups: {
         href: "/tai-khoan",
         label: "Quản trị người dùng",
         icon: AccountIcon,
-        permission: "manageUsers",
+        permission: "viewProjects",
       },
       // Cổng Admin chỉ quản lý tài khoản nội bộ — tài khoản khách nằm trong từng dự án
+    ],
+  },
+  {
+    group: "CẤU HÌNH",
+    items: [
+      {
+        href: "/loai-diem-do",
+        label: "Loại điểm đo",
+        icon: MeterConfigIcon,
+        permission: "manageProjects",
+      },
     ],
   },
 ];

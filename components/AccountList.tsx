@@ -153,23 +153,29 @@ export function AccountList() {
                   </td>
                   <td className="px-5 py-3.5 text-slate-500">{account.createdAt}</td>
                   <td className="px-5 py-3.5 text-right">
-                    {canManage ? (
+                    {canManage || session?.userId === account.id ? (
                       <div className="flex justify-end gap-1">
                         <Link
                           href={`/tai-khoan/them-moi?id=${account.id}`}
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
-                          title={`Sửa ${account.username}`}
+                          title={
+                            session?.userId === account.id
+                              ? "Cập nhật tài khoản của tôi"
+                              : `Sửa ${account.username}`
+                          }
                         >
                           <EditIcon className="h-3.5 w-3.5" />
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => setAccountToDelete(account)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                          title={`Xóa ${account.username}`}
-                        >
-                          <TrashIcon className="h-3.5 w-3.5" />
-                        </button>
+                        {canManage && session?.userId !== account.id ? (
+                          <button
+                            type="button"
+                            onClick={() => setAccountToDelete(account)}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                            title={`Xóa ${account.username}`}
+                          >
+                            <TrashIcon className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
                       </div>
                     ) : (
                       <span className="text-[11px] text-slate-400">Chỉ xem</span>

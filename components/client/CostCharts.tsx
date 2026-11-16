@@ -17,6 +17,7 @@ import {
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { loadProjectGatewayEnergySlots, type GatewayEnergySlot } from "@/lib/gateway-series";
 import {
+  allocateKwhAcrossTouBands,
   civilWeekday,
   formatTariffPrice,
   industrialBand,
@@ -86,24 +87,29 @@ function slotStoredAt(day: string, hour: number, minute: number) {
   return new Date(Date.UTC(year, month - 1, date, hour, minute) - 7 * 60 * 60 * 1000).toISOString().slice(0, 19);
 }
 
-function addSlotCost(
+function priceForBand(source: RateSource, band: Band) {
+  if (source.kind === "flat") return source.price;
+  return source.prices[band === "none" ? "normal" : band];
+}
+
+function addBandCost(
   filter: TimeFilterValue,
   bars: CostBar[],
   tou: TouKwh,
   kwh: TouKwh,
   source: RateSource,
   at: string,
+  band: Band,
   deltaKwh: number,
 ) {
   if (deltaKwh <= 0) return false;
-  const parts = vietnamFromStored(at);
   const bucket = periodIndexForInstant(filter, at, bars.length);
-  if (!parts || bucket < 0) return false;
-  const rate = rateAt(source, parts);
-  const cost = deltaKwh * rate.price;
+  if (bucket < 0) return false;
+  const price = priceForBand(source, band);
+  const cost = deltaKwh * price;
   bars[bucket].dark += cost;
-  tou[rate.band] += cost;
-  kwh[rate.band] += deltaKwh;
+  tou[band] += cost;
+  kwh[band] += deltaKwh;
   return true;
 }
 
@@ -120,18 +126,42 @@ function costBarsFromSlots(filter: TimeFilterValue, slots: GatewayEnergySlot[], 
     (a, b) => a.day.localeCompare(b.day) || a.hour - b.hour || a.minute - b.minute,
   );
   // Chỉ tính ΔkWh (chỉ số tăng thêm). Không nhân cả chỉ số tích lũy EPaed.
-  let previous: number | null = null;
+  // Gap mất bản tin: chia theo phút thực tế của từng khung giờ (BT/TD/CD).
+  let previousEndKwh: number | null = null;
+  let previousAt: string | null = null;
   let lastIndexKwh = 0;
   for (const slot of ordered) {
     const startKwh = registerToKwh(slot.firstWh);
     const endKwh = registerToKwh(slot.lastWh);
     const at = slotStoredAt(slot.day, slot.hour, slot.minute);
+    const parts = vietnamFromStored(at);
     const bucket = periodIndexForInstant(filter, at, bars.length);
     if (bucket >= 0) bars[bucket].light += 1;
+
     const within = Math.max(0, endKwh - startKwh);
-    const gap = previous == null ? 0 : Math.max(0, startKwh - previous);
-    addSlotCost(filter, bars, tou, kwh, source, at, within + gap);
-    previous = endKwh;
+    if (within > 0 && parts) {
+      const rate = rateAt(source, parts);
+      addBandCost(filter, bars, tou, kwh, source, at, rate.band, within);
+    }
+
+    if (previousEndKwh != null && previousAt && parts) {
+      const gap = Math.max(0, startKwh - previousEndKwh);
+      if (gap > 0) {
+        const fromParts = vietnamFromStored(previousAt);
+        if (fromParts) {
+          const split = allocateKwhAcrossTouBands(fromParts, parts, gap);
+          addBandCost(filter, bars, tou, kwh, source, at, "normal", split.normal);
+          addBandCost(filter, bars, tou, kwh, source, at, "off", split.off);
+          addBandCost(filter, bars, tou, kwh, source, at, "peak", split.peak);
+        } else {
+          const rate = rateAt(source, parts);
+          addBandCost(filter, bars, tou, kwh, source, at, rate.band, gap);
+        }
+      }
+    }
+
+    previousEndKwh = endKwh;
+    previousAt = at;
     lastIndexKwh = endKwh;
   }
   return {
@@ -753,7 +783,8 @@ export function CostCharts() {
                   </tbody>
                 </table>
                 <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                  Tiền điện năng trước thuế. Chưa gồm VAT và công suất phản kháng.
+                  Tiền điện năng trước thuế. Chưa gồm VAT và công suất phản kháng. Nếu mất bản tin giữa
+                  hai khung giờ, phần kWh gap được chia theo số phút thực tế của BT / TD / CD.
                 </p>
               </article>
             ) : null}
@@ -765,7 +796,7 @@ export function CostCharts() {
             <span className={`h-2.5 w-2.5 rounded-full ${grandTotal > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
             {grandTotal > 0
               ? energy === "Điện"
-                ? "Tiền điện = sản lượng từng khung giờ (chỉ số cuối − chỉ số đầu) × đơn giá khung giờ tương ứng. Chưa gồm VAT."
+                ? "Tiền điện = ΔkWh trong khung + phần gap mất bản tin (chia theo phút BT/TD/CD) × đơn giá tương ứng. Chưa gồm VAT."
                 : `Chi phí = sản lượng × ${formatVnd(flatPrices[energy] ?? 0)} VNĐ.`
               : slots.length > 0 && energy === "Điện"
                 ? `Đã lấy ${Math.max(...series.map((item) => item.sampleDays), 0)} ngày có bản tin trong kỳ, nhưng EPaed không tăng (first = last) nên sản lượng và tiền điện mỗi ngày đều là 0. Chưa gồm VAT.`

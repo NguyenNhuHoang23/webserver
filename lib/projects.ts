@@ -8,12 +8,34 @@ export type MeterType = string;
 export const METER_TYPES: MeterType[] = ["Điện", "Nước", "Nhiệt", "Hơi"];
 export const EXTRA_METER_TYPE_SUGGESTIONS: MeterType[] = ["Khí nén"];
 
+export type AlertChannel = "email" | "zalo" | "telegram" | "sms";
+
+export const ALERT_CHANNEL_OPTIONS: { id: AlertChannel; label: string }[] = [
+  { id: "email", label: "Email" },
+  { id: "zalo", label: "Zalo" },
+  { id: "telegram", label: "Telegram" },
+  { id: "sms", label: "SMS" },
+];
+
 export type AlertRecipient = {
   id: string;
   name: string;
   email: string;
   phone: string;
+  /** Kênh gửi thông báo — chọn nhiều. */
+  channels: AlertChannel[];
 };
+
+export function normalizeAlertChannels(value: unknown): AlertChannel[] {
+  const allowed = new Set<AlertChannel>(ALERT_CHANNEL_OPTIONS.map((item) => item.id));
+  if (!Array.isArray(value)) return ["email"];
+  const next = Array.from(
+    new Set(
+      value.filter((item): item is AlertChannel => typeof item === "string" && allowed.has(item as AlertChannel)),
+    ),
+  );
+  return next.length ? next : ["email"];
+}
 
 export type Project = {
   id: string;

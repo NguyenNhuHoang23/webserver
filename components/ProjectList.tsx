@@ -90,12 +90,6 @@ export function ProjectList() {
     return map;
   }, [accounts, items]);
 
-  const loadBarMax = useMemo(() => {
-    const values = Object.values(telemetry).map((item) => item.loadKw).filter((v) => v > 0);
-    if (!values.length) return 100;
-    return Math.max(...values) * 1.15;
-  }, [telemetry]);
-
   const customers = useMemo(
     () => Array.from(new Set(items.map((p) => p.customer))).sort(),
     [items],
@@ -228,13 +222,11 @@ export function ProjectList() {
 
         {/* Project Table */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[950px] text-left text-xs">
+          <table className="w-full min-w-[720px] text-left text-xs">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
                 <th className="px-5 py-3.5">Cơ sở / Dự án</th>
                 <th className="px-5 py-3.5">Tài khoản quản lý</th>
-                <th className="px-5 py-3.5">Phụ tải hiện tại (kW)</th>
-                <th className="px-5 py-3.5">Phát thải / ngày</th>
                 <th className="px-5 py-3.5">Hạ tầng đo</th>
                 <th className="px-5 py-3.5">Trạng thái</th>
                 <th className="px-5 py-3.5 text-right">Điều hành</th>
@@ -243,7 +235,7 @@ export function ProjectList() {
             <tbody className="divide-y divide-slate-100">
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={5} className="px-5 py-14 text-center text-slate-400">
                     Không tìm thấy dự án nào phù hợp với bộ lọc tìm kiếm.
                   </td>
                 </tr>
@@ -270,7 +262,7 @@ export function ProjectList() {
                       key={project.id}
                       className="hover:bg-slate-50/90 transition-colors group"
                     >
-                      {/* Project Name & Code */}
+                      {/* Project Name */}
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3.5">
                           <span
@@ -287,17 +279,12 @@ export function ProjectList() {
                               project.initials
                             )}
                           </span>
-                          <div>
-                            <Link
-                              href={`/du-an/${project.id}`}
-                              className="font-bold text-slate-900 group-hover:text-emerald-600 transition-colors text-[13px]"
-                            >
-                              {project.name}
-                            </Link>
-                            <span className="block font-mono text-[11px] text-slate-400">
-                              {project.id} • Khởi tạo: {project.startDate}
-                            </span>
-                          </div>
+                          <Link
+                            href={`/du-an/${project.id}`}
+                            className="font-bold text-slate-900 group-hover:text-emerald-600 transition-colors text-[13px]"
+                          >
+                            {project.name}
+                          </Link>
                         </div>
                       </td>
 
@@ -319,47 +306,6 @@ export function ProjectList() {
                               </div>
                             ))}
                           </div>
-                        )}
-                      </td>
-
-                      {/* Load Demand */}
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-900">
-                            {telem.hasGatewayData
-                              ? telem.loadKw.toLocaleString("vi-VN", {
-                                  maximumFractionDigits: telem.loadKw >= 100 ? 0 : 1,
-                                })
-                              : "—"}
-                          </span>
-                          {telem.hasGatewayData ? (
-                            <span className="text-[10px] text-slate-400">kW</span>
-                          ) : null}
-                        </div>
-                        <div className="mt-1 h-1.5 w-24 rounded-full bg-slate-100 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-emerald-500"
-                            style={{
-                              width: `${telem.hasGatewayData ? Math.min(100, (telem.loadKw / loadBarMax) * 100) : 0}%`,
-                            }}
-                          />
-                        </div>
-                      </td>
-
-                      {/* CO2 Emissions */}
-                      <td className="px-5 py-4">
-                        <span className="font-mono font-semibold text-slate-800">
-                          {telem.co2Day > 0
-                            ? telem.co2Day.toLocaleString("vi-VN", {
-                                maximumFractionDigits: 2,
-                                minimumFractionDigits: 0,
-                              })
-                            : "—"}
-                        </span>
-                        {telem.co2Day > 0 ? (
-                          <span className="text-[10px] text-slate-400 ml-1">tCO₂e</span>
-                        ) : (
-                          <span className="block text-[10px] text-slate-400">Chưa cấu hình GHG</span>
                         )}
                       </td>
 

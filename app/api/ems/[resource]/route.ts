@@ -66,6 +66,12 @@ function serverError(error: unknown) {
   if (code === "ER_NO_REFERENCED_ROW_2" || code === "ER_NO_REFERENCED_ROW") {
     return Response.json({ error: "Mã dự án không tồn tại trên database, không lưu được cấu hình." }, { status: 400 });
   }
+  if (code === "ER_ROW_IS_REFERENCED_2" || code === "ER_ROW_IS_REFERENCED") {
+    return Response.json(
+      { error: "Loại điểm đo đang được dự án sử dụng, không thể xóa." },
+      { status: 400 },
+    );
+  }
   return Response.json({ error: "Không thể xử lý dữ liệu trên database." }, { status: 500 });
 }
 
@@ -76,10 +82,47 @@ let customerAccountProjectsReady: Promise<void> | null = null;
 let accountProjectsReady: Promise<void> | null = null;
 let diagramDisplaysReady: Promise<void> | null = null;
 let alertDeliveryColumnsReady: Promise<void> | null = null;
+let alertRecipientChannelsReady: Promise<void> | null = null;
+let emissionFactorGasColumnsReady: Promise<void> | null = null;
+
+function ensureEmissionFactorGasColumns() {
+  if (!emissionFactorGasColumnsReady) {
+    emissionFactorGasColumnsReady = (async () => {
+      await emsDb
+        .query("ALTER TABLE emission_factor_gases MODIFY COLUMN gas_key VARCHAR(40) NOT NULL")
+        .catch(() => undefined);
+      await emsDb
+        .query("ALTER TABLE emission_factor_gases MODIFY COLUMN gas_label VARCHAR(80) NOT NULL")
+        .catch(() => undefined);
+    })().catch((error) => {
+      emissionFactorGasColumnsReady = null;
+      console.error("emission factor gas columns migrate failed", error);
+      throw error;
+    });
+  }
+  return emissionFactorGasColumnsReady;
+}
 
 function normalizeAlertDeliveryStatus(value: unknown, allowNull = false) {
   if (value === "sent" || value === "failed" || value === "pending") return value;
   return allowNull ? null : "pending";
+}
+
+const ALERT_CHANNELS = new Set(["email", "zalo", "telegram", "sms"]);
+
+function normalizeRecipientChannels(value: unknown, fallbackEmail?: string, fallbackPhone?: string) {
+  if (Array.isArray(value)) {
+    const next = Array.from(
+      new Set(
+        value.filter((item): item is string => typeof item === "string" && ALERT_CHANNELS.has(item)),
+      ),
+    );
+    if (next.length) return next;
+  }
+  const fallback: string[] = [];
+  if (fallbackEmail) fallback.push("email");
+  if (fallbackPhone) fallback.push("sms");
+  return fallback.length ? fallback : ["email"];
 }
 
 function ensureAlertDeliveryColumns() {
@@ -110,6 +153,23 @@ function ensureAlertDeliveryColumns() {
     });
   }
   return alertDeliveryColumnsReady;
+}
+
+function ensureAlertRecipientChannels() {
+  if (!alertRecipientChannelsReady) {
+    alertRecipientChannelsReady = emsDb
+      .query(
+        `ALTER TABLE alert_recipients
+           ADD COLUMN IF NOT EXISTS channels JSON NULL AFTER phone`,
+      )
+      .then(() => undefined)
+      .catch((error) => {
+        alertRecipientChannelsReady = null;
+        console.error("alert recipient channels migrate failed", error);
+        throw error;
+      });
+  }
+  return alertRecipientChannelsReady;
 }
 
 function ensureAccountProjects() {
@@ -331,8 +391,9 @@ async function getProjects(projectId?: string) {
       ORDER BY project_id, meter_type_name`,
     ids,
   );
+  await ensureAlertRecipientChannels();
   const recipients = await queryRows<Row>(
-    `SELECT id, project_id AS projectId, name, email, phone
+    `SELECT id, project_id AS projectId, name, email, phone, channels
        FROM alert_recipients WHERE project_id IN (${placeholders})
       ORDER BY project_id, id`,
     ids,
@@ -345,11 +406,14 @@ async function getProjects(projectId?: string) {
   }
   for (const row of recipients) {
     const id = row.projectId as string;
+    const email = asString(row.email);
+    const phone = asString(row.phone);
     recipientsByProject.set(id, [...(recipientsByProject.get(id) ?? []), {
       id: row.id,
       name: row.name,
-      email: row.email,
-      phone: row.phone,
+      email,
+      phone,
+      channels: normalizeRecipientChannels(jsonField(row.channels, null), email, phone),
     }]);
   }
   return projects.map((project) => ({
@@ -472,6 +536,7 @@ async function getResource(resource: string, request: NextRequest) {
     );
   }
   if (resource === "emission-factors") {
+    await ensureEmissionFactorGasColumns();
     const groups = await queryRows<Row>(
       "SELECT id, name, source FROM emission_factor_groups ORDER BY id",
     );
@@ -632,11 +697,41 @@ async function transaction<T>(work: (connection: PoolConnection) => Promise<T>) 
 async function saveResource(resource: string, body: Row) {
   if (resource === "accounts") {
     await ensureAccountProjects();
+    const session = await getServerSession();
+    if (!session || session.portal !== "admin") {
+      throw new Error("Cần đăng nhập cổng quản trị.");
+    }
+    const isAdminActor = hasPermission(session, "manageUsers");
     const items = Array.isArray(body.items) ? body.items : [body];
+    if (Array.isArray(body.items) && !isAdminActor) {
+      throw new Error("Chỉ Admin được cập nhật hàng loạt tài khoản.");
+    }
     for (const item of items as Row[]) {
-      const password = asString(item.password, "123456");
-      const role = normalizeStaffAccountRole(item.role);
-      const projectIds =
+      const accountId = asString(item.id).trim();
+      if (!accountId) throw new Error("Thiếu mã tài khoản.");
+      const isSelf = session.userId === accountId;
+      if (!isAdminActor && !isSelf) {
+        throw new Error("Không có quyền sửa tài khoản này.");
+      }
+
+      const existingRows = await queryRows<{
+        role: string;
+        username: string;
+        email: string;
+      }>("SELECT role, username, email FROM accounts WHERE id = ? LIMIT 1", [accountId]);
+      const existing = existingRows[0];
+      const isCreate = !existing;
+      if (isCreate && !isAdminActor) {
+        throw new Error("Chỉ Admin được tạo tài khoản nội bộ.");
+      }
+
+      // Không tự phân quyền cho mình; chỉ cấp trên (Admin) gán quyền cấp dưới.
+      let role = normalizeStaffAccountRole(item.role);
+      if (isSelf || !isAdminActor) {
+        role = existing ? normalizeStaffAccountRole(existing.role) : role;
+      }
+
+      let projectIds =
         role === "Admin"
           ? []
           : Array.from(
@@ -646,9 +741,42 @@ async function saveResource(resource: string, body: Row) {
                   .filter(Boolean),
               ),
             );
+      if (isSelf || !isAdminActor) {
+        const links = await queryRows<{ projectId: string }>(
+          "SELECT project_id AS projectId FROM account_projects WHERE account_id = ?",
+          [accountId],
+        );
+        projectIds =
+          role === "Admin" ? [] : links.map((row) => String(row.projectId)).filter(Boolean);
+      }
       if (role === "Manage" && !projectIds.length) {
         throw new Error("Manage nội bộ cần chọn ít nhất một dự án được gán quyền.");
       }
+
+      const password = asString(item.password);
+      const currentPassword = asString(item.currentPassword);
+      if (password && isSelf) {
+        if (!currentPassword) {
+          throw new Error("Vui lòng nhập mật khẩu hiện tại để đổi mật khẩu.");
+        }
+        const matched = await queryRows<{ id: string }>(
+          `SELECT id FROM accounts
+            WHERE id = ? AND password_hash = SHA2(?, 256)
+            LIMIT 1`,
+          [accountId, currentPassword],
+        );
+        if (!matched.length) {
+          throw new Error("Mật khẩu hiện tại không đúng.");
+        }
+      }
+      if (isCreate && !password) {
+        throw new Error("Vui lòng nhập mật khẩu cho tài khoản mới.");
+      }
+
+      const username = asString(item.username).trim() || asString(existing?.username);
+      const email = asString(item.email).trim() || asString(existing?.email);
+      const createdAt = asString(item.createdAt) || new Date().toLocaleDateString("en-GB");
+
       await transaction(async (connection) => {
         await connection.execute(
           `INSERT INTO accounts (id, username, email, role, password_hash, created_at)
@@ -656,13 +784,22 @@ async function saveResource(resource: string, body: Row) {
            ON DUPLICATE KEY UPDATE username=VALUES(username), email=VALUES(email),
              role=VALUES(role), created_at=VALUES(created_at),
              password_hash=IF(? = '', password_hash, SHA2(?, 256))`,
-          [item.id, item.username, item.email, role, password, item.createdAt, password, password],
+          [
+            accountId,
+            username,
+            email,
+            role,
+            password || "123456",
+            createdAt,
+            password,
+            password,
+          ],
         );
-        await connection.execute("DELETE FROM account_projects WHERE account_id = ?", [item.id]);
+        await connection.execute("DELETE FROM account_projects WHERE account_id = ?", [accountId]);
         for (const projectId of projectIds) {
           await connection.execute(
             "INSERT INTO account_projects (account_id, project_id) VALUES (?, ?)",
-            [item.id, projectId],
+            [accountId, projectId],
           );
         }
       });
@@ -720,6 +857,7 @@ async function saveResource(resource: string, body: Row) {
     const recipients = Array.isArray(body.recipients) ? body.recipients as Row[] : [];
     const startDate = projectDateForDb(body.startDate);
     if (!startDate) throw new Error("startDate must use YYYY-MM-DD or DD/MM/YYYY format");
+    await ensureAlertRecipientChannels();
     await transaction(async (connection) => {
       await connection.execute(
         `INSERT INTO projects (id, initials, accent, name, customer, status, start_date,
@@ -750,10 +888,20 @@ async function saveResource(resource: string, body: Row) {
       await connection.execute("DELETE FROM alert_recipients WHERE project_id = ?", [body.id]);
       for (const recipient of recipients) {
         if (!recipient.name && !recipient.email && !recipient.phone) continue;
+        const email = asString(recipient.email);
+        const phone = asString(recipient.phone);
+        const channels = normalizeRecipientChannels(recipient.channels, email, phone);
         await connection.execute(
-          `INSERT INTO alert_recipients (id, project_id, name, email, phone)
-           VALUES (?, ?, ?, ?, ?)`,
-          [recipientKey(recipient.id), body.id, recipient.name || "", recipient.email || "", recipient.phone || ""],
+          `INSERT INTO alert_recipients (id, project_id, name, email, phone, channels)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            recipientKey(recipient.id),
+            body.id,
+            recipient.name || "",
+            email,
+            phone,
+            JSON.stringify(channels),
+          ],
         );
       }
     });
@@ -805,18 +953,28 @@ async function saveResource(resource: string, body: Row) {
     if (!name) throw new Error("Tên loại điểm đo không được để trống.");
     await transaction(async (connection) => {
       if (previousName && previousName !== name) {
+        const existing = await queryRows<{ builtin: number }>(
+          "SELECT builtin FROM meter_types WHERE name = ? LIMIT 1",
+          [previousName],
+        );
+        if (existing[0]?.builtin) {
+          throw new Error("Không thể đổi tên loại điểm đo mặc định.");
+        }
         await connection.execute(
           `INSERT INTO meter_types (name, description, icon, builtin)
-           SELECT ?, description, icon, builtin FROM meter_types WHERE name = ?
-           ON DUPLICATE KEY UPDATE description=VALUES(description)`,
+           SELECT ?, ?, ?, builtin FROM meter_types WHERE name = ?
+           ON DUPLICATE KEY UPDATE description=VALUES(description), icon=VALUES(icon)`,
+          [name, body.description || "Loại điểm đo tùy chỉnh", body.icon || "generic", previousName],
+        );
+        await connection.execute(
+          "UPDATE project_meter_types SET meter_type_name = ? WHERE meter_type_name = ?",
           [name, previousName],
         );
-        await connection.execute("UPDATE project_meter_types SET meter_type_name = ? WHERE meter_type_name = ?", [name, previousName]);
         await connection.execute("DELETE FROM meter_types WHERE name = ? AND builtin = 0", [previousName]);
       } else {
         await connection.execute(
           `INSERT INTO meter_types (name, description, icon, builtin) VALUES (?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE description=VALUES(description), icon=VALUES(icon), builtin=VALUES(builtin)`,
+           ON DUPLICATE KEY UPDATE description=VALUES(description), icon=VALUES(icon)`,
           [name, body.description || "Loại điểm đo tùy chỉnh", body.icon || "generic", body.builtin ? 1 : 0],
         );
       }
@@ -844,6 +1002,7 @@ async function saveResource(resource: string, body: Row) {
     return getResource(resource, new NextRequest(`http://localhost/api/ems/client-meters?projectId=${encodeURIComponent(projectId)}`));
   }
   if (resource === "emission-factors") {
+    await ensureEmissionFactorGasColumns();
     const group = body;
     const gases = Array.isArray(group.gases) ? group.gases as Row[] : [];
     await transaction(async (connection) => {
@@ -854,11 +1013,13 @@ async function saveResource(resource: string, body: Row) {
       );
       await connection.execute("DELETE FROM emission_factor_gases WHERE group_id = ?", [group.id]);
       for (const gas of gases) {
+        const key = asString(gas.key).trim().slice(0, 40) || "gas";
+        const label = asString(gas.label).trim().slice(0, 80) || key;
         await connection.execute(
           `INSERT INTO emission_factor_gases (group_id, gas_key, gas_label, factor_value, unit)
            VALUES (?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE gas_label=VALUES(gas_label), factor_value=VALUES(factor_value), unit=VALUES(unit)`,
-          [group.id, gas.key, gas.label, asNumber(gas.value), gas.unit || ""],
+          [group.id, key, label, asNumber(gas.value), gas.unit || ""],
         );
       }
     });
@@ -1019,6 +1180,13 @@ async function deleteResource(resource: string, request: NextRequest) {
     await ensureDeviceColumns();
     await emsDb.execute("UPDATE meter_points SET device_id = NULL WHERE device_id = ?", [id]);
   }
+  if (resource === "meter-types") {
+    const existing = await queryRows<{ builtin: number }>(
+      "SELECT builtin FROM meter_types WHERE name = ? LIMIT 1",
+      [id],
+    );
+    if (existing[0]?.builtin) throw new Error("Không thể xóa loại điểm đo mặc định.");
+  }
   await emsDb.execute(`DELETE FROM ${table} WHERE ${key} = ?`, [id]);
   return { ok: true };
 }
@@ -1069,8 +1237,16 @@ export async function POST(request: NextRequest, context: Params) {
     if (!RESOURCE_NAMES.has(resource)) return badRequest("Tài nguyên không hợp lệ.");
     const body = (await request.json()) as Row;
     if (resource === "accounts") {
-      const gate = await requirePermission("manageUsers");
-      if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý tài khoản.");
+      const session = await getServerSession();
+      if (!session || session.portal !== "admin") {
+        return forbidden("Cần đăng nhập cổng quản trị.");
+      }
+      const isAdminActor = hasPermission(session, "manageUsers");
+      const targetId = asString(body.id);
+      const isSelf = Boolean(targetId && session.userId === targetId);
+      if (!isAdminActor && !(isSelf && !Array.isArray(body.items))) {
+        return forbidden("Chỉ Admin được quản lý tài khoản; cấp dưới chỉ sửa được tài khoản của mình.");
+      }
     }
     if (resource === "customer-accounts") {
       const gate = await canMutateCustomerAccounts(body);
@@ -1082,6 +1258,15 @@ export async function POST(request: NextRequest, context: Params) {
     }
     return Response.json(await saveResource(resource, body));
   } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (
+      message.includes("Mật khẩu") ||
+      message.includes("quyền") ||
+      message.includes("Admin") ||
+      message.includes("Manage nội bộ")
+    ) {
+      return Response.json({ error: message }, { status: 400 });
+    }
     return serverError(error);
   }
 }

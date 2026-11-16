@@ -6,6 +6,16 @@ export type ProjectGatewaySample = {
   values: Record<string, number>;
 };
 
+/** Cửa sổ coi bản tin gateway còn "online" (khớp sơ đồ / danh sách dự án). */
+export const GATEWAY_SAMPLE_ONLINE_MS = 15 * 60 * 1000;
+
+export function isGatewaySampleOnline(at: string | undefined, nowMs = Date.now()) {
+  if (!at) return false;
+  const ms = Date.parse(at.endsWith("Z") ? at : `${at}Z`);
+  if (!Number.isFinite(ms)) return false;
+  return nowMs - ms <= GATEWAY_SAMPLE_ONLINE_MS;
+}
+
 export type ChartSample = {
   at?: string;
   values: Record<string, number>;

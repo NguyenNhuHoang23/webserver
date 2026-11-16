@@ -17,7 +17,12 @@ import { projectConfigPath } from "@/lib/project-config";
 import { hydrateClientMeters, orderMetersByTree, type ClientMeter } from "@/lib/client-meters";
 import { hydrateDevices, type CatalogDevice } from "@/lib/devices";
 import { hydrateAlertEvents } from "@/lib/alert-events";
-import { hydrateMeterReadings } from "@/lib/meter-readings";
+import {
+  isGatewaySampleOnline,
+  loadProjectGatewayLatest,
+  type ProjectGatewaySample,
+} from "@/lib/gateway-series";
+import { registerToKwh } from "@/lib/meter-parameters";
 
 type Energy = string;
 type DeviceKind = "meter" | "inverter" | "thermo" | "water" | "wind" | "steam" | "air";
@@ -58,13 +63,39 @@ function meterUnit(utility: string) {
   return "kWh";
 }
 
-function fromDbMeters(meters: ClientMeter[], devices: CatalogDevice[], readings: Awaited<ReturnType<typeof hydrateMeterReadings>>) {
-  const latest = new Map<string, number>();
-  for (const reading of readings.filter((row) => row.metric === "energy")) {
-    latest.set(reading.meterPointId, reading.value);
+function liveValueFromSample(utility: string, sample: ProjectGatewaySample | undefined): number | null {
+  if (!sample) return null;
+  const values = sample.values;
+  if (utility === "Điện") {
+    if (Number.isFinite(values.EPaed)) return registerToKwh(values.EPaed);
+    if (Number.isFinite(values.Papt)) return values.Papt;
+    return null;
   }
+  if (utility === "Nước" || utility === "Hơi" || utility === "Khí nén") {
+    const flow = values.Flow ?? values.flow ?? values.Q;
+    return Number.isFinite(flow) ? flow : null;
+  }
+  if (utility === "Nhiệt") {
+    const temp = values.Temp ?? values.temp ?? values.T;
+    return Number.isFinite(temp) ? temp : null;
+  }
+  return null;
+}
+
+function fromDbMeters(
+  meters: ClientMeter[],
+  devices: CatalogDevice[],
+  samples: ProjectGatewaySample[],
+) {
+  const sampleByMeter = new Map(samples.map((sample) => [sample.meterPointId, sample]));
   return orderMetersByTree(meters).map((meter) => {
     const device = devices.find((item) => item.id === meter.deviceId);
+    const sample = sampleByMeter.get(meter.id);
+    const linked = Boolean(device || meter.serialNumber?.trim());
+    const online = linked && isGatewaySampleOnline(sample?.at);
+    const unit = meterUnit(meter.utility);
+    const displayUnit =
+      meter.utility === "Điện" && sample && Number.isFinite(sample.values.EPaed) ? "kWh" : unit;
     return {
       id: meter.id,
       name: meter.name,
@@ -72,9 +103,9 @@ function fromDbMeters(meters: ClientMeter[], devices: CatalogDevice[], readings:
       type: meter.type,
       energy: meter.utility,
       kind: meterKind(meter),
-      status: !device || device.status === "offline" ? "disconnected" : "connected",
-      value: latest.get(meter.id) ?? null,
-      unit: meterUnit(meter.utility),
+      status: online ? "connected" : "disconnected",
+      value: liveValueFromSample(meter.utility, sample),
+      unit: displayUnit,
       ...(meter.parentId ? { parentId: meter.parentId } : {}),
     } satisfies MeterPoint;
   });
@@ -102,11 +133,11 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
     void Promise.all([
       hydrateClientMeters(project.id),
       hydrateDevices(),
-      hydrateMeterReadings(project.id),
+      loadProjectGatewayLatest(project.id),
       hydrateAlertEvents(project.id),
-    ]).then(([meters, devices, readings, alerts]) => {
+    ]).then(([meters, devices, samples, alerts]) => {
       if (!active) return;
-      setAllPoints(fromDbMeters(meters, devices, readings));
+      setAllPoints(fromDbMeters(meters, devices, samples));
       setMeterDataReady(true);
       setAlertCount(alerts.filter((event) => event.status !== "resolved").length);
     }).catch(() => {
@@ -186,11 +217,9 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
     if (!label || energies.includes(label)) return;
     setPage(1);
     persistEnergies([...energies, label]);
-    try {
-      upsertMeterTypeDef({ name: label, description: "" });
-    } catch {
+    void upsertMeterTypeDef({ name: label, description: "" }).catch(() => {
       // Loại đã có trong catalog thì chỉ cần gán vào dự án.
-    }
+    });
     setNewType("");
     setAddingType(false);
   }
@@ -228,7 +257,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
               label="ĐANG KẾT NỐI"
               value={String(connectedPoints)}
               valueClass="text-emerald-600"
-              hint={<span className="text-slate-500">active</span>}
+              hint={<span className="text-slate-500">có bản tin Gateway gần đây</span>}
             />
             <StatCard
               label="KHÔNG KẾT NỐI"
@@ -236,7 +265,7 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
               valueClass={disconnectedPoints > 0 ? "text-amber-500" : "text-slate-900"}
               hint={
                 disconnectedPoints > 0 ? (
-                  <span className="text-amber-600">mất kết nối</span>
+                  <span className="text-amber-600">chưa gắn / mất kết nối Gateway</span>
                 ) : (
                   <span className="text-emerald-600">tất cả trực tuyến</span>
                 )
@@ -514,7 +543,11 @@ function DeviceRows({
               }`}
             />
             <span className={point.status === "connected" ? "text-slate-700" : "text-red-500"}>
-              {point.status === "connected" ? "Connected" : "Disconnected"}
+              {point.status === "connected"
+                ? "Online"
+                : point.sn === "Chưa gán thiết bị"
+                  ? "Chưa gắn đồng hồ"
+                  : "Offline"}
             </span>
           </span>
         </td>

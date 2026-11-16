@@ -172,8 +172,8 @@ CREATE TABLE IF NOT EXISTS emission_factor_groups (
 
 CREATE TABLE IF NOT EXISTS emission_factor_gases (
   group_id VARCHAR(100) NOT NULL,
-  gas_key VARCHAR(10) NOT NULL,
-  gas_label VARCHAR(20) NOT NULL,
+  gas_key VARCHAR(40) NOT NULL,
+  gas_label VARCHAR(80) NOT NULL,
   factor_value DECIMAL(18,6) NOT NULL,
   unit VARCHAR(80) NOT NULL,
   PRIMARY KEY (group_id, gas_key),
@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS alert_recipients (
   name VARCHAR(150) NOT NULL,
   email VARCHAR(255) NOT NULL,
   phone VARCHAR(40) NOT NULL,
+  channels JSON NULL,
   PRIMARY KEY (id),
   KEY idx_alert_recipients_project (project_id),
   CONSTRAINT fk_alert_recipients_project

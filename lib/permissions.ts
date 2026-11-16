@@ -44,12 +44,12 @@ export function isAdminRole(session: AuthSession | null | undefined) {
 
 /** Quyền tối thiểu để mở từng khu vực quản trị. */
 export function permissionForPath(pathname: string): Permission | null {
-  if (
-    pathname === "/tai-khoan" ||
-    pathname.startsWith("/tai-khoan/") ||
-    pathname === "/tai-khoan-khach" ||
-    pathname.startsWith("/tai-khoan-khach/")
-  ) {
+  // Danh sách / form tài khoản nội bộ: mọi nhân sự admin được vào (tự sửa mk);
+  // thêm/sửa người khác vẫn bị chặn trong UI + API bởi manageUsers.
+  if (pathname === "/tai-khoan" || pathname.startsWith("/tai-khoan/")) {
+    return "viewProjects";
+  }
+  if (pathname === "/tai-khoan-khach" || pathname.startsWith("/tai-khoan-khach/")) {
     return "manageUsers";
   }
   if (
@@ -64,6 +64,9 @@ export function permissionForPath(pathname: string): Permission | null {
   if (pathname === "/thiet-bi" || pathname.startsWith("/thiet-bi/")) return "manageDevices";
   if (pathname === "/he-so-phat-thai" || pathname.startsWith("/he-so-phat-thai/")) {
     return "manageEmissionFactors";
+  }
+  if (pathname === "/loai-diem-do" || pathname.startsWith("/loai-diem-do/")) {
+    return "manageProjects";
   }
   return null;
 }

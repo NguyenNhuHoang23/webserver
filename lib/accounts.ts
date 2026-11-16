@@ -11,6 +11,8 @@ export type Account = {
   role: AccountRole;
   createdAt: string;
   password?: string;
+  /** Bắt buộc khi tự đổi mật khẩu của chính mình. */
+  currentPassword?: string;
   /** Dự án được gán (bắt buộc với Manage; Admin = tất cả). */
   projectIds: string[];
 };

@@ -85,9 +85,9 @@ export function buildLiveMetrics(
   if (!options.hasDevice) {
     return {
       status: "offline",
-      statusLabel: "CHƯA GÁN ĐỒNG HỒ",
+      statusLabel: "CHƯA GẮN ĐỒNG HỒ",
       metrics: [
-        { key: "status", label: "Trạng thái", value: "Chưa gán đồng hồ" },
+        { key: "status", label: "Trạng thái", value: "Chưa gắn đồng hồ / SN" },
         { key: "code", label: "Mã", value: options.code || "—" },
       ],
     };

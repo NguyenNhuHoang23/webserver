@@ -117,202 +117,241 @@ export function GatewayConsole() {
   }, [selectedId, state.data]);
 
   const onlineCount = state.data?.gateways.filter(isGatewayOnline).length ?? 0;
+  const valueEntries = Object.entries(selected?.lastValues ?? {}).slice(0, 12);
 
   return (
-    <div className="mx-auto max-w-[1400px] p-4 font-sans sm:p-6 lg:p-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div>
+    <div className="mx-auto max-w-[1400px] space-y-4 p-4 font-sans sm:p-6 lg:p-8">
+      {/* Header + filters */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
           <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">Gateway Server</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Theo dõi kết nối gateway, thông số đo gần nhất và lịch sử bản tin.
-          </p>
+          {state.data ? (
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+              <span className="text-emerald-700">{onlineCount}</span>/{state.data.gateways.length} online
+            </span>
+          ) : null}
         </div>
-        {state.data ? (
-          <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs shadow-sm">
-            <span className="font-semibold text-emerald-700">{onlineCount}</span>
-            <span className="text-slate-500"> / {state.data.gateways.length} gateway đang kết nối</span>
-          </div>
-        ) : null}
-      </div>
-
-      <section className="mb-6 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-          <label className="text-xs font-medium text-slate-600">
-            Từ
-            <input
-              type="datetime-local"
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-              className="mt-1 block h-10 rounded-xl border border-slate-200 px-3 text-xs text-slate-800 outline-none focus:border-emerald-500"
-            />
-          </label>
-          <label className="text-xs font-medium text-slate-600">
-            Đến
-            <input
-              type="datetime-local"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-              className="mt-1 block h-10 rounded-xl border border-slate-200 px-3 text-xs text-slate-800 outline-none focus:border-emerald-500"
-            />
-          </label>
-          <label className="min-w-0 flex-1 text-xs font-medium text-slate-600">
-            Gateway
-            <select
-              value={gatewayFilter}
-              onChange={(event) => setGatewayFilter(event.target.value)}
-              className="mt-1 block h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-800 outline-none focus:border-emerald-500"
-            >
-              <option value="">Tất cả gateway</option>
-              {state.data?.gateways.map((item) => (
-                <option key={item.gatewayId} value={item.gatewayId}>
-                  {item.gatewayId}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="datetime-local"
+            value={from}
+            onChange={(event) => setFrom(event.target.value)}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none focus:border-emerald-500"
+            aria-label="Từ"
+          />
+          <span className="text-xs text-slate-400">→</span>
+          <input
+            type="datetime-local"
+            value={to}
+            onChange={(event) => setTo(event.target.value)}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none focus:border-emerald-500"
+            aria-label="Đến"
+          />
+          <select
+            value={gatewayFilter}
+            onChange={(event) => setGatewayFilter(event.target.value)}
+            className="h-9 min-w-[140px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none focus:border-emerald-500"
+            aria-label="Lọc gateway"
+          >
+            <option value="">Tất cả gateway</option>
+            {state.data?.gateways.map((item) => (
+              <option key={item.gatewayId} value={item.gatewayId}>
+                {item.gatewayId}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={() => void load()}
-            className="h-10 rounded-xl bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800"
+            className="h-9 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800"
           >
             Làm mới
           </button>
         </div>
-      </section>
+      </div>
 
-      {state.loading && <p className="mb-4 text-xs text-slate-500">Đang tải dữ liệu gateway...</p>}
-      {state.error && <p className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{state.error}</p>}
+      {state.loading ? <p className="text-xs text-slate-500">Đang tải…</p> : null}
+      {state.error ? (
+        <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{state.error}</p>
+      ) : null}
 
-      {state.data && (
+      {state.data ? (
         <>
-          <section className="mb-6">
-            <h2 className="mb-3 text-sm font-bold text-slate-900">Danh sách Gateway & trạng thái kết nối</h2>
-            {state.data.gateways.length === 0 ? (
-              <Empty text="Chưa có gateway nào gửi dữ liệu." />
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {state.data.gateways.map((device) => {
-                  const online = isGatewayOnline(device);
-                  const active = selectedId === device.gatewayId;
-                  return (
-                    <button
-                      key={device.gatewayId}
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(device.gatewayId);
-                        setPicked(true);
-                      }}
-                      className={`rounded-2xl border p-4 text-left shadow-sm transition-colors ${
-                        active
-                          ? "border-emerald-400 bg-emerald-50/50"
-                          : "border-slate-200/80 bg-white hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-                            Gateway ID
+          {/* Master–detail */}
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
+                <h2 className="text-sm font-semibold text-slate-800">Gateway</h2>
+                <span className="text-[11px] text-slate-400">{state.data.gateways.length} thiết bị</span>
+              </div>
+              {state.data.gateways.length === 0 ? (
+                <p className="px-4 py-8 text-center text-xs text-slate-400">Chưa có gateway gửi dữ liệu.</p>
+              ) : (
+                <div className="max-h-[420px] overflow-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-slate-50 text-[10px] font-semibold tracking-wide text-slate-400 uppercase">
+                      <tr>
+                        <th className="px-4 py-2">ID</th>
+                        <th className="px-3 py-2">Đồng hồ</th>
+                        <th className="px-3 py-2">Mạng</th>
+                        <th className="px-3 py-2">Trạng thái</th>
+                        <th className="px-4 py-2 text-right">Seen</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {state.data.gateways.map((device) => {
+                        const online = isGatewayOnline(device);
+                        const active = selectedId === device.gatewayId;
+                        return (
+                          <tr
+                            key={device.gatewayId}
+                            onClick={() => {
+                              setSelectedId(device.gatewayId);
+                              setPicked(true);
+                            }}
+                            className={`cursor-pointer transition-colors ${
+                              active ? "bg-emerald-50/70" : "hover:bg-slate-50"
+                            }`}
+                          >
+                            <td className="max-w-[160px] truncate px-4 py-2.5 font-semibold text-slate-800">
+                              {device.gatewayId}
+                            </td>
+                            <td className="px-3 py-2.5 text-slate-600">
+                              <span className="font-medium text-slate-800">{device.meterId || "—"}</span>
+                              {device.meterModel ? (
+                                <span className="ml-1 text-[10px] text-slate-400">{device.meterModel}</span>
+                              ) : null}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <NetDot internet={device.internet} />
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <OnlineDot online={online} />
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                              {shortStamp(device.lastSeenAt)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-semibold text-slate-800">
+                    {selected ? selected.gatewayId : "Chi tiết"}
+                  </h2>
+                  {selected ? (
+                    <p className="truncate text-[11px] text-slate-400">
+                      {[
+                        selected.meterId,
+                        selected.meterModel,
+                        meterTypeText(selected.meterType),
+                        selected.lastReadingTime ? `mốc ${selected.lastReadingTime}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  ) : null}
+                </div>
+                {selected ? <OnlineDot online={isGatewayOnline(selected)} label /> : null}
+              </div>
+
+              {!selected ? (
+                <p className="px-4 py-10 text-center text-xs text-slate-400">Chọn một gateway để xem số liệu.</p>
+              ) : (
+                <div className="space-y-3 p-4">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <MiniStat label="Nhiệt độ" value={selected.temperature} />
+                    <MiniStat label="Độ ẩm" value={selected.humidity} />
+                    <MiniStat
+                      label="Mạng"
+                      value={selected.internet ? INTERNET_LABEL[selected.internet] ?? selected.internet : "—"}
+                    />
+                    <MiniStat
+                      label="Bản tin"
+                      value={
+                        selected.lastDisposition
+                          ? DISPOSITION_LABEL[selected.lastDisposition] ?? selected.lastDisposition
+                          : "—"
+                      }
+                    />
+                  </div>
+                  {valueEntries.length ? (
+                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                      {valueEntries.map(([key, value]) => (
+                        <div
+                          key={key}
+                          className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-1.5"
+                        >
+                          <p className="truncate text-[10px] font-medium text-slate-400">{key}</p>
+                          <p className="truncate text-xs font-semibold tabular-nums text-slate-800">
+                            {formatValue(value)}
                           </p>
-                          <p className="break-all text-sm font-bold text-slate-900">{device.gatewayId}</p>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <StatusBadge online={online} />
-                          <InternetBadge internet={device.internet} />
-                        </div>
-                      </div>
-                      <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                        <Field label="Đồng hồ" value={device.meterId} />
-                        <Field label="Model" value={device.meterModel} />
-                        <Field label="Loại đo" value={meterTypeText(device.meterType)} />
-                        <Field label="Cập nhật gần nhất" value={formatStamp(device.lastSeenAt)} />
-                      </dl>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400">Chưa có thông số đo gần nhất.</p>
+                  )}
+                </div>
+              )}
+            </section>
+          </div>
 
-          <section className="mb-6 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900">Thông số đo gần nhất</h2>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {selected
-                    ? `Gateway ${selected.gatewayId} · mốc đo ${selected.lastReadingTime || "—"}`
-                    : "Chọn một gateway để xem thông số."}
-                </p>
-              </div>
-              {selected ? <StatusBadge online={isGatewayOnline(selected)} /> : null}
-            </div>
-            {selected ? (
-              <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-                <dl className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-xs">
-                  <Field label="Nhiệt độ gateway" value={selected.temperature} />
-                  <Field label="Độ ẩm gateway" value={selected.humidity} />
-                  <Field label="Mạng" value={selected.internet ? INTERNET_LABEL[selected.internet] ?? selected.internet : null} />
-                  <Field
-                    label="Trạng thái bản tin"
-                    value={
-                      selected.lastDisposition
-                        ? DISPOSITION_LABEL[selected.lastDisposition] ?? selected.lastDisposition
-                        : null
-                    }
-                  />
-                </dl>
-                <ValueList values={selected.lastValues} />
-              </div>
-            ) : (
-              <Empty text="Chọn một gateway ở danh sách phía trên." />
-            )}
-          </section>
-
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-end justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900">Lịch sử bản tin gần nhất</h2>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {selectedId ? `Lọc theo gateway ${selectedId}` : "Tất cả gateway trong khoảng đã chọn"}
-                </p>
-              </div>
-              <p className="text-[11px] text-slate-400">
+          {/* Packet history */}
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
+              <h2 className="text-sm font-semibold text-slate-800">Bản tin gần đây</h2>
+              <span className="text-[11px] text-slate-400">
                 {packets.length}
-                {state.data.packetCount > packets.length ? ` / ${state.data.packetCount}` : ""} bản tin
-              </p>
+                {state.data.packetCount > packets.length ? ` / ${state.data.packetCount}` : ""}
+              </span>
             </div>
             {packets.length === 0 ? (
-              <Empty text="Chưa có bản tin trong khoảng thời gian này." />
+              <p className="px-4 py-8 text-center text-xs text-slate-400">Không có bản tin trong khoảng đã chọn.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[880px] text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-                      <th className="px-2 py-2">Nhận lúc</th>
-                      <th className="px-2 py-2">Gateway</th>
-                      <th className="px-2 py-2">Đồng hồ</th>
-                      <th className="px-2 py-2">Mạng</th>
-                      <th className="px-2 py-2">Trạng thái</th>
-                      <th className="px-2 py-2">Mốc đo</th>
-                      <th className="px-2 py-2">Thông số chính</th>
+              <div className="max-h-[360px] overflow-auto">
+                <table className="w-full min-w-[720px] text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-50 text-[10px] font-semibold tracking-wide text-slate-400 uppercase">
+                    <tr>
+                      <th className="px-4 py-2">Nhận lúc</th>
+                      <th className="px-3 py-2">Đồng hồ</th>
+                      <th className="px-3 py-2">Mạng</th>
+                      <th className="px-3 py-2">Trạng thái</th>
+                      <th className="px-3 py-2">Mốc đo</th>
+                      <th className="px-4 py-2">Số liệu</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {packets.map((item) => (
                       <tr key={item.id} className="text-slate-700">
-                        <td className="px-2 py-2.5 whitespace-nowrap">{formatStamp(item.receivedAt)}</td>
-                        <td className="px-2 py-2.5 break-all font-medium">{item.gatewayId}</td>
-                        <td className="px-2 py-2.5">
-                          <p className="font-medium">{item.meterId || "—"}</p>
-                          <p className="text-[11px] text-slate-400">{item.meterModel || meterTypeText(item.meterType)}</p>
+                        <td className="whitespace-nowrap px-4 py-2 tabular-nums text-slate-600">
+                          {shortStamp(item.receivedAt)}
                         </td>
-                        <td className="px-2 py-2.5">
-                          <InternetBadge internet={item.internet} />
+                        <td className="px-3 py-2">
+                          <span className="font-medium text-slate-800">{item.meterId || "—"}</span>
+                          <span className="ml-1 text-[10px] text-slate-400">
+                            {item.meterModel || meterTypeText(item.meterType) || ""}
+                          </span>
                         </td>
-                        <td className="px-2 py-2.5">
+                        <td className="px-3 py-2">
+                          <NetDot internet={item.internet} />
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">
                           {DISPOSITION_LABEL[item.disposition] ?? item.disposition}
                         </td>
-                        <td className="px-2 py-2.5 whitespace-nowrap">{item.readingTime || "—"}</td>
-                        <td className="px-2 py-2.5 text-slate-600">{summarizeValues(item.values)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                          {item.readingTime || "—"}
+                        </td>
+                        <td className="max-w-[280px] truncate px-4 py-2 text-slate-500">
+                          {summarizeValues(item.values)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -321,69 +360,38 @@ export function GatewayConsole() {
             )}
           </section>
         </>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function StatusBadge({ online }: { online: boolean }) {
+function OnlineDot({ online, label = false }: { online: boolean; label?: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-        online ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+      className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${
+        online ? "text-emerald-700" : "text-slate-400"
       }`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-500" : "bg-slate-400"}`} />
-      {online ? "Đang kết nối" : "Mất kết nối"}
+      <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-500" : "bg-slate-300"}`} />
+      {label ? (online ? "Online" : "Offline") : online ? "Online" : "Offline"}
     </span>
   );
 }
 
-function ValueList({ values }: { values: Record<string, unknown> | null }) {
-  if (!values) return <p className="text-xs text-slate-400">Chưa có thông số đo.</p>;
-  const entries = Object.entries(values);
-  if (!entries.length) return <p className="text-xs text-slate-400">Chưa có thông số đo.</p>;
+function NetDot({ internet }: { internet: string | null }) {
+  const label = internet ? INTERNET_LABEL[internet] ?? internet : "—";
+  return <span className="text-[11px] font-medium text-slate-600">{label}</span>;
+}
+
+function MiniStat({ label, value }: { label: string; value: string | null | undefined }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-      {entries.map(([key, value]) => (
-        <div key={key} className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
-          <p className="text-[10px] font-semibold tracking-wide text-slate-400 uppercase">{key}</p>
-          <p className="mt-0.5 break-all text-sm font-semibold text-slate-800">{formatValue(value)}</p>
-        </div>
-      ))}
+    <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
+      <p className="text-[10px] font-medium text-slate-400">{label}</p>
+      <p className="mt-0.5 truncate text-xs font-semibold text-slate-800">
+        {value == null || value === "" ? "—" : value}
+      </p>
     </div>
   );
-}
-
-function Field({ label, value }: { label: string; value: string | null | undefined }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[10px] font-semibold tracking-wider text-slate-400 uppercase">{label}</dt>
-      <dd className="break-all text-xs text-slate-800">{value == null || value === "" ? "—" : value}</dd>
-    </div>
-  );
-}
-
-function InternetBadge({ internet }: { internet: string | null }) {
-  const label = internet ? INTERNET_LABEL[internet] ?? internet : "Chưa có";
-  const wifi = internet === "W";
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-        wifi
-          ? "bg-sky-100 text-sky-800"
-          : internet === "S"
-            ? "bg-violet-100 text-violet-800"
-            : "bg-slate-100 text-slate-500"
-      }`}
-    >
-      {label}
-    </span>
-  );
-}
-
-function Empty({ text }: { text: string }) {
-  return <p className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-xs text-slate-400">{text}</p>;
 }
 
 function meterTypeText(value: string | null) {
@@ -404,9 +412,11 @@ function summarizeValues(values: Record<string, unknown>) {
   return entries.map(([key, value]) => `${key}: ${formatValue(value)}`).join(" · ");
 }
 
-function formatStamp(value: string | null) {
-  if (!value) return null;
-  return formatStoredVietnam(value) ?? value;
+function shortStamp(value: string | null) {
+  if (!value) return "—";
+  const label = formatStoredVietnam(value) ?? value;
+  // "16/11/2026 14:32:01" → bỏ giây nếu có
+  return label.replace(/:(\d{2})$/, "");
 }
 
 function localInput(date: Date) {

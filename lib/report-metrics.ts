@@ -5,6 +5,7 @@ import {
 } from "@/components/client/TimeFilterBar";
 import type { GatewayEnergySlot } from "@/lib/gateway-series";
 import {
+  allocateKwhAcrossTouBands,
   civilWeekday,
   industrialBand,
   parseTariffPrice,
@@ -189,38 +190,60 @@ export function aggregatePeriodMetrics(
     let pointKwh = 0;
     let pointCost = 0;
     let pointPeak = 0;
-    let previous: number | null = null;
+    let previousEndKwh: number | null = null;
+    let previousAt: string | null = null;
     const utility = utilityByPointId[meterPointId] ?? "Điện";
 
     for (const slot of ordered) {
       const startKwh = registerToKwh(slot.firstWh);
       const endKwh = registerToKwh(slot.lastWh);
       const within = Math.max(0, endKwh - startKwh);
-      const gap = previous == null ? 0 : Math.max(0, startKwh - previous);
-      const delta = within + gap;
-      previous = endKwh;
-      if (delta <= 0) continue;
-
       const at = slotStoredAt(slot.day, slot.hour, slot.minute);
       const parts = vietnamFromStored(at);
-      if (!parts) continue;
-      const band = bandForUtility(utility, parts);
-      const price = priceForUtility(utility, rates, band);
-      const cost = delta * price;
-      const slotKw = delta / 0.5;
+      if (!parts) {
+        previousEndKwh = endKwh;
+        previousAt = at;
+        continue;
+      }
 
-      pointKwh += delta;
-      pointCost += cost;
-      pointPeak = Math.max(pointPeak, slotKw);
-      addBand(pointKwhBand, band, delta);
-      addBand(pointCostBand, band, cost);
-      addBand(kwhByBand, band, delta);
-      addBand(costByBand, band, cost);
+      const applyDelta = (band: TouBand, delta: number) => {
+        if (delta <= 0) return;
+        const price = priceForUtility(utility, rates, band);
+        const cost = delta * price;
+        pointKwh += delta;
+        pointCost += cost;
+        pointPeak = Math.max(pointPeak, delta / 0.5);
+        addBand(pointKwhBand, band, delta);
+        addBand(pointCostBand, band, cost);
+        addBand(kwhByBand, band, delta);
+        addBand(costByBand, band, cost);
+        const dayRow = dayMap.get(slot.day) ?? { kwh: 0, cost: 0 };
+        dayRow.kwh += delta;
+        dayRow.cost += cost;
+        dayMap.set(slot.day, dayRow);
+      };
 
-      const dayRow = dayMap.get(slot.day) ?? { kwh: 0, cost: 0 };
-      dayRow.kwh += delta;
-      dayRow.cost += cost;
-      dayMap.set(slot.day, dayRow);
+      if (within > 0) {
+        applyDelta(bandForUtility(utility, parts), within);
+      }
+
+      if (previousEndKwh != null && previousAt) {
+        const gap = Math.max(0, startKwh - previousEndKwh);
+        if (gap > 0) {
+          const fromParts = vietnamFromStored(previousAt);
+          if (fromParts && (!utility || utility === "Điện")) {
+            const split = allocateKwhAcrossTouBands(fromParts, parts, gap);
+            applyDelta("normal", split.normal);
+            applyDelta("off", split.off);
+            applyDelta("peak", split.peak);
+          } else {
+            applyDelta(bandForUtility(utility, parts), gap);
+          }
+        }
+      }
+
+      previousEndKwh = endKwh;
+      previousAt = at;
     }
 
     totalKwh += pointKwh;

@@ -5,7 +5,6 @@ import type { Project } from "@/lib/projects";
 import { hydrateAlertEvents, type AlertEvent } from "@/lib/alert-events";
 import { hydrateClientMeters } from "@/lib/client-meters";
 import { hydrateGhgSources } from "@/lib/ghg-sources";
-import { hydrateDevices } from "@/lib/devices";
 import {
   civilWeekday,
   industrialBand,
@@ -15,8 +14,10 @@ import {
 import { registerToKwh } from "@/lib/meter-parameters";
 import { hydrateProjectSettings } from "@/lib/project-settings";
 import {
+  isGatewaySampleOnline,
   loadProjectGatewayDailyRange,
   loadProjectGatewayEnergySlots,
+  loadProjectGatewayLatest,
   loadProjectGatewaySamples,
   type GatewayDailyPoint,
   type GatewayEnergySlot,
@@ -181,12 +182,12 @@ export function ClientDashboard({ project }: { project: Project }) {
     const reload = () => {
       void Promise.all([
         hydrateAlertEvents(project.id),
-        hydrateDevices(),
         hydrateClientMeters(project.id),
         hydrateGhgSources(project.id),
         hydrateProjectSettings(project.id),
+        loadProjectGatewayLatest(project.id),
       ])
-        .then(([alertEvents, devices, meters, sources, settings]) => {
+        .then(([alertEvents, meters, sources, settings, latestSamples]) => {
           if (!active) return;
           const saved = settings.costConfig as {
             electricity?: {
@@ -195,18 +196,29 @@ export function ClientDashboard({ project }: { project: Project }) {
             };
           } | undefined;
           setTouPrices(resolveTouPrices(saved?.electricity?.voltageLevel, saved?.electricity?.prices).prices);
-          const deviceIds = new Set(meters.map((meter) => meter.deviceId).filter(Boolean));
-          const projectDevices = devices.filter((device) => deviceIds.has(device.id));
-          const sourceDevices = projectDevices.length ? projectDevices : devices;
-          const counts = sourceDevices.reduce(
-            (result, device) => {
-              if (device.status === "offline") result.offline += 1;
-              else if (device.status === "maintenance") result.warning += 1;
-              else result.normal += 1;
-              return result;
-            },
-            { normal: 0, warning: 0, offline: 0 },
+
+          // Chỉ đếm điểm đo của dự án; trạng thái lấy từ bản tin Gateway thật (không dùng catalog / fallback toàn thư viện).
+          const sampleByMeter = new Map(latestSamples.map((sample) => [sample.meterPointId, sample]));
+          const openAlertMeters = new Set(
+            alertEvents
+              .filter((event) => event.status !== "resolved")
+              .map((event) => event.meterPointId)
+              .filter(Boolean),
           );
+          const counts = { normal: 0, warning: 0, offline: 0 };
+          for (const meter of meters) {
+            if (!meter.deviceId && !meter.serialNumber?.trim()) {
+              counts.offline += 1;
+              continue;
+            }
+            const sample = sampleByMeter.get(meter.id);
+            if (!sample || !isGatewaySampleOnline(sample.at)) {
+              counts.offline += 1;
+              continue;
+            }
+            if (openAlertMeters.has(meter.id)) counts.warning += 1;
+            else counts.normal += 1;
+          }
           setDeviceStatus([
             { label: "BÌNH THƯỜNG", value: counts.normal, color: "#43a047" },
             { label: "CẢNH BÁO", value: counts.warning, color: "#ef8d3a" },
