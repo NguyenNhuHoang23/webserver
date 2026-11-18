@@ -12,12 +12,29 @@ CREATE TABLE IF NOT EXISTS accounts (
   id VARCHAR(64) NOT NULL,
   username VARCHAR(100) NOT NULL,
   email VARCHAR(255) NOT NULL,
+  phone VARCHAR(40) NULL,
   role VARCHAR(80) NOT NULL,
   password_hash CHAR(64) NOT NULL,
   created_at DATE NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_accounts_username (username),
   UNIQUE KEY uq_accounts_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS project_manager_history (
+  id VARCHAR(64) NOT NULL,
+  project_id VARCHAR(64) NOT NULL,
+  from_account_id VARCHAR(64) NULL,
+  from_username VARCHAR(100) NULL,
+  to_account_id VARCHAR(64) NOT NULL,
+  to_username VARCHAR(100) NOT NULL,
+  transfer_date DATE NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_pmh_project (project_id),
+  CONSTRAINT fk_pmh_project
+    FOREIGN KEY (project_id) REFERENCES projects (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -61,6 +78,26 @@ CREATE TABLE IF NOT EXISTS meter_types (
   icon VARCHAR(30) NOT NULL,
   builtin TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS meter_models (
+  name VARCHAR(100) NOT NULL,
+  description VARCHAR(255) NOT NULL DEFAULT '',
+  code INT NULL,
+  builtin TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS meter_model_serials (
+  id VARCHAR(64) NOT NULL,
+  model_name VARCHAR(100) NOT NULL,
+  serial_number VARCHAR(150) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_meter_model_serial (serial_number),
+  KEY idx_mms_model (model_name),
+  CONSTRAINT fk_mms_model
+    FOREIGN KEY (model_name) REFERENCES meter_models (name)
+    ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS project_meter_types (
@@ -330,6 +367,9 @@ INSERT IGNORE INTO meter_types (name, description, icon, builtin) VALUES
   ('Nhiệt', 'Nhiệt độ và năng lượng nhiệt', 'thermo', 1),
   ('Hơi', 'Áp suất và lưu lượng hơi', 'steam', 1),
   ('Khí nén', 'Lưu lượng và áp suất khí nén', 'air', 0);
+
+INSERT IGNORE INTO meter_models (name, description, code, builtin) VALUES
+  ('PM2230', 'Model gateway meterModel = PM2230', 0, 1);
 
 INSERT IGNORE INTO emission_factor_groups (id, name, source) VALUES
   ('do-industry', 'Hệ số phát thải của DO trong công nghiệp sản xuất và xây dựng*', 'Quyết định số 2626/QĐ-BTNMT ngày 10/10/2022, Phụ lục I'),

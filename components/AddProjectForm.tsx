@@ -22,6 +22,10 @@ import {
 } from "@/lib/projects";
 import { ensureCustomerAccount } from "@/lib/customer-accounts";
 import {
+  notifyProjectCreated,
+  notifyProjectUpdated,
+} from "@/lib/admin-notifications";
+import {
   hydrateAccounts,
   loadAccounts,
   upsertAccount,
@@ -129,15 +133,33 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
                 (initialProject.email && item.email === initialProject.email) ||
                 (initialProject.contactName && item.username === initialProject.contactName),
             ) ?? null;
-          if (matched) setManagerId(matched.id);
+          if (matched) {
+            setManagerId(matched.id);
+            setPhone(matched.phone?.trim() || initialProject.phone || "");
+          }
         }
       },
     );
   }, [initialProject]);
 
+  const initialManagerId = useMemo(() => {
+    if (!initialProject) return "";
+    const matched = managers.find(
+      (item) =>
+        (initialProject.email && item.email === initialProject.email) ||
+        (initialProject.contactName && item.username === initialProject.contactName),
+    );
+    return matched?.id ?? "";
+  }, [initialProject, managers]);
+
+  const isManagerTransfer = Boolean(
+    initialProject && managerId && initialManagerId && managerId !== initialManagerId,
+  );
+
   function applyManager(accountId: string) {
     setManagerId(accountId);
-    setPhone("");
+    const account = managers.find((item) => item.id === accountId);
+    setPhone(account?.phone?.trim() || "");
   }
 
   function toggleMeter(type: MeterType) {
@@ -219,6 +241,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
 
     try {
       await hydrateProjects();
+      const managerPhone = selectedManager.phone?.trim() || phone.trim();
       await upsertProject({
         id: projectCode,
         name: projectName,
@@ -229,19 +252,43 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         status,
         startDate,
         contactName: selectedManager.username,
-        phone: phone.trim(),
+        phone: managerPhone,
         email: selectedManager.email,
         address: address.trim(),
         meterTypes,
         recipients: cleanedRecipients,
+        managerAccountId: selectedManager.id,
+        managerHistory: initialProject?.managerHistory,
       });
+
+      // Đồng bộ phạm vi Manage trên client (API cũng kick/gán phía server).
+      const previousManager =
+        initialManagerId && initialManagerId !== selectedManager.id
+          ? managers.find((item) => item.id === initialManagerId) ?? null
+          : null;
+      if (
+        previousManager &&
+        previousManager.role === "Manage" &&
+        previousManager.projectIds.includes(projectCode)
+      ) {
+        await upsertAccount({
+          ...previousManager,
+          projectIds: previousManager.projectIds.filter((id) => id !== projectCode),
+        }).catch(() => undefined);
+      }
       if (selectedManager.role === "Manage") {
         await upsertAccount({
           ...selectedManager,
+          phone: managerPhone || selectedManager.phone,
           projectIds: Array.from(new Set([...selectedManager.projectIds, projectCode])),
-        });
+        }).catch(() => undefined);
       }
-      if (!initialProject) ensureCustomerAccount({ id: projectCode, customer: customerName });
+      if (!initialProject) {
+        ensureCustomerAccount({ id: projectCode, customer: customerName });
+        notifyProjectCreated({ id: projectCode, name: projectName });
+      } else {
+        notifyProjectUpdated({ id: projectCode, name: projectName });
+      }
       router.push("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể lưu dự án vào database.");
@@ -306,19 +353,27 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
                 <ChevronIcon className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
               </div>
             </Field>
-            <Field label="THÔNG TIN LIÊN HỆ">
-              <div className="input flex min-h-10 flex-col justify-center gap-0.5 bg-slate-50 text-sm text-slate-700">
-                {selectedManager ? (
-                  <>
-                    <span className="font-semibold text-slate-800">{selectedManager.username}</span>
-                    <span className="text-xs text-slate-500">{selectedManager.email}</span>
-                  </>
-                ) : (
-                  <span className="text-slate-400">Tự lấy sau khi chọn người quản lý</span>
-                )}
-              </div>
+            <Field label="EMAIL">
+              <input
+                type="email"
+                value={selectedManager?.email ?? ""}
+                placeholder="Tự lấy sau khi chọn người quản lý"
+                className="input cursor-not-allowed bg-slate-50 text-slate-600"
+                disabled
+                tabIndex={-1}
+              />
             </Field>
-            <Field label="NGÀY BẮT ĐẦU">
+            <Field label="SỐ ĐIỆN THOẠI">
+              <input
+                type="tel"
+                value={selectedManager?.phone?.trim() || phone}
+                placeholder="Tự lấy sau khi chọn người quản lý"
+                className="input cursor-not-allowed bg-slate-50 text-slate-600"
+                disabled
+                tabIndex={-1}
+              />
+            </Field>
+            <Field label={isManagerTransfer ? "NGÀY CHUYỂN GIAO" : "NGÀY BẮT ĐẦU"}>
               <input
                 type="date"
                 value={startDate}
@@ -326,6 +381,11 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
                 className="input"
                 required
               />
+              {isManagerTransfer ? (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                  Ngày này được lưu làm ngày chuyển giao quản lý trong lịch sử dự án.
+                </p>
+              ) : null}
             </Field>
             <Field label="TRẠNG THÁI">
               <div className="relative">
@@ -353,6 +413,40 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
               />
             </Field>
           </div>
+
+          {initialProject?.managerHistory?.length ? (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <p className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+                Lịch sử chuyển giao quản lý
+              </p>
+              <ul className="mt-3 space-y-2">
+                {initialProject.managerHistory.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className="flex flex-wrap items-baseline justify-between gap-2 text-sm text-slate-700"
+                  >
+                    <span>
+                      {entry.fromUsername ? (
+                        <>
+                          <span className="font-medium">{entry.fromUsername}</span>
+                          {" → "}
+                          <span className="font-medium">{entry.toUsername}</span>
+                        </>
+                      ) : (
+                        <>
+                          Gán <span className="font-medium">{entry.toUsername}</span>
+                        </>
+                      )}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {entry.transferDate}
+                      {entry.createdAt ? ` · ghi ${entry.createdAt}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div className="mt-4">
             <Field label="LOGO CÔNG TY">

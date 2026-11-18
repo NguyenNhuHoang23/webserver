@@ -49,17 +49,9 @@ export function EmissionFactors() {
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Quản lý hệ số phát thải
-            </h1>
-            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
-              {groups.length} nhóm hệ số
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-slate-500">
-            Thư viện hệ số phát thải phục vụ quy đổi năng lượng và kiểm kê carbon theo tiêu chuẩn GHG Protocol và Bộ TN&MT.
-          </p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            Quản lý hệ số phát thải
+          </h1>
         </div>
         <Link
           href="/he-so-phat-thai/them-moi"
@@ -207,16 +199,6 @@ export function EmissionFactors() {
           </div>
         </div>
       </section>
-
-      {/* Note Banner */}
-      <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 text-xs text-emerald-900">
-        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white">
-          i
-        </span>
-        <p className="leading-relaxed">
-          <strong className="font-semibold">Căn cứ tiêu chuẩn:</strong> Hệ số phát thải được phân loại theo các chất khí gây hiệu ứng nhà kính chính (CO₂, CH₄, N₂O) và quy đổi sang tấn CO₂ tương đương ($tCO_2e$) dựa theo GWP (Global Warming Potential) công bố bởi IPCC và quy chuẩn của Bộ Tài nguyên & Môi trường.
-        </p>
-      </div>
     </div>
   );
 }

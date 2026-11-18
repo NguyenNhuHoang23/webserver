@@ -68,6 +68,9 @@ export function permissionForPath(pathname: string): Permission | null {
   if (pathname === "/loai-diem-do" || pathname.startsWith("/loai-diem-do/")) {
     return "manageProjects";
   }
+  if (pathname === "/mau-dong-ho" || pathname.startsWith("/mau-dong-ho/")) {
+    return "manageDevices";
+  }
   return null;
 }
 

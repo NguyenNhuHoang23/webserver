@@ -31,6 +31,7 @@ const RESOURCE_NAMES = new Set([
   "projects",
   "devices",
   "meter-types",
+  "meter-models",
   "client-meters",
   "emission-factors",
   "ghg-sources",
@@ -84,6 +85,94 @@ let diagramDisplaysReady: Promise<void> | null = null;
 let alertDeliveryColumnsReady: Promise<void> | null = null;
 let alertRecipientChannelsReady: Promise<void> | null = null;
 let emissionFactorGasColumnsReady: Promise<void> | null = null;
+let accountPhoneReady: Promise<void> | null = null;
+let managerHistoryReady: Promise<void> | null = null;
+let meterModelsReady: Promise<void> | null = null;
+
+function ensureMeterModelsTables() {
+  if (!meterModelsReady) {
+    meterModelsReady = (async () => {
+      await emsDb.query(
+        `CREATE TABLE IF NOT EXISTS meter_models (
+           name VARCHAR(100) NOT NULL,
+           description VARCHAR(255) NOT NULL DEFAULT '',
+           code INT NULL,
+           builtin TINYINT(1) NOT NULL DEFAULT 0,
+           PRIMARY KEY (name)
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      );
+      await emsDb.query(
+        `CREATE TABLE IF NOT EXISTS meter_model_serials (
+           id VARCHAR(64) NOT NULL,
+           model_name VARCHAR(100) NOT NULL,
+           serial_number VARCHAR(150) NOT NULL,
+           PRIMARY KEY (id),
+           UNIQUE KEY uq_meter_model_serial (serial_number),
+           KEY idx_mms_model (model_name),
+           CONSTRAINT fk_mms_model
+             FOREIGN KEY (model_name) REFERENCES meter_models (name)
+             ON DELETE CASCADE ON UPDATE CASCADE
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      );
+      await emsDb.execute(
+        `INSERT IGNORE INTO meter_models (name, description, code, builtin)
+         VALUES ('PM2230', 'Model gateway meterModel = PM2230', 0, 1)`,
+      );
+    })().catch((error) => {
+      meterModelsReady = null;
+      console.error("meter_models migrate failed", error);
+      throw error;
+    });
+  }
+  return meterModelsReady;
+}
+
+function ensureAccountPhoneColumn() {
+  if (!accountPhoneReady) {
+    accountPhoneReady = emsDb
+      .query(
+        `ALTER TABLE accounts
+           ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NULL AFTER email`,
+      )
+      .then(() => undefined)
+      .catch((error) => {
+        accountPhoneReady = null;
+        console.error("accounts.phone migrate failed", error);
+        throw error;
+      });
+  }
+  return accountPhoneReady;
+}
+
+function ensureManagerHistoryTable() {
+  if (!managerHistoryReady) {
+    managerHistoryReady = emsDb
+      .query(
+        `CREATE TABLE IF NOT EXISTS project_manager_history (
+           id VARCHAR(64) NOT NULL,
+           project_id VARCHAR(64) NOT NULL,
+           from_account_id VARCHAR(64) NULL,
+           from_username VARCHAR(100) NULL,
+           to_account_id VARCHAR(64) NOT NULL,
+           to_username VARCHAR(100) NOT NULL,
+           transfer_date DATE NOT NULL,
+           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+           PRIMARY KEY (id),
+           KEY idx_pmh_project (project_id),
+           CONSTRAINT fk_pmh_project
+             FOREIGN KEY (project_id) REFERENCES projects (id)
+             ON DELETE CASCADE ON UPDATE CASCADE
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      )
+      .then(() => undefined)
+      .catch((error) => {
+        managerHistoryReady = null;
+        console.error("project_manager_history migrate failed", error);
+        throw error;
+      });
+  }
+  return managerHistoryReady;
+}
 
 function ensureEmissionFactorGasColumns() {
   if (!emissionFactorGasColumnsReady) {
@@ -416,10 +505,37 @@ async function getProjects(projectId?: string) {
       channels: normalizeRecipientChannels(jsonField(row.channels, null), email, phone),
     }]);
   }
+  await ensureManagerHistoryTable();
+  const historyRows = await queryRows<Row>(
+    `SELECT id, project_id AS projectId,
+            from_account_id AS fromAccountId, from_username AS fromUsername,
+            to_account_id AS toAccountId, to_username AS toUsername,
+            DATE_FORMAT(transfer_date, '%Y-%m-%d') AS transferDate,
+            DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS createdAt
+       FROM project_manager_history
+      WHERE project_id IN (${placeholders})
+      ORDER BY transfer_date DESC, created_at DESC`,
+    ids,
+  ).catch(() => [] as Row[]);
+  const historyByProject = new Map<string, Row[]>();
+  for (const row of historyRows) {
+    const id = String(row.projectId);
+    historyByProject.set(id, [...(historyByProject.get(id) ?? []), {
+      id: row.id,
+      fromAccountId: row.fromAccountId || undefined,
+      fromUsername: row.fromUsername || undefined,
+      toAccountId: row.toAccountId,
+      toUsername: row.toUsername,
+      transferDate: row.transferDate,
+      createdAt: row.createdAt,
+    }]);
+  }
+
   return projects.map((project) => ({
     ...project,
     meterTypes: typesByProject.get(project.id as string) ?? [],
     recipients: recipientsByProject.get(project.id as string) ?? [],
+    managerHistory: historyByProject.get(project.id as string) ?? [],
   }));
 }
 
@@ -427,8 +543,9 @@ async function getResource(resource: string, request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("projectId") || undefined;
   if (resource === "accounts") {
     await ensureAccountProjects();
+    await ensureAccountPhoneColumn();
     const accounts = await queryRows<Row>(
-      `SELECT id, username, email, role, DATE_FORMAT(created_at, '%d/%m/%Y') AS createdAt
+      `SELECT id, username, email, phone, role, DATE_FORMAT(created_at, '%d/%m/%Y') AS createdAt
          FROM accounts ORDER BY created_at DESC, id`,
     );
     if (!accounts.length) return [];
@@ -525,6 +642,31 @@ async function getResource(resource: string, request: NextRequest) {
   }
   if (resource === "meter-types") {
     return queryRows<Row>("SELECT name, description, icon, builtin FROM meter_types ORDER BY builtin DESC, name");
+  }
+  if (resource === "meter-models") {
+    await ensureMeterModelsTables();
+    const models = await queryRows<Row>(
+      `SELECT name, description, code, builtin
+         FROM meter_models
+        ORDER BY builtin DESC, name`,
+    );
+    const serials = await queryRows<Row>(
+      `SELECT model_name AS modelName, serial_number AS serial
+         FROM meter_model_serials
+        ORDER BY model_name, serial_number`,
+    );
+    const serialsByModel = new Map<string, string[]>();
+    for (const row of serials) {
+      const key = String(row.modelName);
+      serialsByModel.set(key, [...(serialsByModel.get(key) ?? []), String(row.serial)]);
+    }
+    return models.map((model) => ({
+      name: model.name,
+      description: model.description,
+      code: model.code == null ? null : Number(model.code),
+      builtin: Boolean(model.builtin),
+      serials: serialsByModel.get(String(model.name)) ?? [],
+    }));
   }
   if (resource === "client-meters") {
     if (!projectId) throw new Error("projectId is required");
@@ -697,6 +839,7 @@ async function transaction<T>(work: (connection: PoolConnection) => Promise<T>) 
 async function saveResource(resource: string, body: Row) {
   if (resource === "accounts") {
     await ensureAccountProjects();
+    await ensureAccountPhoneColumn();
     const session = await getServerSession();
     if (!session || session.portal !== "admin") {
       throw new Error("Cần đăng nhập cổng quản trị.");
@@ -718,7 +861,8 @@ async function saveResource(resource: string, body: Row) {
         role: string;
         username: string;
         email: string;
-      }>("SELECT role, username, email FROM accounts WHERE id = ? LIMIT 1", [accountId]);
+        phone: string | null;
+      }>("SELECT role, username, email, phone FROM accounts WHERE id = ? LIMIT 1", [accountId]);
       const existing = existingRows[0];
       const isCreate = !existing;
       if (isCreate && !isAdminActor) {
@@ -775,19 +919,22 @@ async function saveResource(resource: string, body: Row) {
 
       const username = asString(item.username).trim() || asString(existing?.username);
       const email = asString(item.email).trim() || asString(existing?.email);
+      const phone =
+        item.phone !== undefined ? asString(item.phone).trim() : asString(existing?.phone).trim();
       const createdAt = asString(item.createdAt) || new Date().toLocaleDateString("en-GB");
 
       await transaction(async (connection) => {
         await connection.execute(
-          `INSERT INTO accounts (id, username, email, role, password_hash, created_at)
-           VALUES (?, ?, ?, ?, SHA2(?, 256), STR_TO_DATE(?, '%d/%m/%Y'))
+          `INSERT INTO accounts (id, username, email, phone, role, password_hash, created_at)
+           VALUES (?, ?, ?, ?, ?, SHA2(?, 256), STR_TO_DATE(?, '%d/%m/%Y'))
            ON DUPLICATE KEY UPDATE username=VALUES(username), email=VALUES(email),
-             role=VALUES(role), created_at=VALUES(created_at),
+             phone=VALUES(phone), role=VALUES(role), created_at=VALUES(created_at),
              password_hash=IF(? = '', password_hash, SHA2(?, 256))`,
           [
             accountId,
             username,
             email,
+            phone || null,
             role,
             password || "123456",
             createdAt,
@@ -858,6 +1005,20 @@ async function saveResource(resource: string, body: Row) {
     const startDate = projectDateForDb(body.startDate);
     if (!startDate) throw new Error("startDate must use YYYY-MM-DD or DD/MM/YYYY format");
     await ensureAlertRecipientChannels();
+    await ensureManagerHistoryTable();
+    await ensureAccountProjects();
+
+    const projectId = asString(body.id);
+    const managerAccountId = asString(body.managerAccountId).trim();
+    const managerUsername = asString(body.contactName).trim();
+    const previous = projectId
+      ? await queryRows<{ contactName: string | null; email: string | null }>(
+          `SELECT contact_name AS contactName, email FROM projects WHERE id = ? LIMIT 1`,
+          [projectId],
+        )
+      : [];
+    const previousContact = previous[0];
+
     await transaction(async (connection) => {
       await connection.execute(
         `INSERT INTO projects (id, initials, accent, name, customer, status, start_date,
@@ -904,16 +1065,67 @@ async function saveResource(resource: string, body: Row) {
           ],
         );
       }
+
+      // Gán / chuyển giao quản lý: kick Manage cũ khỏi dự án, gán Manage mới.
+      if (managerAccountId) {
+        const previousName = asString(previousContact?.contactName).trim();
+        let fromAccountId: string | null = null;
+        if (previousName) {
+          const fromRows = await queryRows<{ id: string }>(
+            "SELECT id FROM accounts WHERE username = ? OR email = ? LIMIT 1",
+            [previousName, asString(previousContact?.email)],
+          );
+          fromAccountId = fromRows[0]?.id ? String(fromRows[0].id) : null;
+          if (fromAccountId && fromAccountId !== managerAccountId) {
+            await connection.execute(
+              "DELETE FROM account_projects WHERE account_id = ? AND project_id = ?",
+              [fromAccountId, projectId],
+            );
+          }
+        }
+
+        const managerRoleRows = await queryRows<{ role: string }>(
+          "SELECT role FROM accounts WHERE id = ? LIMIT 1",
+          [managerAccountId],
+        );
+        const managerRole = normalizeStaffAccountRole(managerRoleRows[0]?.role);
+        if (managerRole === "Manage") {
+          await connection.execute(
+            "INSERT IGNORE INTO account_projects (account_id, project_id) VALUES (?, ?)",
+            [managerAccountId, projectId],
+          );
+        }
+
+        const isNewAssignment = !previousName;
+        const isTransfer = Boolean(previousName && previousName !== managerUsername);
+        if (isNewAssignment || isTransfer) {
+          await connection.execute(
+            `INSERT INTO project_manager_history
+               (id, project_id, from_account_id, from_username, to_account_id, to_username, transfer_date)
+             VALUES (?, ?, ?, ?, ?, ?, STR_TO_DATE(?, '%Y-%m-%d'))`,
+            [
+              `pmh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              projectId,
+              fromAccountId,
+              previousName || null,
+              managerAccountId,
+              managerUsername || managerAccountId,
+              startDate,
+            ],
+          );
+        }
+      }
     });
-    // Manage nội bộ tạo dự án mới → tự gán vào phạm vi của họ
+
+    // Manage nội bộ tạo dự án mới → tự gán vào phạm vi của họ (nếu chưa có managerAccountId)
     const session = await getServerSession();
     if (
+      !managerAccountId &&
       session?.portal === "admin" &&
       normalizeStaffAccountRole(session.role) === "Manage" &&
       session.userId &&
       body.id
     ) {
-      await ensureAccountProjects();
       await emsDb
         .execute("INSERT IGNORE INTO account_projects (account_id, project_id) VALUES (?, ?)", [
           session.userId,
@@ -980,6 +1192,83 @@ async function saveResource(resource: string, body: Row) {
       }
     });
     return getResource(resource, new NextRequest("http://localhost/api/ems/meter-types"));
+  }
+  if (resource === "meter-models") {
+    await ensureMeterModelsTables();
+    const previousName = asString(body.previousName).trim();
+    const name = asString(body.name).trim();
+    if (!name) throw new Error("Tên Category (meterModel) không được để trống.");
+    const description =
+      asString(body.description).trim() || `Model gateway meterModel = ${name}`;
+    const code =
+      body.code === null || body.code === undefined || body.code === ""
+        ? null
+        : Number(body.code);
+    if (code != null && !Number.isInteger(code)) {
+      throw new Error("Mã gateway (MM) phải là số nguyên.");
+    }
+    const serials = Array.from(
+      new Set(
+        (Array.isArray(body.serials) ? body.serials : [])
+          .map((item) => String(item ?? "").trim())
+          .filter(Boolean),
+      ),
+    );
+
+    await transaction(async (connection) => {
+      let targetName = name;
+      if (previousName && previousName !== name) {
+        const existing = await queryRows<{ builtin: number }>(
+          "SELECT builtin FROM meter_models WHERE name = ? LIMIT 1",
+          [previousName],
+        );
+        if (existing[0]?.builtin) {
+          throw new Error("Không thể đổi tên Category mặc định.");
+        }
+        await connection.execute(
+          `INSERT INTO meter_models (name, description, code, builtin)
+           SELECT ?, ?, ?, builtin FROM meter_models WHERE name = ?
+           ON DUPLICATE KEY UPDATE description=VALUES(description), code=VALUES(code)`,
+          [name, description, code, previousName],
+        );
+        await connection.execute(
+          "UPDATE meter_model_serials SET model_name = ? WHERE model_name = ?",
+          [name, previousName],
+        );
+        await connection.execute("DELETE FROM meter_models WHERE name = ? AND builtin = 0", [
+          previousName,
+        ]);
+        targetName = name;
+      } else {
+        const existing = previousName
+          ? await queryRows<{ builtin: number }>(
+              "SELECT builtin FROM meter_models WHERE name = ? LIMIT 1",
+              [previousName || name],
+            )
+          : await queryRows<{ builtin: number }>(
+              "SELECT builtin FROM meter_models WHERE name = ? LIMIT 1",
+              [name],
+            );
+        const builtin = existing[0]?.builtin ? 1 : body.builtin ? 1 : 0;
+        await connection.execute(
+          `INSERT INTO meter_models (name, description, code, builtin)
+           VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE description=VALUES(description), code=VALUES(code)`,
+          [name, description, code, builtin],
+        );
+        targetName = name;
+      }
+
+      await connection.execute("DELETE FROM meter_model_serials WHERE model_name = ?", [targetName]);
+      for (const serial of serials) {
+        await connection.execute(
+          `INSERT INTO meter_model_serials (id, model_name, serial_number)
+           VALUES (?, ?, ?)`,
+          [`mms-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, targetName, serial],
+        );
+      }
+    });
+    return getResource(resource, new NextRequest("http://localhost/api/ems/meter-models"));
   }
   if (resource === "client-meters") {
     const projectId = asString(body.projectId);
@@ -1156,6 +1445,7 @@ async function deleteResource(resource: string, request: NextRequest) {
     devices: "devices",
     "emission-factors": "emission_factor_groups",
     "meter-types": "meter_types",
+    "meter-models": "meter_models",
     "customer-accounts": "customer_accounts",
     "ghg-sources": "ghg_emission_sources",
   };
@@ -1175,7 +1465,12 @@ async function deleteResource(resource: string, request: NextRequest) {
   }
   const table = tables[resource];
   if (!table) throw new Error(`Delete is not supported for ${resource}`);
-  const key = resource === "emission-factors" ? "id" : resource === "meter-types" ? "name" : "id";
+  const key =
+    resource === "emission-factors"
+      ? "id"
+      : resource === "meter-types" || resource === "meter-models"
+        ? "name"
+        : "id";
   if (resource === "devices") {
     await ensureDeviceColumns();
     await emsDb.execute("UPDATE meter_points SET device_id = NULL WHERE device_id = ?", [id]);
@@ -1186,6 +1481,14 @@ async function deleteResource(resource: string, request: NextRequest) {
       [id],
     );
     if (existing[0]?.builtin) throw new Error("Không thể xóa loại điểm đo mặc định.");
+  }
+  if (resource === "meter-models") {
+    await ensureMeterModelsTables();
+    const existing = await queryRows<{ builtin: number }>(
+      "SELECT builtin FROM meter_models WHERE name = ? LIMIT 1",
+      [id],
+    );
+    if (existing[0]?.builtin) throw new Error("Không thể xóa Category mặc định.");
   }
   await emsDb.execute(`DELETE FROM ${table} WHERE ${key} = ?`, [id]);
   return { ok: true };

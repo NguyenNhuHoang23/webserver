@@ -4,18 +4,26 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
+  DEVICE_KIND_OPTIONS,
   hydrateDevices,
+  kindFromDeviceType,
+  kindLabel,
   loadDevices,
   removeDevice as removeStoredDevice,
   type CatalogDevice,
   type DeviceKind,
 } from "@/lib/devices";
+import { PROTOCOL_VERSION } from "@/lib/gateway-protocol";
 
 const PAGE_SIZE = 10;
 
+function resolveKind(device: CatalogDevice): DeviceKind {
+  return device.kind || kindFromDeviceType(device.type);
+}
+
 export function DeviceList() {
   const [brand, setBrand] = useState("all");
-  const [type, setType] = useState("all");
+  const [kind, setKind] = useState<"all" | DeviceKind>("all");
   const [view, setView] = useState<"list" | "grid">("list");
   const [page, setPage] = useState(1);
   const [devices, setDevices] = useState<CatalogDevice[]>([]);
@@ -38,18 +46,13 @@ export function DeviceList() {
     [devices],
   );
 
-  const types = useMemo(
-    () => Array.from(new Set(devices.map((d) => d.type).filter(Boolean))).sort(),
-    [devices],
-  );
-
   const filtered = useMemo(() => {
     return devices.filter((d) => {
       const matchBrand = brand === "all" || d.brand === brand;
-      const matchType = type === "all" || d.type === type;
-      return matchBrand && matchType;
+      const matchKind = kind === "all" || resolveKind(d) === kind;
+      return matchBrand && matchKind;
     });
-  }, [brand, devices, type]);
+  }, [brand, devices, kind]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -117,14 +120,17 @@ export function DeviceList() {
               ]}
             />
             <FilterSelect
-              value={type}
+              value={kind}
               onChange={(v) => {
-                setType(v);
+                setKind(v as "all" | DeviceKind);
                 setPage(1);
               }}
               options={[
-                { value: "all", label: "Tất cả loại" },
-                ...types.map((item) => ({ value: item, label: item })),
+                { value: "all", label: "Tất cả loại đồng hồ" },
+                ...DEVICE_KIND_OPTIONS.map((item) => ({
+                  value: item.value,
+                  label: item.label,
+                })),
               ]}
             />
           </div>
@@ -157,20 +163,20 @@ export function DeviceList() {
                   <th className="px-5 py-3">Thương hiệu</th>
                   <th className="px-5 py-3">Phân loại</th>
                   <th className="px-5 py-3">Giao thức</th>
-                  <th className="px-5 py-3">Hàm dữ liệu</th>
                   <th className="px-5 py-3 text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                    <td colSpan={5} className="px-5 py-12 text-center text-slate-400">
                       Không tìm thấy loại đồng hồ nào phù hợp.
                     </td>
                   </tr>
                 ) : (
                   rows.map((device) => {
-                    const Icon = getKindIcon(device.kind);
+                    const deviceKind = resolveKind(device);
+                    const Icon = getKindIcon(deviceKind);
                     return (
                       <tr
                         key={device.id}
@@ -185,16 +191,9 @@ export function DeviceList() {
                                 <Icon className="h-4 w-4" />
                               )}
                             </span>
-                            <div>
-                              <span className="block font-semibold text-slate-900">
-                                {device.name}
-                              </span>
-                              <span className="block font-mono text-[11px] text-slate-400">
-                                {device.brandModel}
-                                {device.category ? ` · ${device.category}` : ""}
-                                {device.sn ? ` · ${device.sn}` : ""}
-                              </span>
-                            </div>
+                            <span className="font-semibold text-slate-900">
+                              {device.name}
+                            </span>
                           </div>
                         </td>
                         <td className="px-5 py-3.5 font-medium text-slate-700">
@@ -202,21 +201,11 @@ export function DeviceList() {
                         </td>
                         <td className="px-5 py-3.5">
                           <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600 border border-slate-200/60">
-                            {device.type}
+                            {kindLabel(deviceKind)}
                           </span>
                         </td>
                         <td className="px-5 py-3.5 text-slate-600 font-mono text-[11px]">
-                          {device.protocol || "—"}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          {(device.registers?.length ?? 0) > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                              {device.registers?.length} điểm đo
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">Chưa cấu hình</span>
-                          )}
+                          v{(device.protocol || PROTOCOL_VERSION).replace(/^v/i, "")}
                         </td>
                         <td className="px-5 py-3.5 text-right">
                           <div className="flex justify-end gap-1">
@@ -247,7 +236,8 @@ export function DeviceList() {
         ) : (
           <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
             {rows.map((device) => {
-              const Icon = getKindIcon(device.kind);
+              const deviceKind = resolveKind(device);
+              const Icon = getKindIcon(deviceKind);
               return (
                 <article
                   key={device.id}
@@ -266,17 +256,12 @@ export function DeviceList() {
                         {device.name}
                       </p>
                       <p className="text-[11px] text-slate-400">{device.brand}</p>
-                      <p className="mt-1 text-xs text-slate-600 font-mono">
-                        {device.protocol || "Chưa chọn giao thức"}
-                      </p>
                       <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-[11px]">
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
-                          {device.type}
+                          {kindLabel(deviceKind)}
                         </span>
-                        <span className="text-slate-500 font-medium">
-                          {(device.registers?.length ?? 0) > 0
-                            ? `${device.registers?.length} điểm dữ liệu`
-                            : "Chưa cấu hình"}
+                        <span className="font-mono text-slate-500">
+                          v{(device.protocol || PROTOCOL_VERSION).replace(/^v/i, "")}
                         </span>
                       </div>
                     </div>

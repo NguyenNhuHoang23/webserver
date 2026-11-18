@@ -27,6 +27,7 @@ export function AddAccountForm() {
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<AccountRole>("Manage");
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -75,6 +76,7 @@ export function AddAccountForm() {
       setExisting(found);
       setUsername(found.username);
       setEmail(found.email);
+      setPhone(found.phone ?? "");
       setRole(found.role);
       setProjectIds(found.projectIds ?? []);
       setPassword("");
@@ -151,6 +153,7 @@ export function AddAccountForm() {
       id: editingId && isEdit ? editingId : `acc-${Date.now()}`,
       username: name,
       email: mail,
+      phone: phone.trim() || undefined,
       role: effectiveRole,
       projectIds: assigned,
       createdAt: existing?.createdAt ?? todayLabel(),
@@ -202,9 +205,6 @@ export function AddAccountForm() {
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">
           {isEdit ? (isSelf ? "Cập nhật tài khoản của tôi" : "Cập nhật tài khoản nội bộ") : "Thêm tài khoản nội bộ"}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Nhân sự công ty đăng nhập cổng quản trị. Chỉ 2 phân cấp: Admin (mọi dự án) và Manage (dự án được gán).
-        </p>
       </div>
 
       <form
@@ -216,11 +216,6 @@ export function AddAccountForm() {
       >
         <div className="mb-6">
           <h2 className="text-[15px] font-semibold text-slate-800">Thông tin đăng nhập</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            {isSelf
-              ? "Không thể tự phân quyền cho mình. Đổi mật khẩu cần nhập mật khẩu cũ và xác nhận mật khẩu mới."
-              : "Phân cấp do cấp trên gán cho cấp dưới. Admin có thể đặt mật khẩu mới cho cấp dưới."}
-          </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -242,6 +237,15 @@ export function AddAccountForm() {
               placeholder="Ví dụ: a.nguyen@congty.com"
               className="input"
               required
+            />
+          </Field>
+          <Field label="SỐ ĐIỆN THOẠI">
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Ví dụ: 0901234567"
+              className="input"
             />
           </Field>
 
@@ -267,11 +271,6 @@ export function AddAccountForm() {
               <div className="input flex items-center bg-slate-50 font-semibold text-slate-700">
                 {ACCOUNT_ROLE_META[lockedRole].label}
               </div>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-                {isSelf
-                  ? "Không thể tự phân quyền cho mình — chỉ cấp trên được gán."
-                  : ACCOUNT_ROLE_META[lockedRole].hint}
-              </p>
             </Field>
           )}
 
@@ -337,7 +336,7 @@ export function AddAccountForm() {
           </div>
         ) : null}
 
-        {canManage && !isSelf && (canAssignRole ? role : lockedRole) === "Manage" ? (
+        {/* {canManage && !isSelf && (canAssignRole ? role : lockedRole) === "Manage" ? (
           <div className="mt-6">
             <div className="mb-2">
               <p className="text-[11px] font-semibold tracking-wide text-slate-500">DỰ ÁN ĐƯỢC GÁN QUYỀN</p>
@@ -391,7 +390,7 @@ export function AddAccountForm() {
               ? "Tài khoản Admin — toàn quyền mọi dự án."
               : `Dự án được gán: ${(existing?.projectIds ?? []).length ? (existing?.projectIds ?? []).join(", ") : "chưa có"} (do cấp trên quản lý).`}
           </p>
-        ) : null}
+        ) : null} */}
 
         {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
 

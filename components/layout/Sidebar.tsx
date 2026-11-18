@@ -63,6 +63,12 @@ const navGroups: {
         icon: MeterConfigIcon,
         permission: "manageProjects",
       },
+      {
+        href: "/mau-dong-ho",
+        label: "Category / Serial đồng hồ",
+        icon: DeviceIcon,
+        permission: "manageDevices",
+      },
     ],
   },
 ];

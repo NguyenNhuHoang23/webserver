@@ -8,6 +8,7 @@ export type Account = {
   id: string;
   username: string;
   email: string;
+  phone?: string;
   role: AccountRole;
   createdAt: string;
   password?: string;
@@ -58,6 +59,7 @@ function mapAccount(row: Partial<Account> & { id: string }): Account {
     id: row.id,
     username: String(row.username ?? ""),
     email: String(row.email ?? ""),
+    phone: String(row.phone ?? "").trim() || undefined,
     role,
     createdAt: String(row.createdAt ?? todayLabel()),
     password: row.password,

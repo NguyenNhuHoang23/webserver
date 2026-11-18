@@ -37,6 +37,17 @@ export function normalizeAlertChannels(value: unknown): AlertChannel[] {
   return next.length ? next : ["email"];
 }
 
+export type ProjectManagerHistoryEntry = {
+  id: string;
+  fromAccountId?: string;
+  fromUsername?: string;
+  toAccountId: string;
+  toUsername: string;
+  /** Ngày hẹn / ngày chuyển giao quản lý (YYYY-MM-DD). */
+  transferDate: string;
+  createdAt: string;
+};
+
 export type Project = {
   id: string;
   initials: string;
@@ -52,6 +63,10 @@ export type Project = {
   logoUrl?: string;
   meterTypes?: MeterType[];
   recipients?: AlertRecipient[];
+  /** Lịch sử đổi người quản lý dự án. */
+  managerHistory?: ProjectManagerHistoryEntry[];
+  /** ID tài khoản nội bộ được chọn làm quản lý (chỉ dùng khi lưu). */
+  managerAccountId?: string;
 };
 
 export function resolveMeterTypes(project?: Pick<Project, "meterTypes"> | null): MeterType[] {
@@ -111,10 +126,15 @@ export async function upsertProject(project: Project) {
 }
 
 export async function removeProject(id: string) {
+  const existing = loadProjects().find((item) => item.id === id);
   await dbFetch("projects", { method: "DELETE", query: { id } });
   const next = loadProjects().filter((item) => item.id !== id);
   projectsCache = next;
   emitDbChange("projects");
+  if (typeof window !== "undefined") {
+    const { notifyProjectDeleted } = await import("@/lib/admin-notifications");
+    notifyProjectDeleted({ id, name: existing?.name });
+  }
   return next;
 }
 

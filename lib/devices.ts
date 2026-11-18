@@ -6,10 +6,12 @@ export type DeviceStatus = "active" | "maintenance" | "offline";
 
 export type DeviceRegister = {
   id: string;
-  address: string;
   name: string;
+  description: string;
   dataType: string;
   multiplier: string;
+  /** Dữ liệu cũ (địa chỉ thanh ghi) — chỉ để tương thích khi đọc. */
+  address?: string;
 };
 
 export type DeviceExtraField = {
@@ -97,6 +99,13 @@ export function todaySyncLabel() {
   return vietnamNowLabel();
 }
 
+export const DEVICE_KIND_OPTIONS: { value: DeviceKind; label: string }[] = [
+  { value: "power", label: "Điện" },
+  { value: "flow", label: "Nước" },
+  { value: "temp", label: "Nhiệt" },
+  { value: "steam", label: "Hơi" },
+];
+
 export function kindFromDeviceType(deviceType: string): DeviceKind {
   const value = deviceType.toLowerCase();
   if (value.includes("nước") || value.includes("water") || value.includes("flow")) {
@@ -104,7 +113,15 @@ export function kindFromDeviceType(deviceType: string): DeviceKind {
   }
   if (value.includes("nhiệt") || value.includes("temp")) return "temp";
   if (value.includes("hơi") || value.includes("steam")) return "steam";
+  if (value.includes("điện") || value.includes("dien") || value.includes("power") || value.includes("electric")) {
+    return "power";
+  }
   return "power";
+}
+
+export function kindLabel(kind?: DeviceKind | string) {
+  const found = DEVICE_KIND_OPTIONS.find((item) => item.value === kind);
+  return found?.label ?? "Điện";
 }
 
 export function typeLabelFromDeviceType(deviceType: string) {

@@ -57,6 +57,7 @@ export function AccountList() {
       return (
         item.username.toLowerCase().includes(q) ||
         item.email.toLowerCase().includes(q) ||
+        (item.phone ?? "").toLowerCase().includes(q) ||
         item.role.toLowerCase().includes(q) ||
         ACCOUNT_ROLE_META[item.role]?.label.toLowerCase().includes(q) ||
         projectLabel.includes(q)
@@ -78,13 +79,7 @@ export function AccountList() {
             <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
               Quản trị người dùng
             </h1>
-            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
-              {accounts.length} tài khoản nội bộ
-            </span>
           </div>
-          <p className="mt-1 text-xs text-slate-500">
-            Tài khoản nhân sự công ty · phân cấp Admin (mọi dự án) / Manage (dự án được gán).
-          </p>
         </div>
         {canManage ? (
           <Link
@@ -118,7 +113,7 @@ export function AccountList() {
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
                 <th className="px-5 py-3">Tài khoản</th>
-                <th className="px-5 py-3">Email</th>
+                <th className="px-5 py-3">Email / SĐT</th>
                 <th className="px-5 py-3">Phân cấp</th>
                 <th className="px-5 py-3">Dự án được gán</th>
                 <th className="px-5 py-3">Ngày tạo</th>
@@ -136,7 +131,12 @@ export function AccountList() {
                       <p className="font-semibold text-slate-900">{account.username}</p>
                     </div>
                   </td>
-                  <td className="px-5 py-3.5 font-mono text-[11px] text-slate-600">{account.email}</td>
+                  <td className="px-5 py-3.5 font-mono text-[11px] text-slate-600">
+                    <div>{account.email}</div>
+                    {account.phone ? (
+                      <div className="mt-0.5 text-slate-500">{account.phone}</div>
+                    ) : null}
+                  </td>
                   <td className="px-5 py-3.5">
                     <RoleBadge role={account.role} />
                   </td>

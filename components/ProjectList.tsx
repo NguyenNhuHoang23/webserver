@@ -46,7 +46,6 @@ const PAGE_SIZE = 10;
 export function ProjectList() {
   const { session } = useAuth();
   const canManageProjects = hasPermission(session, "manageProjects");
-  const canManageDevices = hasPermission(session, "manageDevices");
   const [items, setItems] = useState<Project[]>([]);
   const [accounts, setAccounts] = useState<CustomerAccount[]>([]);
   const [telemetry, setTelemetry] = useState<Record<string, ProjectTelemetry>>({});
@@ -143,15 +142,6 @@ export function ProjectList() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
-          {canManageDevices ? (
-            <Link
-              href="/thiet-bi"
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
-            >
-              <DeviceIcon className="h-4 w-4 text-slate-500" />
-              Thư viện thiết bị
-            </Link>
-          ) : null}
           {canManageProjects ? (
             <Link
               href="/tao-du-an"
@@ -213,10 +203,6 @@ export function ProjectList() {
                 { value: "paused", label: "Trạng thái: Tạm dừng" },
               ]}
             />
-          </div>
-
-          <div className="text-xs text-slate-500">
-            Hiển thị: <strong className="text-slate-800 font-semibold">{filtered.length}</strong> cơ sở
           </div>
         </div>
 
@@ -553,16 +539,6 @@ function ActivityIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-    </svg>
-  );
-}
-
-function DeviceIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="5" width="16" height="12" rx="2" />
-      <path d="M8 21h8M12 17v4" />
-      <path d="M8 9h.01M12 9h.01M16 9h.01" strokeWidth="2.4" />
     </svg>
   );
 }

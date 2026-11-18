@@ -6,25 +6,29 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  DEVICE_KIND_OPTIONS,
   hydrateDevices,
   kindFromDeviceType,
+  kindLabel,
   todaySyncLabel,
-  typeLabelFromDeviceType,
   upsertDevice,
   type DeviceExtraField,
+  type DeviceKind,
   type DeviceRegister,
 } from "@/lib/devices";
-import { METER_MODEL_BY_CODE } from "@/lib/gateway-protocol";
+import { PROTOCOL_VERSION } from "@/lib/gateway-protocol";
+import {
+  hydrateMeterModels,
+  loadMeterModels,
+  serialsForModel,
+  type MeterModelDef,
+} from "@/lib/meter-models";
 
 type ExtraField = DeviceExtraField;
 type RegisterRow = DeviceRegister;
 
-const protocols = ["Modbus TCP", "Modbus RTU", "M-Bus", "BACnet", "MQTT"];
 const dataTypes = ["UINT16", "UINT32", "INT32", "FLOAT32", "FLOAT64"];
-/** Chỉ model thực tế gateway đang map (không gợi ý PM5000 / catalog ảo). */
-const REAL_METER_MODELS = Array.from(
-  new Set(Object.values(METER_MODEL_BY_CODE).map((item) => item.trim()).filter(Boolean)),
-);
+const PROTOCOL_OPTIONS = [PROTOCOL_VERSION];
 
 function nextId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
@@ -32,8 +36,18 @@ function nextId(prefix: string) {
 
 function emptyRegisterRows(): RegisterRow[] {
   return [
-    { id: "r1", address: "", name: "", dataType: "FLOAT32", multiplier: "1.0" },
+    { id: "r1", name: "", description: "", dataType: "FLOAT32", multiplier: "1.0" },
   ];
+}
+
+function normalizeRegisterRows(rows: DeviceRegister[]): RegisterRow[] {
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name?.trim() || "",
+    description: (row.description ?? row.address ?? "").trim(),
+    dataType: row.dataType || "FLOAT32",
+    multiplier: row.multiplier || "1.0",
+  }));
 }
 
 export function AddCustomDeviceForm() {
@@ -43,39 +57,36 @@ export function AddCustomDeviceForm() {
 
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
-  const [deviceType, setDeviceType] = useState("");
+  const [deviceKind, setDeviceKind] = useState<DeviceKind>("power");
   const [category, setCategory] = useState("");
   const [serial, setSerial] = useState("");
   const [error, setError] = useState("");
-  const [protocol, setProtocol] = useState(protocols[0]);
-  const [notes, setNotes] = useState("");
-  const [preview, setPreview] = useState<string | null>(null);
+  const [protocol, setProtocol] = useState(PROTOCOL_VERSION);
   const [isEdit, setIsEdit] = useState(false);
-  const [knownCategories, setKnownCategories] = useState<string[]>([]);
+  const [meterModels, setMeterModels] = useState<MeterModelDef[]>(loadMeterModels);
   const [extraFields, setExtraFields] = useState<ExtraField[]>([]);
   const [fieldToDelete, setFieldToDelete] = useState<ExtraField | null>(null);
   const [rowToDelete, setRowToDelete] = useState<RegisterRow | null>(null);
   const [rows, setRows] = useState<RegisterRow[]>(emptyRegisterRows());
 
   const lastEdited = useMemo(() => "Vừa xong", []);
-  const categorySuggestions = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...REAL_METER_MODELS,
-          ...knownCategories.map((item) => item.trim()).filter(Boolean),
-        ]),
-      ).sort(),
-    [knownCategories],
+  const categoryOptions = useMemo(
+    () => meterModels.map((item) => item.name).filter(Boolean),
+    [meterModels],
   );
+  const serialOptions = useMemo(() => {
+    const configured = serialsForModel(meterModels, category);
+    if (serial && !configured.includes(serial)) {
+      return [...configured, serial].sort();
+    }
+    return configured;
+  }, [meterModels, category, serial]);
 
   useEffect(() => {
     let active = true;
-    void hydrateDevices().then((devices) => {
+    void Promise.all([hydrateMeterModels(), hydrateDevices()]).then(([models, devices]) => {
       if (!active) return;
-      setKnownCategories(
-        devices.map((item) => item.category?.trim() || item.name.trim()).filter(Boolean),
-      );
+      setMeterModels(models);
       if (!editingId) {
         setIsEdit(false);
         return;
@@ -88,19 +99,30 @@ export function AddCustomDeviceForm() {
       setIsEdit(true);
       setBrand(existing.brand);
       setModel(existing.brandModel.replace(`${existing.brand} `, "").trim() || existing.name);
-      setProtocol(existing.protocol || protocols[0]);
-      setDeviceType(existing.type);
+      const savedProtocol = existing.protocol?.replace(/^v/i, "").trim();
+      setProtocol(savedProtocol || PROTOCOL_VERSION);
+      setDeviceKind(existing.kind || kindFromDeviceType(existing.type));
       setCategory(existing.category ?? "");
       setSerial(existing.sn);
-      setNotes(existing.notes ?? "");
-      setPreview(existing.image ?? null);
       setExtraFields(existing.extraFields ?? []);
-      setRows(existing.registers?.length ? existing.registers : emptyRegisterRows());
+      setRows(
+        existing.registers?.length
+          ? normalizeRegisterRows(existing.registers)
+          : emptyRegisterRows(),
+      );
     });
     return () => {
       active = false;
     };
   }, [editingId]);
+
+  function applyCategory(nextCategory: string) {
+    setCategory(nextCategory);
+    setSerial("");
+    if (!model.trim() || categoryOptions.includes(model.trim())) {
+      setModel(nextCategory);
+    }
+  }
 
   function addExtraField() {
     setExtraFields((current) => [
@@ -114,8 +136,8 @@ export function AddCustomDeviceForm() {
       ...current,
       {
         id: nextId("r"),
-        address: "",
         name: "",
+        description: "",
         dataType: "FLOAT32",
         multiplier: "1.0",
       },
@@ -130,18 +152,27 @@ export function AddCustomDeviceForm() {
 
   async function handleSubmit() {
     const brandName = brand.trim() || "Custom";
-    const modelName = model.trim() || "Device";
+    const modelName = model.trim() || category.trim() || "Device";
     const brandModel = modelName.toLowerCase().startsWith(brandName.toLowerCase())
       ? modelName
       : `${brandName} ${modelName}`;
     const serialNumber = serial.trim();
     const categoryName = category.trim();
     if (!categoryName || !serialNumber) {
-      setError("Vui lòng nhập Category (trùng meterModel gateway) và Serial thực tế.");
+      setError("Vui lòng chọn Category (meterModel gateway) và Serial.");
+      return;
+    }
+    if (!categoryOptions.includes(categoryName)) {
+      setError("Category phải chọn từ danh mục đã cấu hình.");
+      return;
+    }
+    if (!serialOptions.includes(serialNumber)) {
+      setError("Serial phải chọn từ danh sách của Category đã chọn.");
       return;
     }
     setError("");
     const id = editingId || `dev-${Date.now()}`;
+    const protocolVersion = protocol.trim() || PROTOCOL_VERSION;
 
     try {
       await upsertDevice({
@@ -151,15 +182,23 @@ export function AddCustomDeviceForm() {
         category: categoryName,
         brandModel,
         brand: brandName,
-        type: typeLabelFromDeviceType(deviceType),
-        kind: kindFromDeviceType(deviceType || modelName),
+        type: kindLabel(deviceKind),
+        kind: deviceKind,
         status: "active",
         lastSync: todaySyncLabel(),
-        protocol,
-        notes: notes.trim(),
-        image: preview ?? undefined,
+        protocol: protocolVersion,
+        notes: "",
+        image: undefined,
         extraFields,
-        registers: rows.filter((row) => row.address.trim() || row.name.trim()),
+        registers: rows
+          .filter((row) => row.name.trim() || row.description.trim())
+          .map((row) => ({
+            id: row.id,
+            name: row.name.trim(),
+            description: row.description.trim(),
+            dataType: row.dataType,
+            multiplier: row.multiplier,
+          })),
       });
     } catch (submitError) {
       const message = submitError instanceof Error ? submitError.message : "";
@@ -194,11 +233,6 @@ export function AddCustomDeviceForm() {
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
             {isEdit ? "Cập nhật loại đồng hồ" : "Thêm loại đồng hồ"}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Chỉ khai báo loại đồng hồ thực tế đang dùng / sẽ lắp (hiện tại:{" "}
-            <strong className="font-semibold text-slate-800">{REAL_METER_MODELS.join(", ") || "PM2230"}</strong>
-            ). Category phải trùng <code className="text-[12px]">meterModel</code> gửi từ gateway — không dùng model mẫu như PM5000.
-          </p>
         </div>
       </div>
 
@@ -217,30 +251,52 @@ export function AddCustomDeviceForm() {
           </button>
         </div>
 
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+          Category &amp; Serial được cấu hình tại{" "}
+          <Link href="/mau-dong-ho" className="font-semibold text-emerald-700 hover:underline">
+            Category / Serial đồng hồ
+          </Link>
+          . Form này chỉ chọn từ danh sách sẵn.
+        </div>
+
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="1. Category (meterModel gateway)">
-            <input
-              list="device-category-suggestions"
+            <select
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder={REAL_METER_MODELS[0] ?? "PM2230"}
+              onChange={(e) => applyCategory(e.target.value)}
               className="input"
               required
-            />
-            <datalist id="device-category-suggestions">
-              {categorySuggestions.map((item) => (
-                <option key={item} value={item} />
+            >
+              <option value="">Chọn Category...</option>
+              {categoryOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
               ))}
-            </datalist>
+            </select>
           </Field>
           <Field label="2. Serial">
-            <input
+            <select
               value={serial}
               onChange={(e) => setSerial(e.target.value)}
-              placeholder="Số serial thực trên đồng hồ"
               className="input"
               required
-            />
+              disabled={!category}
+            >
+              <option value="">
+                {category ? "Chọn serial..." : "Chọn Category trước"}
+              </option>
+              {serialOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+            {category && serialOptions.length === 0 ? (
+              <p className="mt-1.5 text-[11px] text-amber-600">
+                Category này chưa có serial. Thêm tại trang Category / Serial đồng hồ.
+              </p>
+            ) : null}
           </Field>
           <Field label="Thương hiệu / Nhà sản xuất">
             <input
@@ -254,26 +310,35 @@ export function AddCustomDeviceForm() {
             <input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder={REAL_METER_MODELS[0] ?? "PM2230"}
+              placeholder={category || "PM2230"}
               className="input"
             />
           </Field>
           <Field label="Loại thiết bị">
-            <input
-              value={deviceType}
-              onChange={(e) => setDeviceType(e.target.value)}
-              placeholder="Đồng hồ điện, cảm biến lưu lượng, ..."
+            <select
+              value={deviceKind}
+              onChange={(e) => setDeviceKind(e.target.value as DeviceKind)}
               className="input"
-            />
+              required
+            >
+              {DEVICE_KIND_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="Giao thức kết nối">
+          <Field label="Giao thức kết nối (protocol version)">
             <select
               value={protocol}
               onChange={(e) => setProtocol(e.target.value)}
               className="input"
+              required
             >
-              {protocols.map((item) => (
-                <option key={item}>{item}</option>
+              {PROTOCOL_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  v{item}
+                </option>
               ))}
             </select>
           </Field>
@@ -344,8 +409,8 @@ export function AddCustomDeviceForm() {
           <table className="w-full min-w-[700px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-[11px] font-semibold tracking-wide text-slate-400">
-                <th className="px-2 py-2">ĐỊA CHỈ (HEX/DEC)</th>
-                <th className="px-2 py-2">TÊN THÔNG SỐ</th>
+                <th className="px-2 py-2">TÊN</th>
+                <th className="px-2 py-2">MÔ TẢ</th>
                 <th className="px-2 py-2">KIỂU DỮ LIỆU</th>
                 <th className="px-2 py-2">HỆ SỐ NHÂN</th>
                 <th className="w-12 px-2 py-2 text-right">THAO TÁC</th>
@@ -356,15 +421,17 @@ export function AddCustomDeviceForm() {
                 <tr key={row.id} className="border-b border-slate-50 last:border-0">
                   <td className="px-2 py-2">
                     <input
-                      value={row.address}
-                      onChange={(e) => updateRow(row.id, "address", e.target.value)}
+                      value={row.name}
+                      onChange={(e) => updateRow(row.id, "name", e.target.value)}
+                      placeholder="Tên thông số"
                       className="input h-9"
                     />
                   </td>
                   <td className="px-2 py-2">
                     <input
-                      value={row.name}
-                      onChange={(e) => updateRow(row.id, "name", e.target.value)}
+                      value={row.description}
+                      onChange={(e) => updateRow(row.id, "description", e.target.value)}
+                      placeholder="Mô tả"
                       className="input h-9"
                     />
                   </td>
@@ -404,54 +471,6 @@ export function AddCustomDeviceForm() {
           </table>
         </div>
       </section>
-
-      <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center hover:border-emerald-500 hover:bg-emerald-50/30 transition-colors">
-            {preview ? (
-              <img
-                src={preview}
-                alt="Ảnh thiết bị"
-                className="mb-3 h-24 w-24 rounded-lg object-cover"
-              />
-            ) : (
-              <CameraIcon className="mb-3 h-8 w-8 text-slate-400" />
-            )}
-            <span className="text-xs font-bold tracking-wide text-slate-600">
-              ẢNH ĐỒNG HỒ
-            </span>
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => setPreview(String(reader.result ?? ""));
-                reader.readAsDataURL(file);
-              }}
-            />
-          </label>
-          <p className="mt-3 text-center text-xs leading-5 text-slate-400">
-            Ảnh mẫu của loại đồng hồ để dễ nhận diện. Không phải ảnh hiện trường của một dự án.
-          </p>
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-wide text-slate-700 uppercase">
-            <DocIcon className="h-4 w-4 text-emerald-600" />
-            Ghi chú & mô tả
-          </h2>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={7}
-            placeholder="Ghi chú kỹ thuật của loại đồng hồ: đơn vị, cách đọc thanh ghi, lưu ý khi kết nối gateway..."
-            className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 transition-all"
-          />
-        </section>
-      </div>
 
       <div className="sticky bottom-0 -mx-6 mt-1 flex items-center justify-between gap-3 border-t border-slate-200 bg-[#f3f5f8]/95 px-6 py-4 backdrop-blur lg:-mx-8 lg:px-8">
         <p className="flex items-center gap-2 text-xs text-slate-500">
@@ -553,15 +572,6 @@ function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M5 7h14M10 7V5h4v2M8 7l.8 12h6.4L16 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function CameraIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M4 8.5h3l1.5-2h7l1.5 2h3A1.5 1.5 0 0 1 21.5 10v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <circle cx="12" cy="14" r="3.2" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
