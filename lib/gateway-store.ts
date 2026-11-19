@@ -19,6 +19,189 @@ import {
   type PacketNumber,
 } from "@/lib/gateway-protocol";
 import type { ProjectGatewaySample } from "@/lib/gateway-series";
+import { mapPool } from "@/lib/async-pool";
+import { registerToKwh } from "@/lib/meter-parameters";
+
+export type GatewayMeterFilter = {
+  meterPointIds?: string[];
+};
+
+type MeterReplacementRow = {
+  id: string;
+  projectId: string;
+  meterPointId: string;
+  replacedAt: string;
+  oldSerial: string;
+  newSerial: string;
+  oldCategory: string | null;
+  newCategory: string | null;
+  lastReadingWh: number;
+};
+
+type GatewayPointBinding = {
+  model: number;
+  meterId: string;
+  pointId: string;
+  /** Chỉ lấy mẫu trước thời điểm này (đồng hồ cũ). */
+  validUntil?: string;
+};
+
+async function ensureMeterReplacementsTable() {
+  await emsDb.query(
+    `CREATE TABLE IF NOT EXISTS meter_replacements (
+       id VARCHAR(64) NOT NULL,
+       project_id VARCHAR(64) NOT NULL,
+       meter_point_id VARCHAR(64) NOT NULL,
+       replaced_at DATETIME NOT NULL,
+       old_serial VARCHAR(150) NOT NULL,
+       new_serial VARCHAR(150) NOT NULL,
+       old_category VARCHAR(100) NULL,
+       new_category VARCHAR(100) NULL,
+       last_reading_wh DECIMAL(18,6) NOT NULL DEFAULT 0,
+       note VARCHAR(255) NULL,
+       PRIMARY KEY (id),
+       KEY idx_mr_project (project_id),
+       KEY idx_mr_point (meter_point_id),
+       KEY idx_mr_replaced (replaced_at)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  );
+}
+
+async function loadProjectMeterReplacements(projectId: string): Promise<MeterReplacementRow[]> {
+  await ensureMeterReplacementsTable();
+  const rows = await queryRows<RowDataPacket>(
+    `SELECT id, project_id AS projectId, meter_point_id AS meterPointId,
+            DATE_FORMAT(replaced_at, '%Y-%m-%dT%H:%i:%s') AS replacedAt,
+            old_serial AS oldSerial, new_serial AS newSerial,
+            old_category AS oldCategory, new_category AS newCategory,
+            last_reading_wh AS lastReadingWh
+       FROM meter_replacements
+      WHERE project_id = ?
+      ORDER BY replaced_at ASC, id ASC`,
+    [projectId],
+  ).catch(() => []);
+  return rows.map((row) => ({
+    id: String(row.id),
+    projectId: String(row.projectId),
+    meterPointId: String(row.meterPointId),
+    replacedAt: String(row.replacedAt),
+    oldSerial: String(row.oldSerial ?? ""),
+    newSerial: String(row.newSerial ?? ""),
+    oldCategory: row.oldCategory == null ? null : String(row.oldCategory),
+    newCategory: row.newCategory == null ? null : String(row.newCategory),
+    lastReadingWh: Number(row.lastReadingWh) || 0,
+  }));
+}
+
+function offsetKwhForPointAt(
+  replacements: MeterReplacementRow[],
+  meterPointId: string,
+  atText: string,
+) {
+  const atMs = Date.parse(atText.endsWith("Z") ? atText : `${atText}Z`);
+  if (!Number.isFinite(atMs)) return 0;
+  let offset = 0;
+  for (const item of replacements) {
+    if (item.meterPointId !== meterPointId) continue;
+    const replacedMs = Date.parse(
+      item.replacedAt.endsWith("Z") ? item.replacedAt : `${item.replacedAt}Z`,
+    );
+    if (!Number.isFinite(replacedMs) || replacedMs > atMs) continue;
+    offset += registerToKwh(item.lastReadingWh);
+  }
+  return offset;
+}
+
+function pushBinding(
+  list: GatewayPointBinding[],
+  pointId: string,
+  category: string | null | undefined,
+  serial: string | null | undefined,
+  validUntil?: string,
+) {
+  const model = modelCodeForCategory(category ?? "");
+  const meterId = serialToMeterId(serial || "");
+  if (model == null || !meterId) return;
+  const key = `${model}:${meterId}:${pointId}:${validUntil ?? ""}`;
+  if (list.some((item) => `${item.model}:${item.meterId}:${item.pointId}:${item.validUntil ?? ""}` === key)) {
+    return;
+  }
+  list.push({
+    model,
+    meterId,
+    pointId,
+    validUntil,
+  });
+}
+
+async function loadProjectGatewayBindings(projectId: string, filter?: GatewayMeterFilter) {
+  const allowed =
+    filter?.meterPointIds && filter.meterPointIds.length
+      ? new Set(filter.meterPointIds.map((id) => id.trim()).filter(Boolean))
+      : null;
+  const points = await queryRows<{
+    id: string;
+    serialNumber: string | null;
+    category: string | null;
+    deviceSerial: string | null;
+  }>(
+    `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
+       FROM meter_points mp
+       LEFT JOIN devices d ON d.id = mp.device_id
+      WHERE mp.project_id = ?`,
+    [projectId],
+  );
+  const replacements = await loadProjectMeterReplacements(projectId);
+  const bindings: GatewayPointBinding[] = [];
+  for (const point of points) {
+    const pointId = String(point.id);
+    if (allowed && !allowed.has(pointId)) continue;
+    pushBinding(
+      bindings,
+      pointId,
+      point.category,
+      point.serialNumber || point.deviceSerial,
+    );
+    for (const item of replacements) {
+      if (item.meterPointId !== pointId) continue;
+      pushBinding(bindings, pointId, item.oldCategory ?? point.category, item.oldSerial, item.replacedAt);
+      pushBinding(bindings, pointId, item.newCategory ?? point.category, item.newSerial);
+    }
+  }
+  return { bindings, replacements };
+}
+
+function sqlMeterPairFilter(pairs: Array<{ model: number; meterId: string }>) {
+  if (!pairs.length) return { sql: "1=0", params: [] as Array<string | number> };
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+  for (const pair of pairs) {
+    clauses.push("(meter_model = ? AND meter_id = ?)");
+    params.push(pair.model, pair.meterId);
+  }
+  return { sql: `(${clauses.join(" OR ")})`, params };
+}
+
+function groupBindingsByMeter(bindings: GatewayPointBinding[]) {
+  const pairs = new Map<
+    string,
+    { model: number; meterId: string; members: Array<{ pointId: string; validUntil?: string }> }
+  >();
+  for (const binding of bindings) {
+    const key = `${binding.model}:${binding.meterId}`;
+    const existing = pairs.get(key);
+    if (existing) {
+      existing.members.push({ pointId: binding.pointId, validUntil: binding.validUntil });
+    } else {
+      pairs.set(key, {
+        model: binding.model,
+        meterId: binding.meterId,
+        members: [{ pointId: binding.pointId, validUntil: binding.validUntil }],
+      });
+    }
+  }
+  return pairs;
+}
 
 type ThresholdRow = {
   gateway_id: string;
@@ -1032,122 +1215,99 @@ function isDuplicate(error: unknown) {
 
 export async function getProjectGatewaySeries(
   projectId: string,
-  options?: { from?: string; to?: string; limit?: number },
+  options?: { from?: string; to?: string; limit?: number } & GatewayMeterFilter,
 ): Promise<ProjectGatewaySample[]> {
   const id = projectId.trim();
   if (!id) return [];
   await ensureGatewaySchema();
 
-  let points: Array<{
-    id: string;
-    serialNumber: string | null;
-    category: string | null;
-    deviceSerial: string | null;
-  }> = [];
+  let bindings: GatewayPointBinding[] = [];
   try {
-    points = await queryRows(
-      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
-         FROM meter_points mp
-         LEFT JOIN devices d ON d.id = mp.device_id
-        WHERE mp.project_id = ?`,
-      [id],
-    );
+    bindings = (await loadProjectGatewayBindings(id, options)).bindings;
   } catch (error) {
     console.error("Project gateway match failed", error);
     return [];
   }
 
-  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
-  for (const point of points) {
-    const model = modelCodeForCategory(point.category ?? "");
-    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
-    if (model == null || !meterId) continue;
-    const key = `${model}:${meterId}`;
-    const existing = pairs.get(key);
-    if (existing) existing.pointIds.push(String(point.id));
-    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
-  }
+  const pairs = groupBindingsByMeter(bindings);
+  const pairList = Array.from(pairs.values());
+  if (!pairList.length) return [];
 
   const bounds = options?.from && options?.to ? vietnamRangeBounds(options.from, options.to) : null;
-  const limit = Math.min(8000, Math.max(1, Math.floor(options?.limit ?? (bounds ? 2000 : 800))));
-  const samples: ProjectGatewaySample[] = [];
-  for (const pair of pairs.values()) {
+  const totalLimit = Math.min(8000, Math.max(1, Math.floor(options?.limit ?? (bounds ? 2000 : 800))));
+  const perMeterLimit = Math.max(50, Math.ceil(totalLimit / pairList.length));
+
+  const chunks = await mapPool(pairList, 8, async (pair) => {
     const rows = await queryRows<RowDataPacket>(
       `SELECT received_at, values_json
          FROM gateway_samples
         WHERE meter_model = ? AND meter_id = ?
           ${bounds ? "AND received_at >= ? AND received_at < ?" : ""}
         ORDER BY received_at DESC
-        LIMIT ${limit}`,
+        LIMIT ${perMeterLimit}`,
       bounds ? [pair.model, pair.meterId, bounds.start, bounds.end] : [pair.model, pair.meterId],
     );
-    const chronological = [...rows].reverse();
-    for (const row of chronological) {
+    const out: ProjectGatewaySample[] = [];
+    for (const row of [...rows].reverse()) {
       const values = numericValues(row.values_json);
       const at = receivedAtText(row.received_at);
-      for (const meterPointId of pair.pointIds) {
-        samples.push({ meterPointId, at, values });
+      for (const member of pair.members) {
+        if (member.validUntil) {
+          const untilMs = Date.parse(
+            member.validUntil.endsWith("Z") ? member.validUntil : `${member.validUntil}Z`,
+          );
+          const atMs = Date.parse(at.endsWith("Z") ? at : `${at}Z`);
+          if (Number.isFinite(untilMs) && Number.isFinite(atMs) && atMs >= untilMs) continue;
+        }
+        out.push({ meterPointId: member.pointId, at, values });
       }
     }
-  }
-  return samples;
+    return out;
+  });
+
+  return chunks.flat();
 }
 
 /** Bản tin mới nhất theo từng điểm đo (đọc `gateway_meter_latest`). */
-export async function getProjectGatewayLatest(projectId: string): Promise<ProjectGatewaySample[]> {
+export async function getProjectGatewayLatest(
+  projectId: string,
+  filter?: GatewayMeterFilter,
+): Promise<ProjectGatewaySample[]> {
   const id = projectId.trim();
   if (!id) return [];
   await ensureGatewaySchema();
 
-  let points: Array<{
-    id: string;
-    serialNumber: string | null;
-    category: string | null;
-    deviceSerial: string | null;
-  }> = [];
+  let bindings: GatewayPointBinding[] = [];
   try {
-    points = await queryRows(
-      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
-         FROM meter_points mp
-         LEFT JOIN devices d ON d.id = mp.device_id
-        WHERE mp.project_id = ?`,
-      [id],
-    );
+    bindings = (await loadProjectGatewayBindings(id, filter)).bindings.filter((item) => !item.validUntil);
   } catch (error) {
     console.error("Project gateway latest match failed", error);
     return [];
   }
 
-  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
-  for (const point of points) {
-    const model = modelCodeForCategory(point.category ?? "");
-    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
-    if (model == null || !meterId) continue;
-    const key = `${model}:${meterId}`;
-    const existing = pairs.get(key);
-    if (existing) existing.pointIds.push(String(point.id));
-    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
-  }
+  const pairs = groupBindingsByMeter(bindings);
+  const pairList = Array.from(pairs.values());
+  if (!pairList.length) return [];
+
+  const filterSql = sqlMeterPairFilter(pairList);
+  const rows = await queryRows<RowDataPacket>(
+    `SELECT meter_model, meter_id, received_at, values_json
+       FROM gateway_meter_latest
+      WHERE ${filterSql.sql}`,
+    filterSql.params,
+  ).catch(() => [] as RowDataPacket[]);
 
   const samples: ProjectGatewaySample[] = [];
-  await Promise.all(
-    [...pairs.values()].map(async (pair) => {
-      const rows = await queryRows<RowDataPacket>(
-        `SELECT received_at, values_json
-           FROM gateway_meter_latest
-          WHERE meter_model = ? AND meter_id = ?
-          LIMIT 1`,
-        [pair.model, pair.meterId],
-      ).catch(() => []);
-      const row = rows[0];
-      if (!row) return;
-      const values = numericValues(row.values_json);
-      const at = receivedAtText(row.received_at);
-      for (const meterPointId of pair.pointIds) {
-        samples.push({ meterPointId, at, values });
-      }
-    }),
-  );
+  for (const row of rows) {
+    const key = `${Number(row.meter_model)}:${String(row.meter_id)}`;
+    const pair = pairs.get(key);
+    if (!pair) continue;
+    const values = numericValues(row.values_json);
+    const at = receivedAtText(row.received_at);
+    for (const member of pair.members) {
+      samples.push({ meterPointId: member.pointId, at, values });
+    }
+  }
   return samples;
 }
 
@@ -1156,6 +1316,8 @@ export type GatewayDailyEnergy = {
   day: string;
   firstWh: number;
   lastWh: number;
+  /** Offset kWh cần cộng vào chỉ số thô (sau các lần thay đồng hồ). */
+  offsetKwh?: number;
 };
 
 export type GatewayDailySummary = {
@@ -1192,45 +1354,28 @@ function vietnamMonthBounds(year: number, month: number) {
 async function queryProjectGatewayDaily(
   projectId: string,
   bounds: { start: string; end: string },
+  filter?: GatewayMeterFilter,
 ): Promise<GatewayDailySummary> {
   const empty = { days: [], latest: null };
   const id = projectId.trim();
   if (!id) return empty;
   await ensureGatewaySchema();
 
-  let points: Array<{
-    id: string;
-    serialNumber: string | null;
-    category: string | null;
-    deviceSerial: string | null;
-  }> = [];
+  let bindings: GatewayPointBinding[] = [];
+  let replacements: MeterReplacementRow[] = [];
   try {
-    points = await queryRows(
-      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
-         FROM meter_points mp
-         LEFT JOIN devices d ON d.id = mp.device_id
-        WHERE mp.project_id = ?`,
-      [id],
-    );
+    const loaded = await loadProjectGatewayBindings(id, filter);
+    bindings = loaded.bindings;
+    replacements = loaded.replacements;
   } catch (error) {
     console.error("Project gateway match failed", error);
     return empty;
   }
 
-  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
-  for (const point of points) {
-    const model = modelCodeForCategory(point.category ?? "");
-    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
-    if (model == null || !meterId) continue;
-    const key = `${model}:${meterId}`;
-    const existing = pairs.get(key);
-    if (existing) existing.pointIds.push(String(point.id));
-    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
-  }
+  const pairs = Array.from(groupBindingsByMeter(bindings).values());
+  if (!pairs.length) return empty;
 
-  const days: GatewayDailyEnergy[] = [];
-  let latest: ProjectGatewaySample | null = null;
-  for (const pair of pairs.values()) {
+  const chunks = await mapPool(pairs, 8, async (pair) => {
     const [rows, latestRows] = await Promise.all([
       queryRows<RowDataPacket>(
         `SELECT day_vn,
@@ -1266,24 +1411,45 @@ async function queryProjectGatewayDaily(
         [pair.model, pair.meterId],
       ),
     ]);
+    const days: GatewayDailyEnergy[] = [];
     for (const row of rows) {
       const day = String(row.day_vn ?? "");
       const firstWh = Number(row.first_wh);
       const lastWh = Number(row.last_wh);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(firstWh) || !Number.isFinite(lastWh)) continue;
-      for (const meterPointId of pair.pointIds) {
-        days.push({ meterPointId, day, firstWh, lastWh });
+      const dayAt = `${day}T12:00:00`;
+      for (const member of pair.members) {
+        if (member.validUntil) {
+          const untilMs = Date.parse(
+            member.validUntil.endsWith("Z") ? member.validUntil : `${member.validUntil}Z`,
+          );
+          const dayMs = Date.parse(`${dayAt}Z`);
+          if (Number.isFinite(untilMs) && Number.isFinite(dayMs) && dayMs >= untilMs) continue;
+        }
+        days.push({
+          meterPointId: member.pointId,
+          day,
+          firstWh,
+          lastWh,
+          offsetKwh: offsetKwhForPointAt(replacements, member.pointId, dayAt),
+        });
       }
     }
     const latestRow = latestRows[0];
-    if (latestRow) {
-      const sample = {
-        meterPointId: pair.pointIds[0] ?? "",
-        at: receivedAtText(latestRow.received_at),
-        values: numericValues(latestRow.values_json),
-      };
-      if (!latest || sample.at > latest.at) latest = sample;
-    }
+    const latest = latestRow
+      ? {
+          meterPointId: pair.members[0]?.pointId ?? "",
+          at: receivedAtText(latestRow.received_at),
+          values: numericValues(latestRow.values_json),
+        }
+      : null;
+    return { days, latest };
+  });
+
+  const days = chunks.flatMap((chunk) => chunk.days);
+  let latest: ProjectGatewaySample | null = null;
+  for (const chunk of chunks) {
+    if (chunk.latest && (!latest || chunk.latest.at > latest.at)) latest = chunk.latest;
   }
   return { days, latest };
 }
@@ -1292,23 +1458,25 @@ export async function getProjectGatewayDailyEnergy(
   projectId: string,
   year: number,
   month: number,
+  filter?: GatewayMeterFilter,
 ): Promise<GatewayDailySummary> {
   if (!projectId.trim() || !Number.isInteger(year) || month < 1 || month > 12) {
     return { days: [], latest: null };
   }
   const bounds = vietnamMonthBounds(year, month);
   if (!bounds) return { days: [], latest: null };
-  return queryProjectGatewayDaily(projectId, bounds);
+  return queryProjectGatewayDaily(projectId, bounds, filter);
 }
 
 export async function getProjectGatewayDailyRange(
   projectId: string,
   from: string,
   to: string,
+  filter?: GatewayMeterFilter,
 ): Promise<GatewayDailySummary> {
   const bounds = vietnamRangeBounds(from, to);
   if (!bounds) return { days: [], latest: null };
-  return queryProjectGatewayDaily(projectId, bounds);
+  return queryProjectGatewayDaily(projectId, bounds, filter);
 }
 
 export type GatewayEnergySlot = {
@@ -1318,6 +1486,8 @@ export type GatewayEnergySlot = {
   minute: number;
   firstWh: number;
   lastWh: number;
+  /** Offset kWh sau các lần thay đồng hồ — cộng vào chỉ số thô khi tính ΔkWh. */
+  offsetKwh?: number;
 };
 
 export type GatewayEnergySlotSummary = {
@@ -1329,6 +1499,7 @@ export async function getProjectGatewayEnergySlots(
   projectId: string,
   from: string,
   to: string,
+  filter?: GatewayMeterFilter,
 ): Promise<GatewayEnergySlotSummary> {
   const empty = { slots: [], latest: null };
   const bounds = vietnamRangeBounds(from, to);
@@ -1336,39 +1507,21 @@ export async function getProjectGatewayEnergySlots(
   if (!id || !bounds) return empty;
   await ensureGatewaySchema();
 
-  let points: Array<{
-    id: string;
-    serialNumber: string | null;
-    category: string | null;
-    deviceSerial: string | null;
-  }> = [];
+  let bindings: GatewayPointBinding[] = [];
+  let replacements: MeterReplacementRow[] = [];
   try {
-    points = await queryRows(
-      `SELECT mp.id, mp.serial_number AS serialNumber, d.category AS category, d.serial_number AS deviceSerial
-         FROM meter_points mp
-         LEFT JOIN devices d ON d.id = mp.device_id
-        WHERE mp.project_id = ?`,
-      [id],
-    );
+    const loaded = await loadProjectGatewayBindings(id, filter);
+    bindings = loaded.bindings;
+    replacements = loaded.replacements;
   } catch (error) {
     console.error("Project gateway match failed", error);
     return empty;
   }
 
-  const pairs = new Map<string, { model: number; meterId: string; pointIds: string[] }>();
-  for (const point of points) {
-    const model = modelCodeForCategory(point.category ?? "");
-    const meterId = serialToMeterId(point.serialNumber || point.deviceSerial || "");
-    if (model == null || !meterId) continue;
-    const key = `${model}:${meterId}`;
-    const existing = pairs.get(key);
-    if (existing) existing.pointIds.push(String(point.id));
-    else pairs.set(key, { model, meterId, pointIds: [String(point.id)] });
-  }
+  const pairs = Array.from(groupBindingsByMeter(bindings).values());
+  if (!pairs.length) return empty;
 
-  const slots: GatewayEnergySlot[] = [];
-  let latest: ProjectGatewaySample | null = null;
-  for (const pair of pairs.values()) {
+  const chunks = await mapPool(pairs, 8, async (pair) => {
     const [rows, latestRows] = await Promise.all([
       queryRows<RowDataPacket>(
         `SELECT slot_vn,
@@ -1410,31 +1563,47 @@ export async function getProjectGatewayEnergySlots(
         [pair.model, pair.meterId],
       ),
     ]);
+    const slots: GatewayEnergySlot[] = [];
     for (const row of rows) {
       const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})$/.exec(String(row.slot_vn ?? ""));
       const firstWh = Number(row.first_wh);
       const lastWh = Number(row.last_wh);
       if (!match || !Number.isFinite(firstWh) || !Number.isFinite(lastWh)) continue;
-      for (const meterPointId of pair.pointIds) {
+      const slotAt = `${match[1]}T${match[2]}:${match[3]}:00`;
+      for (const member of pair.members) {
+        if (member.validUntil) {
+          const untilMs = Date.parse(
+            member.validUntil.endsWith("Z") ? member.validUntil : `${member.validUntil}Z`,
+          );
+          const slotMs = Date.parse(`${slotAt}Z`);
+          if (Number.isFinite(untilMs) && Number.isFinite(slotMs) && slotMs >= untilMs) continue;
+        }
         slots.push({
-          meterPointId,
+          meterPointId: member.pointId,
           day: match[1],
           hour: Number(match[2]),
           minute: Number(match[3]),
           firstWh,
           lastWh,
+          offsetKwh: offsetKwhForPointAt(replacements, member.pointId, slotAt),
         });
       }
     }
     const latestRow = latestRows[0];
-    if (latestRow) {
-      const sample = {
-        meterPointId: pair.pointIds[0] ?? "",
-        at: receivedAtText(latestRow.received_at),
-        values: numericValues(latestRow.values_json),
-      };
-      if (!latest || sample.at > latest.at) latest = sample;
-    }
+    const latest = latestRow
+      ? {
+          meterPointId: pair.members[0]?.pointId ?? "",
+          at: receivedAtText(latestRow.received_at),
+          values: numericValues(latestRow.values_json),
+        }
+      : null;
+    return { slots, latest };
+  });
+
+  const slots = chunks.flatMap((chunk) => chunk.slots);
+  let latest: ProjectGatewaySample | null = null;
+  for (const chunk of chunks) {
+    if (chunk.latest && (!latest || chunk.latest.at > latest.at)) latest = chunk.latest;
   }
   return { slots, latest };
 }

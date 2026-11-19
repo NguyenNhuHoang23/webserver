@@ -19,6 +19,7 @@ import { HarmonicsChart } from "@/components/client/HarmonicsChart";
 import { PowerChart } from "@/components/client/PowerChart";
 import { UiWaveform } from "@/components/client/UiWaveform";
 import { UnbalanceChart } from "@/components/client/UnbalanceChart";
+import { VirtualList } from "@/components/ui/VirtualList";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { hydrateProjects, loadProjects, resolveMeterTypes } from "@/lib/projects";
 import {
@@ -280,31 +281,46 @@ export function EnergyCharts() {
   useEffect(() => {
     const span = timeFilterSpan(timeFilter);
     let active = true;
-    if (span.hourly) {
-      void loadProjectGatewaySamples(projectId, { from: span.from, to: span.to, limit: 6000 }).then((rows) => {
-        if (!active) return;
-        setGatewaySamples(rows);
-        setDailyRows([]);
-      });
-    } else {
-      void Promise.all([
-        loadProjectGatewayDailyRange(projectId, span.from, span.to),
-        loadProjectGatewaySamples(projectId, { from: span.from, to: span.to, limit: 800 }),
-      ]).then(([summary, rows]) => {
-        if (!active) return;
-        setDailyRows(summary.days);
-        setGatewaySamples(rows);
-        if (filterTouched.current || gatewayMonthAligned.current || !summary.latest) return;
-        const parts = vietnamFromStored(summary.latest.at);
-        gatewayMonthAligned.current = true;
-        if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) return;
-        setTimeFilter((current) => ({ ...current, mode: "month", month: parts.monthKey, year: parts.year }));
-      });
-    }
+    const ids = selectedIds.length ? selectedIds : undefined;
+    const sampleLimit = Math.min(4000, Math.max(400, (ids?.length ?? 8) * 80));
+    const timer = window.setTimeout(() => {
+      if (span.hourly) {
+        void loadProjectGatewaySamples(projectId, {
+          from: span.from,
+          to: span.to,
+          limit: sampleLimit,
+          meterPointIds: ids,
+        }).then((rows) => {
+          if (!active) return;
+          setGatewaySamples(rows);
+          setDailyRows([]);
+        });
+      } else {
+        void Promise.all([
+          loadProjectGatewayDailyRange(projectId, span.from, span.to, ids),
+          loadProjectGatewaySamples(projectId, {
+            from: span.from,
+            to: span.to,
+            limit: Math.min(1200, sampleLimit),
+            meterPointIds: ids,
+          }),
+        ]).then(([summary, rows]) => {
+          if (!active) return;
+          setDailyRows(summary.days);
+          setGatewaySamples(rows);
+          if (filterTouched.current || gatewayMonthAligned.current || !summary.latest) return;
+          const parts = vietnamFromStored(summary.latest.at);
+          gatewayMonthAligned.current = true;
+          if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) return;
+          setTimeFilter((current) => ({ ...current, mode: "month", month: parts.monthKey, year: parts.year }));
+        });
+      }
+    }, 120);
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
-  }, [projectId, timeFilter]);
+  }, [projectId, timeFilter, selectedIds]);
 
   const pointsForEnergy = useMemo(
     () => allPoints.filter((p) => p.energy === energy),
@@ -323,23 +339,15 @@ export function EnergyCharts() {
   }, [pointQuery, pointsForEnergy]);
 
   // Khi đổi loại năng lượng, giữ các điểm đã chọn thuộc loại đó; nếu trống thì chọn 1–2 điểm đầu
+  // (chọn sớm để API chỉ tải điểm đang xem — tránh kéo cả 1000 điểm).
   useEffect(() => {
     setSelectedIds((current) => {
       const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
       if (selectionTouched.current) return kept;
-      const linked = pointsForEnergy.filter(
-        (point) =>
-          gatewaySamples.some((sample) => sample.meterPointId === point.id) ||
-          dailyRows.some((row) => row.meterPointId === point.id),
-      );
-      if (linked.length > 0 && !kept.some((id) => linked.some((point) => point.id === id))) {
-        return linked.slice(0, Math.min(2, linked.length)).map((point) => point.id);
-      }
       if (kept.length > 0) return kept;
-      const source = linked.length > 0 ? linked : pointsForEnergy;
-      return source.slice(0, Math.min(2, source.length)).map((point) => point.id);
+      return pointsForEnergy.slice(0, Math.min(2, pointsForEnergy.length)).map((point) => point.id);
     });
-  }, [dailyRows, pointsForEnergy, gatewaySamples]);
+  }, [pointsForEnergy]);
 
   const selectedPoints = useMemo(
     () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
@@ -579,18 +587,23 @@ export function EnergyCharts() {
               </button>
             </span>
           </div>
-          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+          <div className="min-h-0 flex-1">
             {filteredPoints.length === 0 ? (
-              <li className="py-8 text-center text-sm text-slate-400">
+              <p className="py-8 text-center text-sm text-slate-400">
                 Không có điểm đo loại {energy}. Thêm tại Cấu hình → Cụm điểm đo.
-              </li>
+              </p>
             ) : (
-              filteredPoints.map((point, index) => {
-                const checked = selectedIds.includes(point.id);
-                return (
-                  <li key={point.id}>
+              <VirtualList
+                count={filteredPoints.length}
+                rowHeight={48}
+                height={Math.min(420, Math.max(180, filteredPoints.length * 48))}
+                className="space-y-1"
+                renderRow={(index) => {
+                  const point = filteredPoints[index];
+                  const checked = selectedIds.includes(point.id);
+                  return (
                     <label
-                      className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors ${
+                      className={`flex h-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 transition-colors ${
                         checked
                           ? "bg-emerald-600 text-white shadow-sm"
                           : "text-slate-700 hover:bg-slate-50"
@@ -623,11 +636,11 @@ export function EnergyCharts() {
                         </span>
                       </span>
                     </label>
-                  </li>
-                );
-              })
+                  );
+                }}
+              />
             )}
-          </ul>
+          </div>
         </div>
       </aside>
 

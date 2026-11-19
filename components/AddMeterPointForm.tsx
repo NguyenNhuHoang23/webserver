@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { VirtualList } from "@/components/ui/VirtualList";
 import {
   deviceSpec,
   hydrateDevices,
@@ -16,6 +17,10 @@ import {
   isMeterDescendant,
   type ClientMeter,
 } from "@/lib/client-meters";
+import { notifyMeterReplaced } from "@/lib/admin-notifications";
+import { loadProjectGatewayLatest } from "@/lib/gateway-series";
+import { registerToKwh } from "@/lib/meter-parameters";
+import { recordMeterReplacement } from "@/lib/meter-replacements";
 import {
   hydrateMeterTypeDefs,
   inferMeterTypeIcon,
@@ -50,6 +55,18 @@ export function AddMeterPointForm({
   const [pointName, setPointName] = useState(initialMeter?.name ?? "");
   const [formula, setFormula] = useState("");
   const [error, setError] = useState("");
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [lastReadingWh, setLastReadingWh] = useState<number | null>(null);
+  const [loadingLastReading, setLoadingLastReading] = useState(false);
+
+  const initialSerial = (
+    initialMeter?.serialNumber?.trim() ||
+    devices.find((item) => item.id === initialMeter?.deviceId)?.sn ||
+    ""
+  ).trim();
+  const nextSerial = (serialNumber.trim() || droppedDevice?.sn || "").trim();
+  const isReplacement =
+    Boolean(initialMeter && projectId && initialSerial && nextSerial && initialSerial !== nextSerial);
 
   const configuredTypeNames = useMemo(
     () =>
@@ -109,6 +126,31 @@ export function AddMeterPointForm({
     };
   }, [initialMeter, projectId]);
 
+  useEffect(() => {
+    if (!isReplacement || !projectId || !initialMeter) {
+      setLastReadingWh(null);
+      return;
+    }
+    let active = true;
+    setLoadingLastReading(true);
+    void loadProjectGatewayLatest(projectId)
+      .then((samples) => {
+        if (!active) return;
+        const sample = samples.find((item) => item.meterPointId === initialMeter.id);
+        const raw = sample?.values?.EPaed;
+        setLastReadingWh(typeof raw === "number" && Number.isFinite(raw) ? raw : 0);
+      })
+      .catch(() => {
+        if (active) setLastReadingWh(0);
+      })
+      .finally(() => {
+        if (active) setLoadingLastReading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isReplacement, projectId, initialMeter]);
+
   const parentOptions = useMemo(
     () => existingMeters.filter((meter) =>
       meter.utility === energy &&
@@ -153,6 +195,7 @@ export function AddMeterPointForm({
       return;
     }
     setError("");
+    setConfirmReplace(false);
     setDroppedDevice(device);
     setDeviceId(device.id);
     setSerialNumber(device.sn);
@@ -208,6 +251,11 @@ export function AddMeterPointForm({
     }
 
     try {
+      if (isReplacement && !confirmReplace) {
+        setError("Bạn đang thay đồng hồ. Hãy xác nhận thay thế để hệ thống lưu offset chỉ số cũ.");
+        return;
+      }
+
       const meters = await hydrateClientMeters(projectId);
       const next: ClientMeter = {
         id: initialMeter?.id ?? `m-${Date.now()}`,
@@ -225,6 +273,29 @@ export function AddMeterPointForm({
       if (initialMeter && !meters.some((meter) => meter.id === initialMeter.id)) {
         throw new Error("Không tìm thấy điểm đo cần cập nhật trong dự án.");
       }
+
+      if (isReplacement && initialMeter) {
+        const oldDevice = devices.find((item) => item.id === initialMeter.deviceId);
+        const reading = lastReadingWh ?? 0;
+        await recordMeterReplacement({
+          projectId,
+          meterPointId: initialMeter.id,
+          oldSerial: initialSerial,
+          newSerial: nextSerial,
+          oldCategory: oldDevice?.category ?? null,
+          newCategory: droppedDevice?.category ?? oldDevice?.category ?? null,
+          lastReadingWh: reading,
+          note: `Thay đồng hồ tại điểm ${name}`,
+        });
+        notifyMeterReplaced({
+          projectId,
+          meterName: name,
+          oldSerial: initialSerial,
+          newSerial: nextSerial,
+          lastReadingKwh: registerToKwh(reading),
+        });
+      }
+
       await saveClientMeters(projectId, updated);
       router.push(cancelHref);
     } catch (err) {
@@ -327,7 +398,10 @@ export function AddMeterPointForm({
             <Field label="SỐ SERIAL ĐỒNG HỒ (NHẬP TAY)">
               <input
                 value={serialNumber}
-                onChange={(e) => setSerialNumber(e.target.value)}
+                onChange={(e) => {
+                  setSerialNumber(e.target.value);
+                  setConfirmReplace(false);
+                }}
                 placeholder="VD: EM-992834-A"
                 className="input"
               />
@@ -335,6 +409,34 @@ export function AddMeterPointForm({
                 Có thể nhập trước khi gán thiết bị. Serial chưa được ghép nối sẽ chưa có dữ liệu.
               </p>
             </Field>
+
+            {isReplacement ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                <p className="text-sm font-semibold text-amber-900">Thay đồng hồ mới</p>
+                <p className="mt-1 text-xs leading-5 text-amber-800">
+                  Serial đổi từ <span className="font-mono font-semibold">{initialSerial}</span> sang{" "}
+                  <span className="font-mono font-semibold">{nextSerial}</span>. Đồng hồ mới thường về 0 —
+                  hệ thống sẽ lưu chỉ số cuối đồng hồ cũ làm <strong>offset</strong> để tính sản lượng liên tục.
+                </p>
+                <p className="mt-2 text-xs text-amber-800">
+                  Chỉ số cuối đồng hồ cũ:{" "}
+                  {loadingLastReading
+                    ? "đang lấy..."
+                    : `${registerToKwh(lastReadingWh ?? 0).toFixed(3)} kWh`}
+                </p>
+                <label className="mt-3 flex items-start gap-2 text-xs text-amber-900">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={confirmReplace}
+                    onChange={(e) => setConfirmReplace(e.target.checked)}
+                  />
+                  <span>
+                    Xác nhận đây là thay đồng hồ (không phải sửa nhầm serial). Offset sẽ được cộng vào chỉ số mới khi tính điện / chi phí.
+                  </span>
+                </label>
+              </div>
+            ) : null}
 
             <Field label="THIẾT BỊ">
               <div
@@ -452,35 +554,41 @@ export function AddMeterPointForm({
             />
           </label>
 
-          <ul className="max-h-[min(640px,70vh)] space-y-2 overflow-y-auto pr-1">
-            {filteredDevices.map((device) => (
-              <li key={device.id}>
-                <button
-                  type="button"
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", device.id);
-                    e.dataTransfer.effectAllowed = "copy";
-                  }}
-                  onClick={() => applyDevice(device)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-3 text-left hover:border-emerald-300 hover:bg-emerald-50/40 transition-colors"
-                >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                    <MeterIcon className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-slate-800">{device.name}</span>
-                    <span className="block truncate text-xs text-slate-400">
-                      {device.brandModel} • {deviceSpec(device)}
+          {filteredDevices.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">Không tìm thấy thiết bị.</p>
+          ) : (
+            <VirtualList
+              count={filteredDevices.length}
+              rowHeight={64}
+              height={Math.min(640, Math.max(240, Math.min(filteredDevices.length, 10) * 64))}
+              className="pr-1"
+              renderRow={(index) => {
+                const device = filteredDevices[index];
+                return (
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", device.id);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onClick={() => applyDevice(device)}
+                    className="flex h-[56px] w-full items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 text-left hover:border-emerald-300 hover:bg-emerald-50/40 transition-colors"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                      <MeterIcon className="h-4 w-4" />
                     </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-            {filteredDevices.length === 0 && (
-              <li className="py-6 text-center text-sm text-slate-400">Không tìm thấy thiết bị</li>
-            )}
-          </ul>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-slate-800">{device.name}</span>
+                      <span className="block truncate text-xs text-slate-400">
+                        {device.brandModel} • {deviceSpec(device)}
+                      </span>
+                    </span>
+                  </button>
+                );
+              }}
+            />
+          )}
         </aside>
       </div>
     </div>

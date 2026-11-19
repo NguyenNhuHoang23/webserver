@@ -28,6 +28,7 @@ export type GatewayDailyPoint = {
   day: string;
   firstWh: number;
   lastWh: number;
+  offsetKwh?: number;
 };
 
 export type GatewayDailySummary = {
@@ -35,10 +36,16 @@ export type GatewayDailySummary = {
   latest: ProjectGatewaySample | null;
 };
 
+function appendMeterPointIds(params: URLSearchParams, meterPointIds?: string[]) {
+  if (!meterPointIds?.length) return;
+  params.set("meterPointIds", meterPointIds.join(","));
+}
+
 export async function loadProjectGatewayDaily(
   projectId: string,
   year: number,
   month: number,
+  meterPointIds?: string[],
 ): Promise<GatewayDailySummary> {
   const empty = { days: [], latest: null };
   try {
@@ -47,6 +54,7 @@ export async function loadProjectGatewayDaily(
       year: String(year),
       month: String(month),
     });
+    appendMeterPointIds(params, meterPointIds);
     const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
     if (!response.ok) return empty;
     const body = (await response.json()) as Partial<GatewayDailySummary>;
@@ -63,10 +71,12 @@ export async function loadProjectGatewayDailyRange(
   projectId: string,
   from: string,
   to: string,
+  meterPointIds?: string[],
 ): Promise<GatewayDailySummary> {
   const empty = { days: [], latest: null };
   try {
     const params = new URLSearchParams({ projectId, from, to, summary: "day" });
+    appendMeterPointIds(params, meterPointIds);
     const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
     if (!response.ok) return empty;
     const body = (await response.json()) as Partial<GatewayDailySummary>;
@@ -86,6 +96,7 @@ export type GatewayEnergySlot = {
   minute: number;
   firstWh: number;
   lastWh: number;
+  offsetKwh?: number;
 };
 
 export type GatewayEnergySlotSummary = {
@@ -97,10 +108,12 @@ export async function loadProjectGatewayEnergySlots(
   projectId: string,
   from: string,
   to: string,
+  meterPointIds?: string[],
 ): Promise<GatewayEnergySlotSummary> {
   const empty = { slots: [], latest: null };
   try {
     const params = new URLSearchParams({ projectId, from, to, summary: "slot" });
+    appendMeterPointIds(params, meterPointIds);
     const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
     if (!response.ok) return empty;
     const body = (await response.json()) as Partial<GatewayEnergySlotSummary>;
@@ -115,7 +128,7 @@ export async function loadProjectGatewayEnergySlots(
 
 export async function loadProjectGatewaySamples(
   projectId: string,
-  range?: { from?: string; to?: string; limit?: number },
+  range?: { from?: string; to?: string; limit?: number; meterPointIds?: string[] },
 ): Promise<ProjectGatewaySample[]> {
   try {
     const params = new URLSearchParams({ projectId });
@@ -124,6 +137,7 @@ export async function loadProjectGatewaySamples(
       params.set("to", range.to);
     }
     if (range?.limit) params.set("limit", String(range.limit));
+    appendMeterPointIds(params, range?.meterPointIds);
     const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
     if (!response.ok) return [];
     const body = (await response.json()) as ProjectGatewaySample[];
@@ -133,9 +147,13 @@ export async function loadProjectGatewaySamples(
   }
 }
 
-export async function loadProjectGatewayLatest(projectId: string): Promise<ProjectGatewaySample[]> {
+export async function loadProjectGatewayLatest(
+  projectId: string,
+  meterPointIds?: string[],
+): Promise<ProjectGatewaySample[]> {
   try {
     const params = new URLSearchParams({ projectId, summary: "latest" });
+    appendMeterPointIds(params, meterPointIds);
     const response = await fetch(`/api/gateway/series?${params}`, { cache: "no-store" });
     if (!response.ok) return [];
     const body = (await response.json()) as ProjectGatewaySample[];

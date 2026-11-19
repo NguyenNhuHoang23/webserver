@@ -13,7 +13,7 @@ import {
   type TouBand,
   type TouPrices,
 } from "@/lib/industrial-electricity";
-import { registerToKwh } from "@/lib/meter-parameters";
+import { effectiveRegisterKwh } from "@/lib/meter-replacements";
 import { vietnamFromStored } from "@/lib/vietnam-time";
 
 export type ReportPeriod = "Ngày" | "Tuần" | "Tháng" | "Năm";
@@ -195,8 +195,9 @@ export function aggregatePeriodMetrics(
     const utility = utilityByPointId[meterPointId] ?? "Điện";
 
     for (const slot of ordered) {
-      const startKwh = registerToKwh(slot.firstWh);
-      const endKwh = registerToKwh(slot.lastWh);
+      const offset = slot.offsetKwh ?? 0;
+      const startKwh = effectiveRegisterKwh(slot.firstWh, offset);
+      const endKwh = effectiveRegisterKwh(slot.lastWh, offset);
       const within = Math.max(0, endKwh - startKwh);
       const at = slotStoredAt(slot.day, slot.hour, slot.minute);
       const parts = vietnamFromStored(at);

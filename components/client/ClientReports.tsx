@@ -159,9 +159,10 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     const compareDateValue = report.needsComparePeriod ? compareDate : compareAnchorDate(period, date);
     const compareSpan = reportSpan(period, compareDateValue);
     setMetricsLoading(true);
+    const ids = selectedPoints.length ? selectedPoints : undefined;
     void Promise.all([
-      loadProjectGatewayEnergySlots(projectId, span.from, span.to),
-      loadProjectGatewayEnergySlots(projectId, compareSpan.from, compareSpan.to),
+      loadProjectGatewayEnergySlots(projectId, span.from, span.to, ids),
+      loadProjectGatewayEnergySlots(projectId, compareSpan.from, compareSpan.to, ids),
     ])
       .then(([primary, compare]) => {
         if (!active) return;
@@ -179,7 +180,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     return () => {
       active = false;
     };
-  }, [projectId, period, date, compareDate, report.needsComparePeriod]);
+  }, [projectId, period, date, compareDate, report.needsComparePeriod, selectedPoints]);
 
   const dateLabel = useMemo(() => formatCivilDate(date), [date]);
   const compareLabel = useMemo(() => formatCivilDate(compareDate), [compareDate]);

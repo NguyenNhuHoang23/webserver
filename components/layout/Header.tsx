@@ -116,7 +116,7 @@ export function Header() {
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Thông báo</p>
                   <p className="text-[11px] text-slate-400">
-                    Khởi tạo, cập nhật, xóa dự án
+                    Dự án, thay đồng hồ,...
                   </p>
                 </div>
                 {items.length ? (

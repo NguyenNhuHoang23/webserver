@@ -1,7 +1,8 @@
 export type AdminNotificationType =
   | "project_created"
   | "project_updated"
-  | "project_deleted";
+  | "project_deleted"
+  | "meter_replaced";
 
 export type AdminNotification = {
   id: string;
@@ -111,6 +112,21 @@ export function notifyProjectDeleted(project: { id: string; name?: string }) {
     body: project.name
       ? `Đã xóa dự án ${project.name} (${project.id}).`
       : `Đã xóa dự án ${project.id}.`,
+  });
+}
+
+export function notifyMeterReplaced(input: {
+  projectId: string;
+  meterName: string;
+  oldSerial: string;
+  newSerial: string;
+  lastReadingKwh: number;
+}) {
+  return pushAdminNotification({
+    type: "meter_replaced",
+    title: "Thay đồng hồ",
+    body: `${input.meterName}: ${input.oldSerial} → ${input.newSerial} (offset ${input.lastReadingKwh.toFixed(3)} kWh).`,
+    href: `/chinh-sua-du-an/${encodeURIComponent(input.projectId)}`,
   });
 }
 

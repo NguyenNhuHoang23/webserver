@@ -14,6 +14,7 @@ import {
   periodIndexForInstant,
   type TimeFilterValue,
 } from "@/components/client/TimeFilterBar";
+import { VirtualList } from "@/components/ui/VirtualList";
 import { hydrateClientMeters, loadClientMeters, orderMetersByTree } from "@/lib/client-meters";
 import { loadProjectGatewayEnergySlots, type GatewayEnergySlot } from "@/lib/gateway-series";
 import {
@@ -27,7 +28,7 @@ import {
   type TouPrices,
   type VoltageLevelId,
 } from "@/lib/industrial-electricity";
-import { registerToKwh } from "@/lib/meter-parameters";
+import { effectiveRegisterKwh } from "@/lib/meter-replacements";
 import { hydrateProjectSettings } from "@/lib/project-settings";
 import { hydrateProjects, resolveMeterTypes, type MeterType } from "@/lib/projects";
 import { vietnamFromStored, type VietnamParts } from "@/lib/vietnam-time";
@@ -131,8 +132,9 @@ function costBarsFromSlots(filter: TimeFilterValue, slots: GatewayEnergySlot[], 
   let previousAt: string | null = null;
   let lastIndexKwh = 0;
   for (const slot of ordered) {
-    const startKwh = registerToKwh(slot.firstWh);
-    const endKwh = registerToKwh(slot.lastWh);
+    const offset = slot.offsetKwh ?? 0;
+    const startKwh = effectiveRegisterKwh(slot.firstWh, offset);
+    const endKwh = effectiveRegisterKwh(slot.lastWh, offset);
     const at = slotStoredAt(slot.day, slot.hour, slot.minute);
     const parts = vietnamFromStored(at);
     const bucket = periodIndexForInstant(filter, at, bars.length);
@@ -271,51 +273,6 @@ export function CostCharts() {
     };
   }, [projectId, reloadKey]);
 
-  useEffect(() => {
-    const span = timeFilterSpan(timeFilter);
-    let active = true;
-    void loadProjectGatewayEnergySlots(projectId, span.from, span.to).then((summary) => {
-      if (!active) return;
-      setSlots(summary.slots);
-      if (filterTouched.current) return;
-      const days = [...new Set(summary.slots.map((slot) => slot.day))].sort();
-      if (days.length > 0) {
-        if (monthAligned.current) return;
-        monthAligned.current = true;
-        const first = days[0];
-        const last = days[days.length - 1];
-        setTimeFilter((current) =>
-          current.mode === "custom_date" &&
-          current.customDateMode === "range" &&
-          current.startDate.slice(0, 10) === first &&
-          current.endDate.slice(0, 10) === last
-            ? current
-            : {
-                ...current,
-                mode: "custom_date",
-                customDateMode: "range",
-                startDate: `${first}T00:00`,
-                endDate: `${last}T23:59`,
-                date: last,
-                month: last.slice(0, 7),
-                year: Number(last.slice(0, 4)),
-              },
-        );
-        return;
-      }
-      if (monthAligned.current || !summary.latest) return;
-      const parts = vietnamFromStored(summary.latest.at);
-      if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) {
-        monthAligned.current = true;
-        return;
-      }
-      setTimeFilter((current) => ({ ...current, mode: "month", month: parts.monthKey, year: parts.year }));
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, timeFilter]);
-
   const pointsForEnergy = useMemo(
     () => allPoints.filter((p) => p.energy === energy),
     [allPoints, energy],
@@ -335,15 +292,62 @@ export function CostCharts() {
     setSelectedIds((current) => {
       const kept = current.filter((id) => pointsForEnergy.some((p) => p.id === id));
       if (selectionTouched.current) return kept;
-      const linked = pointsForEnergy.filter((point) => slots.some((slot) => slot.meterPointId === point.id));
-      if (linked.length > 0 && !kept.some((id) => linked.some((point) => point.id === id))) {
-        return linked.slice(0, 1).map((point) => point.id);
-      }
       if (kept.length > 0) return kept;
-      const source = linked.length > 0 ? linked : pointsForEnergy;
-      return source.slice(0, 1).map((point) => point.id);
+      return pointsForEnergy.slice(0, 1).map((point) => point.id);
     });
-  }, [pointsForEnergy, slots]);
+  }, [pointsForEnergy]);
+
+  useEffect(() => {
+    if (!selectedIds.length) {
+      setSlots([]);
+      return;
+    }
+    const span = timeFilterSpan(timeFilter);
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void loadProjectGatewayEnergySlots(projectId, span.from, span.to, selectedIds).then((summary) => {
+        if (!active) return;
+        setSlots(summary.slots);
+        if (filterTouched.current) return;
+        const days = [...new Set(summary.slots.map((slot) => slot.day))].sort();
+        if (days.length > 0) {
+          if (monthAligned.current) return;
+          monthAligned.current = true;
+          const first = days[0];
+          const last = days[days.length - 1];
+          setTimeFilter((current) =>
+            current.mode === "custom_date" &&
+            current.customDateMode === "range" &&
+            current.startDate.slice(0, 10) === first &&
+            current.endDate.slice(0, 10) === last
+              ? current
+              : {
+                  ...current,
+                  mode: "custom_date",
+                  customDateMode: "range",
+                  startDate: `${first}T00:00`,
+                  endDate: `${last}T23:59`,
+                  date: last,
+                  month: last.slice(0, 7),
+                  year: Number(last.slice(0, 4)),
+                },
+          );
+          return;
+        }
+        if (monthAligned.current || !summary.latest) return;
+        const parts = vietnamFromStored(summary.latest.at);
+        if (!parts || (timeFilter.mode === "month" && timeFilter.month === parts.monthKey)) {
+          monthAligned.current = true;
+          return;
+        }
+        setTimeFilter((current) => ({ ...current, mode: "month", month: parts.monthKey, year: parts.year }));
+      });
+    }, 120);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [projectId, timeFilter, selectedIds]);
 
   const selectedPoints = useMemo(
     () => pointsForEnergy.filter((p) => selectedIds.includes(p.id)),
@@ -531,18 +535,23 @@ export function CostCharts() {
               </button>
             </span>
           </div>
-          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+          <div className="min-h-0 flex-1">
             {filteredPoints.length === 0 ? (
-              <li className="py-8 text-center text-sm text-slate-400">
+              <p className="py-8 text-center text-sm text-slate-400">
                 Không có điểm đo loại {energy}
-              </li>
+              </p>
             ) : (
-              filteredPoints.map((point, index) => {
-                const checked = selectedIds.includes(point.id);
-                return (
-                  <li key={point.id}>
+              <VirtualList
+                count={filteredPoints.length}
+                rowHeight={48}
+                height={Math.min(420, Math.max(180, filteredPoints.length * 48))}
+                className="space-y-1"
+                renderRow={(index) => {
+                  const point = filteredPoints[index];
+                  const checked = selectedIds.includes(point.id);
+                  return (
                     <label
-                      className={`flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors ${
+                      className={`flex h-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 transition-colors ${
                         checked
                           ? "bg-emerald-600 text-white shadow-xs font-medium"
                           : "text-slate-700 hover:bg-slate-50"
@@ -575,11 +584,11 @@ export function CostCharts() {
                         </span>
                       </span>
                     </label>
-                  </li>
-                );
-              })
+                  );
+                }}
+              />
             )}
-          </ul>
+          </div>
         </div>
 
         <div className="p-4">

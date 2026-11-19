@@ -32,6 +32,7 @@ const RESOURCE_NAMES = new Set([
   "devices",
   "meter-types",
   "meter-models",
+  "meter-replacements",
   "client-meters",
   "emission-factors",
   "ghg-sources",
@@ -677,6 +678,38 @@ async function getResource(resource: string, request: NextRequest) {
       [projectId],
     );
   }
+  if (resource === "meter-replacements") {
+    if (!projectId) throw new Error("projectId is required");
+    await emsDb.query(
+      `CREATE TABLE IF NOT EXISTS meter_replacements (
+         id VARCHAR(64) NOT NULL,
+         project_id VARCHAR(64) NOT NULL,
+         meter_point_id VARCHAR(64) NOT NULL,
+         replaced_at DATETIME NOT NULL,
+         old_serial VARCHAR(150) NOT NULL,
+         new_serial VARCHAR(150) NOT NULL,
+         old_category VARCHAR(100) NULL,
+         new_category VARCHAR(100) NULL,
+         last_reading_wh DECIMAL(18,6) NOT NULL DEFAULT 0,
+         note VARCHAR(255) NULL,
+         PRIMARY KEY (id),
+         KEY idx_mr_project (project_id),
+         KEY idx_mr_point (meter_point_id),
+         KEY idx_mr_replaced (replaced_at)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    );
+    return queryRows<Row>(
+      `SELECT id, project_id AS projectId, meter_point_id AS meterPointId,
+              DATE_FORMAT(replaced_at, '%Y-%m-%dT%H:%i:%s') AS replacedAt,
+              old_serial AS oldSerial, new_serial AS newSerial,
+              old_category AS oldCategory, new_category AS newCategory,
+              last_reading_wh AS lastReadingWh, note
+         FROM meter_replacements
+        WHERE project_id = ?
+        ORDER BY replaced_at ASC, id ASC`,
+      [projectId],
+    );
+  }
   if (resource === "emission-factors") {
     await ensureEmissionFactorGasColumns();
     const groups = await queryRows<Row>(
@@ -1289,6 +1322,66 @@ async function saveResource(resource: string, body: Row) {
       }
     });
     return getResource(resource, new NextRequest(`http://localhost/api/ems/client-meters?projectId=${encodeURIComponent(projectId)}`));
+  }
+  if (resource === "meter-replacements") {
+    const projectId = asString(body.projectId).trim();
+    const meterPointId = asString(body.meterPointId).trim();
+    const oldSerial = asString(body.oldSerial).trim();
+    const newSerial = asString(body.newSerial).trim();
+    if (!projectId || !meterPointId) throw new Error("Thiếu projectId hoặc meterPointId.");
+    if (!oldSerial || !newSerial) throw new Error("Cần serial đồng hồ cũ và mới.");
+    if (oldSerial === newSerial) throw new Error("Serial mới phải khác serial cũ.");
+    const lastReadingWh = Number(body.lastReadingWh);
+    if (!Number.isFinite(lastReadingWh) || lastReadingWh < 0) {
+      throw new Error("Chỉ số cuối đồng hồ cũ không hợp lệ.");
+    }
+    await emsDb.query(
+      `CREATE TABLE IF NOT EXISTS meter_replacements (
+         id VARCHAR(64) NOT NULL,
+         project_id VARCHAR(64) NOT NULL,
+         meter_point_id VARCHAR(64) NOT NULL,
+         replaced_at DATETIME NOT NULL,
+         old_serial VARCHAR(150) NOT NULL,
+         new_serial VARCHAR(150) NOT NULL,
+         old_category VARCHAR(100) NULL,
+         new_category VARCHAR(100) NULL,
+         last_reading_wh DECIMAL(18,6) NOT NULL DEFAULT 0,
+         note VARCHAR(255) NULL,
+         PRIMARY KEY (id),
+         KEY idx_mr_project (project_id),
+         KEY idx_mr_point (meter_point_id),
+         KEY idx_mr_replaced (replaced_at)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    );
+    const replacedAtRaw = asString(body.replacedAt).trim();
+    const replacedAt = replacedAtRaw
+      ? replacedAtRaw.replace("T", " ").slice(0, 19)
+      : new Date().toISOString().slice(0, 19).replace("T", " ");
+    const id = `mr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await emsDb.execute(
+      `INSERT INTO meter_replacements
+         (id, project_id, meter_point_id, replaced_at, old_serial, new_serial,
+          old_category, new_category, last_reading_wh, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        projectId,
+        meterPointId,
+        replacedAt,
+        oldSerial,
+        newSerial,
+        asString(body.oldCategory) || null,
+        asString(body.newCategory) || null,
+        lastReadingWh,
+        asString(body.note) || null,
+      ],
+    );
+    return getResource(
+      resource,
+      new NextRequest(
+        `http://localhost/api/ems/meter-replacements?projectId=${encodeURIComponent(projectId)}`,
+      ),
+    );
   }
   if (resource === "emission-factors") {
     await ensureEmissionFactorGasColumns();

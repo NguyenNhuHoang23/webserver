@@ -10,6 +10,20 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function parseMeterPointIds(request: NextRequest) {
+  const raw = request.nextUrl.searchParams.get("meterPointIds")?.trim() ?? "";
+  if (!raw) return undefined;
+  const ids = Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+  return ids.length ? ids : undefined;
+}
+
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("projectId")?.trim() ?? "";
   if (!projectId) {
@@ -22,28 +36,31 @@ export async function GET(request: NextRequest) {
   const summary = request.nextUrl.searchParams.get("summary");
   const limitParam = request.nextUrl.searchParams.get("limit");
   const limit = limitParam == null ? Number.NaN : Number(limitParam);
+  const meterPointIds = parseMeterPointIds(request);
+  const filter = meterPointIds ? { meterPointIds } : undefined;
   const civilDate = /^\d{4}-\d{2}-\d{2}$/;
   try {
     if (summary === "latest") {
-      const latest = await getProjectGatewayLatest(projectId);
+      const latest = await getProjectGatewayLatest(projectId, filter);
       return Response.json(latest);
     }
     if (Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12) {
-      const summary = await getProjectGatewayDailyEnergy(projectId, year, month);
-      return Response.json(summary);
+      const daily = await getProjectGatewayDailyEnergy(projectId, year, month, filter);
+      return Response.json(daily);
     }
     if (civilDate.test(from) && civilDate.test(to) && summary === "day") {
-      const days = await getProjectGatewayDailyRange(projectId, from, to);
+      const days = await getProjectGatewayDailyRange(projectId, from, to, filter);
       return Response.json(days);
     }
     if (civilDate.test(from) && civilDate.test(to) && summary === "slot") {
-      const slots = await getProjectGatewayEnergySlots(projectId, from, to);
+      const slots = await getProjectGatewayEnergySlots(projectId, from, to, filter);
       return Response.json(slots);
     }
     const samples = await getProjectGatewaySeries(projectId, {
       from: civilDate.test(from) ? from : undefined,
       to: civilDate.test(to) ? to : undefined,
       limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+      meterPointIds,
     });
     return Response.json(samples);
   } catch (error) {

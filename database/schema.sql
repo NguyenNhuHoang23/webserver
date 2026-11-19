@@ -100,6 +100,23 @@ CREATE TABLE IF NOT EXISTS meter_model_serials (
     ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS meter_replacements (
+  id VARCHAR(64) NOT NULL,
+  project_id VARCHAR(64) NOT NULL,
+  meter_point_id VARCHAR(64) NOT NULL,
+  replaced_at DATETIME NOT NULL,
+  old_serial VARCHAR(150) NOT NULL,
+  new_serial VARCHAR(150) NOT NULL,
+  old_category VARCHAR(100) NULL,
+  new_category VARCHAR(100) NULL,
+  last_reading_wh DECIMAL(18,6) NOT NULL DEFAULT 0,
+  note VARCHAR(255) NULL,
+  PRIMARY KEY (id),
+  KEY idx_mr_project (project_id),
+  KEY idx_mr_point (meter_point_id),
+  KEY idx_mr_replaced (replaced_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS project_meter_types (
   project_id VARCHAR(64) NOT NULL,
   meter_type_name VARCHAR(100) NOT NULL,

@@ -12,6 +12,7 @@ import {
   type TouPrices,
 } from "@/lib/industrial-electricity";
 import { registerToKwh } from "@/lib/meter-parameters";
+import { effectiveRegisterKwh } from "@/lib/meter-replacements";
 import { hydrateProjectSettings } from "@/lib/project-settings";
 import {
   isGatewaySampleOnline,
@@ -79,8 +80,9 @@ function monthlyCostFromSlots(slots: GatewayEnergySlot[], prices: TouPrices) {
     );
     let previous: number | null = null;
     for (const slot of ordered) {
-      const startKwh = registerToKwh(slot.firstWh);
-      const endKwh = registerToKwh(slot.lastWh);
+      const offset = slot.offsetKwh ?? 0;
+      const startKwh = effectiveRegisterKwh(slot.firstWh, offset);
+      const endKwh = effectiveRegisterKwh(slot.lastWh, offset);
       const within = Math.max(0, endKwh - startKwh);
       const gap = previous == null ? 0 : Math.max(0, startKwh - previous);
       const delta = within + gap;
@@ -103,8 +105,9 @@ function energySeriesFromDaily(filter: TimeFilterValue, rows: GatewayDailyPoint[
     if (!/^\d{4}-\d{2}-\d{2}$/.test(row.day)) continue;
     const index = periodIndexForInstant(filter, `${row.day}T00:00:00`, periods.length);
     if (index < 0) continue;
-    const firstKwh = registerToKwh(Number(row.firstWh));
-    const lastKwh = registerToKwh(Number(row.lastWh));
+    const offset = Number(row.offsetKwh) || 0;
+    const firstKwh = effectiveRegisterKwh(Number(row.firstWh), offset);
+    const lastKwh = effectiveRegisterKwh(Number(row.lastWh), offset);
     if (!Number.isFinite(firstKwh) || !Number.isFinite(lastKwh)) continue;
     kwh[index] += Math.max(0, lastKwh - firstKwh);
     hasSample[index] = true;
@@ -149,8 +152,9 @@ function energySeriesFromSamples(filter: TimeFilterValue, samples: ProjectGatewa
 function totalKwhFromDaily(rows: GatewayDailyPoint[]) {
   let total = 0;
   for (const row of rows) {
-    const firstKwh = registerToKwh(Number(row.firstWh));
-    const lastKwh = registerToKwh(Number(row.lastWh));
+    const offset = Number(row.offsetKwh) || 0;
+    const firstKwh = effectiveRegisterKwh(Number(row.firstWh), offset);
+    const lastKwh = effectiveRegisterKwh(Number(row.lastWh), offset);
     if (!Number.isFinite(firstKwh) || !Number.isFinite(lastKwh)) continue;
     total += Math.max(0, lastKwh - firstKwh);
   }
@@ -169,6 +173,7 @@ export function ClientDashboard({ project }: { project: Project }) {
   const [co2, setCo2] = useState(0);
   const [ghgSourceCount, setGhgSourceCount] = useState(0);
   const [prevPeriodKwh, setPrevPeriodKwh] = useState<number | null>(null);
+  const [meterPointIds, setMeterPointIds] = useState<string[]>([]);
   const alignedFilter = useRef(false);
   const filterTouched = useRef(false);
 
@@ -196,6 +201,7 @@ export function ClientDashboard({ project }: { project: Project }) {
             };
           } | undefined;
           setTouPrices(resolveTouPrices(saved?.electricity?.voltageLevel, saved?.electricity?.prices).prices);
+          setMeterPointIds(meters.map((meter) => meter.id));
 
           // Chỉ đếm điểm đo của dự án; trạng thái lấy từ bản tin Gateway thật (không dùng catalog / fallback toàn thư viện).
           const sampleByMeter = new Map(latestSamples.map((sample) => [sample.meterPointId, sample]));
@@ -254,11 +260,19 @@ export function ClientDashboard({ project }: { project: Project }) {
     const prevFilter = shiftTimeFilter(timeFilter, -1);
     const prevSpan = timeFilterSpan(prevFilter);
 
+    const ids = meterPointIds.length ? meterPointIds : undefined;
+    const sampleLimit = Math.min(4000, Math.max(400, (ids?.length ?? 8) * 80));
+
     const loadCurrent = span.hourly
       ? Promise.all([
-          loadProjectGatewaySamples(project.id, { from: span.from, to: span.to, limit: 6000 }),
-          loadProjectGatewayEnergySlots(project.id, span.from, span.to),
-          loadProjectGatewayDailyRange(project.id, span.from, span.to),
+          loadProjectGatewaySamples(project.id, {
+            from: span.from,
+            to: span.to,
+            limit: sampleLimit,
+            meterPointIds: ids,
+          }),
+          loadProjectGatewayEnergySlots(project.id, span.from, span.to, ids),
+          loadProjectGatewayDailyRange(project.id, span.from, span.to, ids),
         ]).then(([samples, slots, summary]) => ({
           samples,
           slots: slots.slots,
@@ -266,9 +280,14 @@ export function ClientDashboard({ project }: { project: Project }) {
           latest: slots.latest ?? summary.latest,
         }))
       : Promise.all([
-          loadProjectGatewayDailyRange(project.id, span.from, span.to),
-          loadProjectGatewayEnergySlots(project.id, span.from, span.to),
-          loadProjectGatewaySamples(project.id, { from: span.from, to: span.to, limit: 800 }),
+          loadProjectGatewayDailyRange(project.id, span.from, span.to, ids),
+          loadProjectGatewayEnergySlots(project.id, span.from, span.to, ids),
+          loadProjectGatewaySamples(project.id, {
+            from: span.from,
+            to: span.to,
+            limit: Math.min(1200, sampleLimit),
+            meterPointIds: ids,
+          }),
         ]).then(([summary, slots, samples]) => ({
           samples,
           slots: slots.slots,
@@ -278,7 +297,7 @@ export function ClientDashboard({ project }: { project: Project }) {
 
     const loadPrev =
       timeFilter.mode === "month"
-        ? loadProjectGatewayDailyRange(project.id, prevSpan.from, prevSpan.to).then((summary) =>
+        ? loadProjectGatewayDailyRange(project.id, prevSpan.from, prevSpan.to, ids).then((summary) =>
             summary.days.length ? totalKwhFromDaily(summary.days) : null,
           )
         : Promise.resolve(null);
@@ -306,7 +325,7 @@ export function ClientDashboard({ project }: { project: Project }) {
     return () => {
       active = false;
     };
-  }, [project.id, timeFilter]);
+  }, [project.id, timeFilter, meterPointIds]);
 
   const span = useMemo(() => timeFilterSpan(timeFilter), [timeFilter]);
   const energySeries = useMemo(
@@ -333,7 +352,7 @@ export function ClientDashboard({ project }: { project: Project }) {
     for (const row of dailyRows) {
       const index = periodIndexForInstant(timeFilter, `${row.day}T00:00:00`, periods.length);
       if (index < 0) continue;
-      indexKwh[index] += registerToKwh(Number(row.lastWh));
+      indexKwh[index] += effectiveRegisterKwh(Number(row.lastWh), Number(row.offsetKwh) || 0);
       hasSample[index] = true;
     }
     return periods.map((period, index) => ({
