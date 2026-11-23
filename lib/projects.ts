@@ -46,6 +46,17 @@ export type ProjectManagerHistoryEntry = {
   /** Ngày hẹn / ngày chuyển giao quản lý (YYYY-MM-DD). */
   transferDate: string;
   createdAt: string;
+  /** null/undefined = chưa áp dụng (đang chờ đến ngày). */
+  appliedAt?: string | null;
+};
+
+export type PendingManagerTransfer = {
+  id: string;
+  fromAccountId?: string;
+  fromUsername?: string;
+  toAccountId: string;
+  toUsername: string;
+  transferDate: string;
 };
 
 export type Project = {
@@ -65,8 +76,14 @@ export type Project = {
   recipients?: AlertRecipient[];
   /** Lịch sử đổi người quản lý dự án. */
   managerHistory?: ProjectManagerHistoryEntry[];
+  /** Lịch hẹn chuyển giao chưa tới ngày (A vẫn giữ quyền đến transferDate). */
+  pendingManagerTransfer?: PendingManagerTransfer | null;
   /** ID tài khoản nội bộ được chọn làm quản lý (chỉ dùng khi lưu). */
   managerAccountId?: string;
+  /** Username quản lý đích (B) — dùng khi hẹn chuyển giao vẫn giữ contactName của A. */
+  managerUsername?: string;
+  /** Ngày hẹn chuyển giao quản lý (chỉ dùng khi lưu; không ghi đè startDate). */
+  managerTransferDate?: string;
 };
 
 export function resolveMeterTypes(project?: Pick<Project, "meterTypes"> | null): MeterType[] {

@@ -4,12 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/useAuth";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { hydrateAccounts, type Account } from "@/lib/accounts";
 import {
-  adminAccountsForProject,
   customerPassword,
   ensureCustomerAccount,
-  hydrateCustomerAccounts,
-  type CustomerAccount,
 } from "@/lib/customer-accounts";
 import { canViewClientProject } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
@@ -19,6 +17,13 @@ import {
   type ProjectTelemetry,
 } from "@/lib/project-telemetry";
 import { hydrateProjects, loadProjects, removeProject, type Project, type ProjectStatus } from "@/lib/projects";
+
+type ProjectManagerView = {
+  id?: string;
+  username: string;
+  email?: string;
+  role?: string;
+};
 
 const statusMeta: Record<
   ProjectStatus,
@@ -47,7 +52,7 @@ export function ProjectList() {
   const { session } = useAuth();
   const canManageProjects = hasPermission(session, "manageProjects");
   const [items, setItems] = useState<Project[]>([]);
-  const [accounts, setAccounts] = useState<CustomerAccount[]>([]);
+  const [staffAccounts, setStaffAccounts] = useState<Account[]>([]);
   const [telemetry, setTelemetry] = useState<Record<string, ProjectTelemetry>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [customer, setCustomer] = useState("all");
@@ -66,12 +71,12 @@ export function ProjectList() {
       .catch(() => {
         if (active) setItems(loadProjects());
       });
-    void hydrateCustomerAccounts()
+    void hydrateAccounts()
       .then((rows) => {
-        if (active) setAccounts(rows);
+        if (active) setStaffAccounts(rows);
       })
       .catch(() => {
-        if (active) setAccounts([]);
+        if (active) setStaffAccounts([]);
       });
     void loadProjectsTelemetry().then((rows) => {
       if (active) setTelemetry(rows);
@@ -81,13 +86,13 @@ export function ProjectList() {
     };
   }, []);
 
-  const adminsByProject = useMemo(() => {
-    const map = new Map<string, CustomerAccount[]>();
+  const managersByProject = useMemo(() => {
+    const map = new Map<string, ProjectManagerView | null>();
     for (const project of items) {
-      map.set(project.id, adminAccountsForProject(project, accounts, items));
+      map.set(project.id, resolveProjectManager(project, staffAccounts));
     }
     return map;
-  }, [accounts, items]);
+  }, [staffAccounts, items]);
 
   const customers = useMemo(
     () => Array.from(new Set(items.map((p) => p.customer))).sort(),
@@ -98,22 +103,20 @@ export function ProjectList() {
     const q = searchQuery.trim().toLowerCase();
     return items.filter((p) => {
       if (!canViewClientProject(session, p.id)) return false;
-      const admins = adminsByProject.get(p.id) ?? [];
+      const manager = managersByProject.get(p.id);
       const matchCustomer = customer === "all" || p.customer === customer;
       const matchStatus = status === "all" || p.status === status;
       const matchSearch =
         !q ||
         p.name.toLowerCase().includes(q) ||
         p.id.toLowerCase().includes(q) ||
-        admins.some(
-          (account) =>
-            account.username.toLowerCase().includes(q) ||
-            account.displayName.toLowerCase().includes(q) ||
-            account.email.toLowerCase().includes(q),
-        );
+        (manager?.username ?? "").toLowerCase().includes(q) ||
+        (manager?.email ?? "").toLowerCase().includes(q) ||
+        (p.contactName ?? "").toLowerCase().includes(q) ||
+        (p.email ?? "").toLowerCase().includes(q);
       return matchCustomer && matchStatus && matchSearch;
     });
-  }, [customer, status, searchQuery, items, adminsByProject, session]);
+  }, [customer, status, searchQuery, items, managersByProject, session]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -228,7 +231,7 @@ export function ProjectList() {
               ) : (
                 rows.map((project) => {
                   const telem = telemetry[project.id] ?? emptyTelemetry(project.id);
-                  const admins = adminsByProject.get(project.id) ?? [];
+                  const manager = managersByProject.get(project.id);
                   const meterDot =
                     telem.meterCount === 0
                       ? "bg-slate-300"
@@ -274,23 +277,26 @@ export function ProjectList() {
                         </div>
                       </td>
 
-                      {/* Customer Admin account */}
+                      {/* Người quản lý dự án (tài khoản nội bộ đã chọn trên form) */}
                       <td className="px-5 py-4">
-                        {!admins.length ? (
-                          <span className="text-slate-400">Chưa gán Admin</span>
+                        {!manager ? (
+                          <span className="text-slate-400">Chưa gán quản lý</span>
                         ) : (
-                          <div className="space-y-1.5">
-                            {admins.map((account) => (
-                              <div key={account.id}>
-                                <Link
-                                  href={`/tai-khoan-khach/chi-tiet?id=${account.id}`}
-                                  className="font-medium text-slate-800 hover:text-emerald-700"
-                                >
-                                  {account.username}
-                                </Link>
-                                <p className="text-[11px] text-slate-400">{account.displayName}</p>
-                              </div>
-                            ))}
+                          <div>
+                            {manager.id ? (
+                              <Link
+                                href={`/tai-khoan/them-moi?id=${manager.id}`}
+                                className="font-medium text-slate-800 hover:text-emerald-700"
+                              >
+                                {manager.username}
+                              </Link>
+                            ) : (
+                              <span className="font-medium text-slate-800">{manager.username}</span>
+                            )}
+                            <p className="text-[11px] text-slate-400">
+                              {manager.role ? `${manager.role}` : "Quản lý dự án"}
+                              {manager.email ? ` · ${manager.email}` : ""}
+                            </p>
                           </div>
                         )}
                       </td>
@@ -392,6 +398,47 @@ export function ProjectList() {
 }
 
 // ---------------- Helpers & Subcomponents ----------------
+
+function resolveProjectManager(
+  project: Project,
+  accounts: Account[],
+): ProjectManagerView | null {
+  const historyId = project.managerHistory?.[0]?.toAccountId?.trim();
+  const byHistory = historyId ? accounts.find((item) => item.id === historyId) : undefined;
+  if (byHistory) {
+    return {
+      id: byHistory.id,
+      username: byHistory.username,
+      email: byHistory.email || project.email,
+      role: byHistory.role,
+    };
+  }
+
+  const contact = project.contactName?.trim();
+  const email = project.email?.trim();
+  const matched = accounts.find(
+    (item) =>
+      (contact && item.username === contact) ||
+      (email && item.email === email) ||
+      (historyId && item.id === historyId),
+  );
+  if (matched) {
+    return {
+      id: matched.id,
+      username: matched.username,
+      email: matched.email || email,
+      role: matched.role,
+    };
+  }
+  if (contact) {
+    return {
+      username: contact,
+      email,
+      role: "Quản lý dự án",
+    };
+  }
+  return null;
+}
 
 function copyCustomerInvite(project: Project, setCopiedId: (id: string) => void) {
   const account = ensureCustomerAccount(project);

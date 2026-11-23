@@ -50,18 +50,26 @@ import {
   type AlertSeverityLevel,
 } from "@/lib/alert-config";
 import { hydrateProjectSettings, saveProjectSettings, type ProjectSettingsPayload } from "@/lib/project-settings";
+import { REPORTS, type ReportId } from "@/lib/report-defs";
+import {
+  defaultReportConfig,
+  normalizeReportConfig,
+  type ReportConfig,
+} from "@/lib/report-config";
 
-type TabId = "project" | "meters" | "cost" | "alerts" | "accounts";
+type TabId = "project" | "meters" | "cost" | "alerts" | "reports" | "accounts";
 type Utility = string;
 type DropPosition = "before" | "after" | "child";
 type Meter = ClientMeter;
+type NavIconType = "doc" | "nodes" | "cash" | "warn" | "report" | "user";
 
-const NAV: { id: TabId; n: number; label: string; icon: "doc" | "nodes" | "cash" | "warn" | "user" }[] = [
+const NAV: { id: TabId; n: number; label: string; icon: NavIconType }[] = [
   { id: "project", n: 1, label: "Dự án", icon: "doc" },
   { id: "meters", n: 2, label: "Cụm điểm đo", icon: "nodes" },
   { id: "cost", n: 3, label: "Chi phí", icon: "cash" },
   { id: "alerts", n: 4, label: "Cảnh báo", icon: "warn" },
-  { id: "accounts", n: 5, label: "Quản lý tài khoản", icon: "user" },
+  { id: "reports", n: 5, label: "Báo cáo", icon: "report" },
+  { id: "accounts", n: 6, label: "Quản lý tài khoản", icon: "user" },
 ];
 
 const FALLBACK_UTILITIES = ["Điện", "Nước", "Nhiệt", "Hơi"];
@@ -130,6 +138,8 @@ export function ClientConfig() {
   const [voltageMax, setVoltageMax] = useState("");
   const [currentMaxA, setCurrentMaxA] = useState("");
   const [severityByCategory, setSeverityByCategory] = useState(DEFAULT_SEVERITY_BY_CATEGORY);
+  const [reportConfig, setReportConfig] = useState<ReportConfig>(() => defaultReportConfig());
+  const [expandedReportId, setExpandedReportId] = useState<ReportId>(REPORTS[0].id);
 
   function applyCostSettings(settings: ProjectSettingsPayload, types: string[] = utilities) {
     const savedCost = settings.costConfig as SavedCostConfig | undefined;
@@ -167,6 +177,10 @@ export function ClientConfig() {
     setCurrentMaxA(config.currentMaxA ?? "");
   }
 
+  function applyReportSettings(settings: ProjectSettingsPayload) {
+    setReportConfig(normalizeReportConfig(settings.reportConfig));
+  }
+
   useEffect(() => {
     const project = loadProjects().find((item) => item.id === projectId);
     const types = resolveMeterTypes(project);
@@ -179,6 +193,7 @@ export function ClientConfig() {
       .then((settings) => {
         applyCostSettings(settings, types);
         applyAlertSettings(settings);
+        applyReportSettings(settings);
       })
       .catch(() => undefined);
     setDevices(loadDevices());
@@ -239,6 +254,11 @@ export function ClientConfig() {
         };
         const stored = await saveProjectSettings(projectId, { alertConfig: payload });
         applyAlertSettings(stored);
+      } else if (tab === "reports") {
+        const stored = await saveProjectSettings(projectId, {
+          reportConfig: normalizeReportConfig(reportConfig),
+        });
+        applyReportSettings(stored);
       } else {
         await saveClientMeters(projectId, meters);
       }
@@ -267,6 +287,10 @@ export function ClientConfig() {
     alerts: {
       title: "Cấu hình cảnh báo",
       hint: "Chọn mức độ (Nghiêm trọng / Cảnh báo) theo từng loại lỗi và đặt ngưỡng vận hành. Nhật ký chỉ hiển thị thời điểm phát sinh.",
+    },
+    reports: {
+      title: "Cấu hình báo cáo",
+      hint: "Chọn loại báo cáo và trường dữ liệu khách được thấy / xuất trên trang Báo cáo",
     },
     accounts: {
       title: "Quản lý tài khoản",
@@ -436,6 +460,15 @@ export function ClientConfig() {
             />
           ) : null}
 
+          {tab === "reports" ? (
+            <ReportsPanel
+              config={reportConfig}
+              expandedId={expandedReportId}
+              onExpanded={setExpandedReportId}
+              onChange={setReportConfig}
+            />
+          ) : null}
+
           {tab === "accounts" ? (
             <AccountsPanel
               projectId={projectId}
@@ -486,6 +519,8 @@ export function ClientConfig() {
                   setMeters(loadClientMeters(projectId));
                   void hydrateProjectSettings(projectId, { force: true }).then((settings) => {
                     applyCostSettings(settings);
+                    applyAlertSettings(settings);
+                    applyReportSettings(settings);
                   });
                 }}
                 className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
@@ -1256,6 +1291,176 @@ function AlertsPanel({
   );
 }
 
+function ReportsPanel({
+  config,
+  expandedId,
+  onExpanded,
+  onChange,
+}: {
+  config: ReportConfig;
+  expandedId: ReportId;
+  onExpanded: (id: ReportId) => void;
+  onChange: (next: ReportConfig) => void;
+}) {
+  const toggleReport = (id: ReportId) => {
+    const enabled = config.enabledReportIds.includes(id);
+    if (enabled && config.enabledReportIds.length === 1) return;
+    const enabledReportIds = enabled
+      ? config.enabledReportIds.filter((item) => item !== id)
+      : [...config.enabledReportIds, id];
+    onChange({ ...config, enabledReportIds });
+    if (!enabled) onExpanded(id);
+  };
+
+  const toggleAvailableField = (reportId: ReportId, fieldId: string) => {
+    const def = REPORTS.find((item) => item.id === reportId);
+    if (!def) return;
+    const current = config.availableFields[reportId] ?? def.fields.map((field) => field.id);
+    const next = current.includes(fieldId)
+      ? current.filter((item) => item !== fieldId)
+      : [...current, fieldId];
+    if (!next.length) return;
+    const nextSet = new Set(next);
+    const defaults = (config.defaultFields[reportId] ?? def.defaultFields).filter((item) =>
+      nextSet.has(item),
+    );
+    onChange({
+      ...config,
+      availableFields: { ...config.availableFields, [reportId]: next },
+      defaultFields: {
+        ...config.defaultFields,
+        [reportId]: defaults.length ? defaults : [next[0]],
+      },
+    });
+  };
+
+  const toggleDefaultField = (reportId: ReportId, fieldId: string) => {
+    const def = REPORTS.find((item) => item.id === reportId);
+    if (!def) return;
+    const available = new Set(
+      config.availableFields[reportId] ?? def.fields.map((field) => field.id),
+    );
+    if (!available.has(fieldId)) return;
+    const current = (config.defaultFields[reportId] ?? def.defaultFields).filter((item) =>
+      available.has(item),
+    );
+    const next = current.includes(fieldId)
+      ? current.filter((item) => item !== fieldId)
+      : [...current, fieldId];
+    if (!next.length) return;
+    onChange({
+      ...config,
+      defaultFields: { ...config.defaultFields, [reportId]: next },
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
+        Bật loại báo cáo để hiện trên menu Báo cáo. Trong mỗi loại, chọn trường được phép xuất và
+        trường chọn sẵn khi mở báo cáo.
+      </p>
+      <div className="space-y-2">
+        {REPORTS.map((report) => {
+          const enabled = config.enabledReportIds.includes(report.id);
+          const open = expandedId === report.id;
+          const available = new Set(
+            config.availableFields[report.id] ?? report.fields.map((field) => field.id),
+          );
+          const defaults = new Set(
+            (config.defaultFields[report.id] ?? report.defaultFields).filter((id) =>
+              available.has(id),
+            ),
+          );
+          return (
+            <div
+              key={report.id}
+              className={`rounded-xl border ${
+                enabled ? "border-emerald-200 bg-white" : "border-slate-200 bg-slate-50/60"
+              }`}
+            >
+              <div className="flex items-center gap-3 px-3 py-3 sm:px-4">
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={() => toggleReport(report.id)}
+                    className="h-4 w-4 accent-emerald-600"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[14px] font-semibold text-slate-800">{report.name}</span>
+                    <span className="block truncate text-[11px] text-slate-400">{report.description}</span>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onExpanded(report.id)}
+                  className="h-8 shrink-0 rounded-md px-2 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-50"
+                >
+                  {open ? "Thu gọn" : "Trường"}
+                </button>
+              </div>
+              {open ? (
+                <div className="border-t border-slate-100 px-3 py-3 sm:px-4">
+                  <p className="mb-2 text-[11px] font-semibold tracking-[0.06em] text-slate-400 uppercase">
+                    Trường được phép hiện
+                  </p>
+                  <div className="mb-4 flex flex-wrap gap-1.5">
+                    {report.fields.map((field) => {
+                      const active = available.has(field.id);
+                      return (
+                        <button
+                          key={field.id}
+                          type="button"
+                          title={field.hint}
+                          disabled={!enabled}
+                          onClick={() => toggleAvailableField(report.id, field.id)}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                            active
+                              ? "bg-emerald-600 text-white"
+                              : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          {field.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mb-2 text-[11px] font-semibold tracking-[0.06em] text-slate-400 uppercase">
+                    Chọn sẵn khi mở báo cáo
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {report.fields
+                      .filter((field) => available.has(field.id))
+                      .map((field) => {
+                        const active = defaults.has(field.id);
+                        return (
+                          <button
+                            key={field.id}
+                            type="button"
+                            disabled={!enabled}
+                            onClick={() => toggleDefaultField(report.id, field.id)}
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                              active
+                                ? "bg-slate-800 text-white"
+                                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {field.label}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AccountsPanel({
   projectId,
   accounts,
@@ -1582,7 +1787,7 @@ function IconBtn({
   );
 }
 
-function NavIcon({ type, className }: { type: "doc" | "nodes" | "cash" | "warn" | "user"; className?: string }) {
+function NavIcon({ type, className }: { type: NavIconType; className?: string }) {
   if (type === "nodes") {
     return (
       <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1615,6 +1820,15 @@ function NavIcon({ type, className }: { type: "doc" | "nodes" | "cash" | "warn" 
         <circle cx="9" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.7" />
         <circle cx="16" cy="9" r="1.8" stroke="currentColor" strokeWidth="1.7" />
         <path d="M4.5 18c.8-2.5 2.6-4 5.5-4s4.7 1.5 5.5 4M14 14.2c1.7.2 3.1 1.2 4 3.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "report") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M7 3.5h7l5 5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+        <path d="M14 3.5V9h5.5" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+        <path d="M9 13h6M9 16h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
       </svg>
     );
   }

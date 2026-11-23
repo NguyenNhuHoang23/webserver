@@ -17,7 +17,9 @@ import {
   type AlertChannel,
   type AlertRecipient,
   type MeterType,
+  type PendingManagerTransfer,
   type Project,
+  type ProjectManagerHistoryEntry,
   type ProjectStatus,
 } from "@/lib/projects";
 import { ensureCustomerAccount } from "@/lib/customer-accounts";
@@ -69,6 +71,38 @@ function toInputDate(value?: string) {
   return match ? `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}` : todayIso();
 }
 
+function formatDisplayDate(iso: string) {
+  const [year, month, day] = iso.split("-");
+  if (year && month && day) return `${day}/${month}/${year}`;
+  return iso;
+}
+
+function matchProjectManager(project: Project, accounts: Account[]) {
+  const pendingId = project.pendingManagerTransfer?.toAccountId?.trim();
+  if (pendingId) {
+    const pending = accounts.find((item) => item.id === pendingId);
+    if (pending) return pending;
+  }
+  return (
+    accounts.find(
+      (item) =>
+        (project.contactName && item.username === project.contactName) ||
+        (project.email && item.email === project.email),
+    ) ?? null
+  );
+}
+
+/** Người quản lý hiện đang giữ quyền (chưa tính lịch hẹn). */
+function matchCurrentManager(project: Project, accounts: Account[]) {
+  return (
+    accounts.find(
+      (item) =>
+        (project.contactName && item.username === project.contactName) ||
+        (project.email && item.email === project.email),
+    ) ?? null
+  );
+}
+
 export function AddProjectForm({ initialProject }: { initialProject?: Project }) {
   const router = useRouter();
 
@@ -79,6 +113,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
   const [address, setAddress] = useState(() => initialProject?.address ?? "");
   const [logoUrl, setLogoUrl] = useState(() => initialProject?.logoUrl ?? "");
   const [startDate, setStartDate] = useState(() => toInputDate(initialProject?.startDate));
+  const [transferDate, setTransferDate] = useState(() => todayIso());
   const [status, setStatus] = useState<ProjectStatus>(() => initialProject?.status ?? "active");
   const [meterTypes, setMeterTypes] = useState<MeterType[]>(() =>
     initialProject ? resolveMeterTypes(initialProject) : ["Điện"],
@@ -92,6 +127,12 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
   );
   const [error, setError] = useState("");
   const [recipientToDelete, setRecipientToDelete] = useState<AlertRecipient | null>(null);
+  const [managerHistory, setManagerHistory] = useState<ProjectManagerHistoryEntry[]>(
+    () => initialProject?.managerHistory ?? [],
+  );
+  const [pendingTransfer, setPendingTransfer] = useState<PendingManagerTransfer | null>(
+    () => initialProject?.pendingManagerTransfer ?? null,
+  );
 
   const selectedManager = useMemo(
     () => managers.find((item) => item.id === managerId) ?? null,
@@ -127,39 +168,60 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         setMeterCatalog(meterTypes);
         setManagers(accounts);
         if (initialProject) {
-          const matched =
-            accounts.find(
-              (item) =>
-                (initialProject.email && item.email === initialProject.email) ||
-                (initialProject.contactName && item.username === initialProject.contactName),
-            ) ?? null;
+          const fresh = projects.find((item) => item.id === initialProject.id) ?? initialProject;
+          setManagerHistory(fresh.managerHistory ?? []);
+          setPendingTransfer(fresh.pendingManagerTransfer ?? null);
+          const matched = matchProjectManager(fresh, accounts);
           if (matched) {
             setManagerId(matched.id);
-            setPhone(matched.phone?.trim() || initialProject.phone || "");
+            setPhone(matched.phone?.trim() || fresh.phone?.trim() || "");
+          } else if (fresh.phone?.trim()) {
+            setPhone(fresh.phone.trim());
+          }
+          const pending = fresh.pendingManagerTransfer;
+          if (pending?.transferDate) {
+            setTransferDate(toInputDate(pending.transferDate));
           }
         }
       },
     );
   }, [initialProject]);
 
-  const initialManagerId = useMemo(() => {
+  /** Quản lý đang giữ quyền hiện tại (A) — không phải người đang hẹn (B). */
+  const currentManagerId = useMemo(() => {
     if (!initialProject) return "";
-    const matched = managers.find(
-      (item) =>
-        (initialProject.email && item.email === initialProject.email) ||
-        (initialProject.contactName && item.username === initialProject.contactName),
-    );
-    return matched?.id ?? "";
+    return matchCurrentManager(initialProject, managers)?.id ?? "";
   }, [initialProject, managers]);
 
+  const previousManagerLabel = useMemo(() => {
+    if (!initialProject) return "";
+    if (currentManagerId) {
+      return managers.find((item) => item.id === currentManagerId)?.username ?? "";
+    }
+    return initialProject.contactName?.trim() || "";
+  }, [initialProject, currentManagerId, managers]);
+
+  /** Đổi người quản lý khi sửa dự án → ô ngày = ngày hẹn chuyển giao. */
   const isManagerTransfer = Boolean(
-    initialProject && managerId && initialManagerId && managerId !== initialManagerId,
+    initialProject &&
+      managerId &&
+      ((currentManagerId && managerId !== currentManagerId) ||
+        (!currentManagerId &&
+          selectedManager &&
+          ((previousManagerLabel && selectedManager.username !== previousManagerLabel) ||
+            (initialProject.email && selectedManager.email !== initialProject.email) ||
+            !previousManagerLabel))),
   );
+
+  const deferTransfer = Boolean(isManagerTransfer && transferDate > todayIso());
 
   function applyManager(accountId: string) {
     setManagerId(accountId);
     const account = managers.find((item) => item.id === accountId);
-    setPhone(account?.phone?.trim() || "");
+    setPhone(account?.phone?.trim() || initialProject?.phone?.trim() || "");
+    if (initialProject && accountId && accountId !== currentManagerId) {
+      setTransferDate((current) => current || todayIso());
+    }
   }
 
   function toggleMeter(type: MeterType) {
@@ -242,6 +304,22 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
     try {
       await hydrateProjects();
       const managerPhone = selectedManager.phone?.trim() || phone.trim();
+      const currentManager =
+        currentManagerId && currentManagerId !== selectedManager.id
+          ? managers.find((item) => item.id === currentManagerId) ?? null
+          : null;
+      // Hẹn tương lai: giữ contact của A; B chỉ vào lịch sử pending.
+      const contactForSave = deferTransfer
+        ? {
+            contactName: currentManager?.username ?? initialProject?.contactName ?? selectedManager.username,
+            phone: currentManager?.phone?.trim() || initialProject?.phone || managerPhone,
+            email: currentManager?.email ?? initialProject?.email ?? selectedManager.email,
+          }
+        : {
+            contactName: selectedManager.username,
+            phone: managerPhone,
+            email: selectedManager.email,
+          };
       await upsertProject({
         id: projectCode,
         name: projectName,
@@ -251,37 +329,37 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
         logoUrl: logoUrl || undefined,
         status,
         startDate,
-        contactName: selectedManager.username,
-        phone: managerPhone,
-        email: selectedManager.email,
+        contactName: contactForSave.contactName,
+        phone: contactForSave.phone,
+        email: contactForSave.email,
         address: address.trim(),
         meterTypes,
         recipients: cleanedRecipients,
         managerAccountId: selectedManager.id,
+        managerUsername: selectedManager.username,
         managerHistory: initialProject?.managerHistory,
+        managerTransferDate: isManagerTransfer ? transferDate : undefined,
       });
 
-      // Đồng bộ phạm vi Manage trên client (API cũng kick/gán phía server).
-      const previousManager =
-        initialManagerId && initialManagerId !== selectedManager.id
-          ? managers.find((item) => item.id === initialManagerId) ?? null
-          : null;
-      if (
-        previousManager &&
-        previousManager.role === "Manage" &&
-        previousManager.projectIds.includes(projectCode)
-      ) {
-        await upsertAccount({
-          ...previousManager,
-          projectIds: previousManager.projectIds.filter((id) => id !== projectCode),
-        }).catch(() => undefined);
-      }
-      if (selectedManager.role === "Manage") {
-        await upsertAccount({
-          ...selectedManager,
-          phone: managerPhone || selectedManager.phone,
-          projectIds: Array.from(new Set([...selectedManager.projectIds, projectCode])),
-        }).catch(() => undefined);
+      // Chỉ đồng bộ quyền ngay khi không hẹn tương lai (API cũng xử lý).
+      if (!deferTransfer) {
+        if (
+          currentManager &&
+          currentManager.role === "Manage" &&
+          currentManager.projectIds.includes(projectCode)
+        ) {
+          await upsertAccount({
+            ...currentManager,
+            projectIds: currentManager.projectIds.filter((id) => id !== projectCode),
+          }).catch(() => undefined);
+        }
+        if (selectedManager.role === "Manage") {
+          await upsertAccount({
+            ...selectedManager,
+            phone: managerPhone || selectedManager.phone,
+            projectIds: Array.from(new Set([...selectedManager.projectIds, projectCode])),
+          }).catch(() => undefined);
+        }
       }
       if (!initialProject) {
         ensureCustomerAccount({ id: projectCode, customer: customerName });
@@ -373,20 +451,41 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
                 tabIndex={-1}
               />
             </Field>
-            <Field label={isManagerTransfer ? "NGÀY CHUYỂN GIAO" : "NGÀY BẮT ĐẦU"}>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="input"
-                required
-              />
-              {isManagerTransfer ? (
-                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-                  Ngày này được lưu làm ngày chuyển giao quản lý trong lịch sử dự án.
+            {isManagerTransfer ? (
+              <Field label={previousManagerLabel ? "NGÀY CHUYỂN GIAO" : "NGÀY GÁN QUẢN LÝ"}>
+                <input
+                  type="date"
+                  value={transferDate}
+                  onChange={(e) => setTransferDate(e.target.value)}
+                  className="input"
+                  required
+                />
+                <p className="mt-1.5 text-[11px] leading-relaxed text-amber-700">
+                  {previousManagerLabel && selectedManager ? (
+                    <>
+                      Đến hết ngày trước {formatDisplayDate(transferDate)},{" "}
+                      <span className="font-semibold">{previousManagerLabel}</span> vẫn quản lý. Từ{" "}
+                      {formatDisplayDate(transferDate)},{" "}
+                      <span className="font-semibold">{previousManagerLabel}</span> bị gỡ quyền và{" "}
+                      <span className="font-semibold">{selectedManager.username}</span> được truy cập.
+                    </>
+                  ) : (
+                    <>Hẹn ngày gán người quản lý cho dự án.</>
+                  )}{" "}
+                  Ngày bắt đầu dự án giữ nguyên {formatDisplayDate(startDate)}.
                 </p>
-              ) : null}
-            </Field>
+              </Field>
+            ) : (
+              <Field label="NGÀY BẮT ĐẦU">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="input"
+                  required
+                />
+              </Field>
+            )}
             <Field label="TRẠNG THÁI">
               <div className="relative">
                 <select
@@ -414,13 +513,29 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
             </Field>
           </div>
 
-          {initialProject?.managerHistory?.length ? (
+          {pendingTransfer ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+              Đã hẹn chuyển giao:{" "}
+              <span className="font-semibold">
+                {pendingTransfer.fromUsername || previousManagerLabel || "—"}
+              </span>
+              {" → "}
+              <span className="font-semibold">{pendingTransfer.toUsername}</span>
+              {" vào "}
+              <span className="font-semibold">
+                {formatDisplayDate(pendingTransfer.transferDate)}
+              </span>
+              . Trước ngày đó người cũ vẫn truy cập được.
+            </div>
+          ) : null}
+
+          {managerHistory.length ? (
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <p className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
                 Lịch sử chuyển giao quản lý
               </p>
               <ul className="mt-3 space-y-2">
-                {initialProject.managerHistory.map((entry) => (
+                {managerHistory.map((entry) => (
                   <li
                     key={entry.id}
                     className="flex flex-wrap items-baseline justify-between gap-2 text-sm text-slate-700"
@@ -437,10 +552,19 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
                           Gán <span className="font-medium">{entry.toUsername}</span>
                         </>
                       )}
+                      {!entry.appliedAt ? (
+                        <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                          Chờ ngày
+                        </span>
+                      ) : null}
                     </span>
                     <span className="text-xs text-slate-500">
                       {entry.transferDate}
-                      {entry.createdAt ? ` · ghi ${entry.createdAt}` : ""}
+                      {entry.appliedAt
+                        ? ` · áp dụng ${entry.appliedAt}`
+                        : entry.createdAt
+                          ? ` · ghi ${entry.createdAt}`
+                          : ""}
                     </span>
                   </li>
                 ))}

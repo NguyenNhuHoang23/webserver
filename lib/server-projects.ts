@@ -1,5 +1,10 @@
 import "server-only";
-import { normalizeAlertChannels, type Project } from "@/lib/projects";
+import {
+  normalizeAlertChannels,
+  type PendingManagerTransfer,
+  type Project,
+  type ProjectManagerHistoryEntry,
+} from "@/lib/projects";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
 
 let recipientChannelsReady: Promise<void> | null = null;
@@ -18,6 +23,63 @@ function ensureRecipientChannels() {
       });
   }
   return recipientChannelsReady;
+}
+
+async function loadManagerHistory(projectId: string): Promise<{
+  managerHistory: ProjectManagerHistoryEntry[];
+  pendingManagerTransfer: PendingManagerTransfer | null;
+}> {
+  const historyRows = await queryRows<Record<string, unknown>>(
+    `SELECT id,
+            from_account_id AS fromAccountId, from_username AS fromUsername,
+            to_account_id AS toAccountId, to_username AS toUsername,
+            DATE_FORMAT(transfer_date, '%Y-%m-%d') AS transferDate,
+            DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i') AS appliedAt,
+            DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS createdAt
+       FROM project_manager_history
+      WHERE project_id = ?
+      ORDER BY transfer_date DESC, created_at DESC`,
+    [projectId],
+  ).catch(async () => {
+    // Bảng/cột cũ chưa có applied_at
+    return queryRows<Record<string, unknown>>(
+      `SELECT id,
+              from_account_id AS fromAccountId, from_username AS fromUsername,
+              to_account_id AS toAccountId, to_username AS toUsername,
+              DATE_FORMAT(transfer_date, '%Y-%m-%d') AS transferDate,
+              NULL AS appliedAt,
+              DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS createdAt
+         FROM project_manager_history
+        WHERE project_id = ?
+        ORDER BY transfer_date DESC, created_at DESC`,
+      [projectId],
+    ).catch(() => [] as Record<string, unknown>[]);
+  });
+
+  const managerHistory: ProjectManagerHistoryEntry[] = historyRows.map((row) => ({
+    id: String(row.id),
+    fromAccountId: row.fromAccountId ? String(row.fromAccountId) : undefined,
+    fromUsername: row.fromUsername ? String(row.fromUsername) : undefined,
+    toAccountId: String(row.toAccountId),
+    toUsername: String(row.toUsername),
+    transferDate: String(row.transferDate ?? ""),
+    createdAt: String(row.createdAt ?? ""),
+    appliedAt: row.appliedAt ? String(row.appliedAt) : null,
+  }));
+
+  const pending = managerHistory.find((item) => !item.appliedAt) ?? null;
+  const pendingManagerTransfer: PendingManagerTransfer | null = pending
+    ? {
+        id: pending.id,
+        fromAccountId: pending.fromAccountId,
+        fromUsername: pending.fromUsername,
+        toAccountId: pending.toAccountId,
+        toUsername: pending.toUsername,
+        transferDate: pending.transferDate,
+      }
+    : null;
+
+  return { managerHistory, pendingManagerTransfer };
 }
 
 export async function getProjectFromDb(id: string): Promise<Project | undefined> {
@@ -41,6 +103,7 @@ export async function getProjectFromDb(id: string): Promise<Project | undefined>
       WHERE project_id = ? ORDER BY id`,
     [id],
   );
+  const { managerHistory, pendingManagerTransfer } = await loadManagerHistory(id);
   return {
     id: row.id as string,
     initials: row.initials as string,
@@ -68,5 +131,7 @@ export async function getProjectFromDb(id: string): Promise<Project | undefined>
         )),
       };
     }),
+    managerHistory,
+    pendingManagerTransfer,
   };
 }

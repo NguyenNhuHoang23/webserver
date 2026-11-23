@@ -5,6 +5,7 @@ import { getProjectsListTelemetry } from "@/lib/gateway-store";
 import { hasPermission } from "@/lib/permissions";
 import { getServerSession, requirePermission } from "@/lib/server-auth";
 import { emsDb, jsonField, queryRows } from "@/lib/server-db";
+import { vietnamNow } from "@/lib/vietnam-time";
 
 function normalizeCustomerAccountRole(role: unknown): "Admin" | "View" | "Edit" {
   if (role === "Admin") return "Admin";
@@ -147,8 +148,8 @@ function ensureAccountPhoneColumn() {
 
 function ensureManagerHistoryTable() {
   if (!managerHistoryReady) {
-    managerHistoryReady = emsDb
-      .query(
+    managerHistoryReady = (async () => {
+      await emsDb.query(
         `CREATE TABLE IF NOT EXISTS project_manager_history (
            id VARCHAR(64) NOT NULL,
            project_id VARCHAR(64) NOT NULL,
@@ -157,22 +158,98 @@ function ensureManagerHistoryTable() {
            to_account_id VARCHAR(64) NOT NULL,
            to_username VARCHAR(100) NOT NULL,
            transfer_date DATE NOT NULL,
+           applied_at DATETIME NULL,
            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
            PRIMARY KEY (id),
            KEY idx_pmh_project (project_id),
+           KEY idx_pmh_pending (transfer_date, applied_at),
            CONSTRAINT fk_pmh_project
              FOREIGN KEY (project_id) REFERENCES projects (id)
              ON DELETE CASCADE ON UPDATE CASCADE
          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-      )
-      .then(() => undefined)
-      .catch((error) => {
-        managerHistoryReady = null;
-        console.error("project_manager_history migrate failed", error);
-        throw error;
-      });
+      );
+      await emsDb
+        .query(
+          `ALTER TABLE project_manager_history
+             ADD COLUMN IF NOT EXISTS applied_at DATETIME NULL AFTER transfer_date`,
+        )
+        .catch(async () => {
+          // MySQL cũ không có IF NOT EXISTS cho ADD COLUMN — thử thêm trực tiếp.
+          const cols = await queryRows<{ Field: string }>("SHOW COLUMNS FROM project_manager_history");
+          if (!cols.some((col) => col.Field === "applied_at")) {
+            await emsDb.query(
+              "ALTER TABLE project_manager_history ADD COLUMN applied_at DATETIME NULL AFTER transfer_date",
+            );
+          }
+        });
+    })().catch((error) => {
+      managerHistoryReady = null;
+      console.error("project_manager_history migrate failed", error);
+      throw error;
+    });
   }
   return managerHistoryReady;
+}
+
+/** Tới ngày hẹn: đá Manage cũ, gán Manage mới, cập nhật contact dự án. */
+async function applyDueManagerTransfers() {
+  await ensureManagerHistoryTable();
+  await ensureAccountProjects();
+  const today = vietnamNow().date;
+  const due = await queryRows<{
+    id: string;
+    projectId: string;
+    fromAccountId: string | null;
+    toAccountId: string;
+    toUsername: string;
+  }>(
+    `SELECT id, project_id AS projectId,
+            from_account_id AS fromAccountId, to_account_id AS toAccountId,
+            to_username AS toUsername
+       FROM project_manager_history
+      WHERE applied_at IS NULL
+        AND transfer_date <= STR_TO_DATE(?, '%Y-%m-%d')
+      ORDER BY transfer_date ASC, created_at ASC`,
+    [today],
+  ).catch(() => []);
+
+  for (const row of due) {
+    const projectId = String(row.projectId);
+    const toAccountId = String(row.toAccountId);
+    const fromAccountId = row.fromAccountId ? String(row.fromAccountId) : null;
+    await transaction(async (connection) => {
+      if (fromAccountId && fromAccountId !== toAccountId) {
+        await connection.execute(
+          "DELETE FROM account_projects WHERE account_id = ? AND project_id = ?",
+          [fromAccountId, projectId],
+        );
+      }
+      const roleRows = await queryRows<{ role: string; email: string | null; phone: string | null; username: string }>(
+        "SELECT role, email, phone, username FROM accounts WHERE id = ? LIMIT 1",
+        [toAccountId],
+      );
+      const toAccount = roleRows[0];
+      if (toAccount && normalizeStaffAccountRole(toAccount.role) === "Manage") {
+        await connection.execute(
+          "INSERT IGNORE INTO account_projects (account_id, project_id) VALUES (?, ?)",
+          [toAccountId, projectId],
+        );
+      }
+      const contactName = toAccount?.username || row.toUsername || toAccountId;
+      await connection.execute(
+        `UPDATE projects
+            SET contact_name = ?, email = ?, phone = ?
+          WHERE id = ?`,
+        [contactName, toAccount?.email ?? null, toAccount?.phone ?? null, projectId],
+      );
+      await connection.execute(
+        "UPDATE project_manager_history SET applied_at = NOW() WHERE id = ?",
+        [row.id],
+      );
+    }).catch((error) => {
+      console.error("applyDueManagerTransfers failed", row.id, error);
+    });
+  }
 }
 
 function ensureEmissionFactorGasColumns() {
@@ -460,6 +537,7 @@ async function resourceName(context: Params) {
 }
 
 async function getProjects(projectId?: string) {
+  await applyDueManagerTransfers();
   const where = projectId ? "WHERE p.id = ?" : "";
   const params = projectId ? [projectId] : [];
   const projects = await queryRows<Row>(
@@ -512,6 +590,7 @@ async function getProjects(projectId?: string) {
             from_account_id AS fromAccountId, from_username AS fromUsername,
             to_account_id AS toAccountId, to_username AS toUsername,
             DATE_FORMAT(transfer_date, '%Y-%m-%d') AS transferDate,
+            DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i') AS appliedAt,
             DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS createdAt
        FROM project_manager_history
       WHERE project_id IN (${placeholders})
@@ -519,30 +598,51 @@ async function getProjects(projectId?: string) {
     ids,
   ).catch(() => [] as Row[]);
   const historyByProject = new Map<string, Row[]>();
+  const pendingByProject = new Map<string, Row>();
   for (const row of historyRows) {
     const id = String(row.projectId);
-    historyByProject.set(id, [...(historyByProject.get(id) ?? []), {
+    const entry = {
       id: row.id,
       fromAccountId: row.fromAccountId || undefined,
       fromUsername: row.fromUsername || undefined,
       toAccountId: row.toAccountId,
       toUsername: row.toUsername,
       transferDate: row.transferDate,
+      appliedAt: row.appliedAt || null,
       createdAt: row.createdAt,
-    }]);
+    };
+    historyByProject.set(id, [...(historyByProject.get(id) ?? []), entry]);
+    if (!entry.appliedAt && !pendingByProject.has(id)) {
+      pendingByProject.set(id, entry);
+    }
   }
 
-  return projects.map((project) => ({
-    ...project,
-    meterTypes: typesByProject.get(project.id as string) ?? [],
-    recipients: recipientsByProject.get(project.id as string) ?? [],
-    managerHistory: historyByProject.get(project.id as string) ?? [],
-  }));
+  return projects.map((project) => {
+    const pid = project.id as string;
+    const pending = pendingByProject.get(pid);
+    return {
+      ...project,
+      meterTypes: typesByProject.get(pid) ?? [],
+      recipients: recipientsByProject.get(pid) ?? [],
+      managerHistory: historyByProject.get(pid) ?? [],
+      pendingManagerTransfer: pending
+        ? {
+            id: String(pending.id),
+            fromAccountId: pending.fromAccountId ? String(pending.fromAccountId) : undefined,
+            fromUsername: pending.fromUsername ? String(pending.fromUsername) : undefined,
+            toAccountId: String(pending.toAccountId),
+            toUsername: String(pending.toUsername),
+            transferDate: String(pending.transferDate),
+          }
+        : null,
+    };
+  });
 }
 
 async function getResource(resource: string, request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("projectId") || undefined;
   if (resource === "accounts") {
+    await applyDueManagerTransfers();
     await ensureAccountProjects();
     await ensureAccountPhoneColumn();
     const accounts = await queryRows<Row>(
@@ -1043,14 +1143,58 @@ async function saveResource(resource: string, body: Row) {
 
     const projectId = asString(body.id);
     const managerAccountId = asString(body.managerAccountId).trim();
-    const managerUsername = asString(body.contactName).trim();
+    const transferDate =
+      projectDateForDb(body.managerTransferDate) || startDate;
+    const today = vietnamNow().date;
     const previous = projectId
-      ? await queryRows<{ contactName: string | null; email: string | null }>(
-          `SELECT contact_name AS contactName, email FROM projects WHERE id = ? LIMIT 1`,
+      ? await queryRows<{
+          contactName: string | null;
+          email: string | null;
+          phone: string | null;
+        }>(
+          `SELECT contact_name AS contactName, email, phone FROM projects WHERE id = ? LIMIT 1`,
           [projectId],
         )
       : [];
     const previousContact = previous[0];
+    const previousName = asString(previousContact?.contactName).trim();
+    let fromAccountId: string | null = null;
+    if (previousName) {
+      const fromRows = await queryRows<{ id: string }>(
+        "SELECT id FROM accounts WHERE username = ? OR email = ? LIMIT 1",
+        [previousName, asString(previousContact?.email)],
+      );
+      fromAccountId = fromRows[0]?.id ? String(fromRows[0].id) : null;
+    }
+    // Username đích lấy từ tài khoản được chọn (không dùng contactName — khi hẹn lịch contact vẫn là A).
+    let managerUsername = asString(body.managerUsername).trim();
+    if (managerAccountId) {
+      const targetRows = await queryRows<{ username: string }>(
+        "SELECT username FROM accounts WHERE id = ? LIMIT 1",
+        [managerAccountId],
+      );
+      if (targetRows[0]?.username) managerUsername = String(targetRows[0].username);
+    }
+    if (!managerUsername) managerUsername = asString(body.contactName).trim();
+
+    const isNewAssignment = Boolean(managerAccountId && !previousName && !fromAccountId);
+    const isTransfer = Boolean(
+      managerAccountId &&
+        ((fromAccountId && fromAccountId !== managerAccountId) ||
+          (previousName && previousName !== managerUsername)),
+    );
+    const scheduleChange = isNewAssignment || isTransfer;
+    // Có gửi managerTransferDate → luôn ghi lịch sử khi đổi/gán quản lý.
+    const hasTransferDate = Boolean(projectDateForDb(body.managerTransferDate));
+    const deferTransfer = Boolean(
+      scheduleChange && transferDate && transferDate > today,
+    );
+    // Hẹn tương lai: giữ contact + quyền của A đến ngày chuyển giao.
+    const contactNameSave = deferTransfer
+      ? previousContact?.contactName || null
+      : body.contactName || null;
+    const phoneSave = deferTransfer ? previousContact?.phone || null : body.phone || null;
+    const emailSave = deferTransfer ? previousContact?.email || null : body.email || null;
 
     await transaction(async (connection) => {
       await connection.execute(
@@ -1064,8 +1208,8 @@ async function saveResource(resource: string, body: Row) {
            phone=VALUES(phone), email=VALUES(email), address=VALUES(address),
            logo_url=VALUES(logo_url)`,
         [body.id, body.initials, body.accent, body.name, body.customer, body.status,
-          startDate, body.contactName || null, body.phone || null,
-          body.email || null, body.address || null, body.logoUrl || null],
+          startDate, contactNameSave, phoneSave, emailSave,
+          body.address || null, body.logoUrl || null],
       );
       await connection.execute("DELETE FROM project_meter_types WHERE project_id = ?", [body.id]);
       for (const meterType of meterTypes) {
@@ -1099,43 +1243,23 @@ async function saveResource(resource: string, body: Row) {
         );
       }
 
-      // Gán / chuyển giao quản lý: kick Manage cũ khỏi dự án, gán Manage mới.
       if (managerAccountId) {
-        const previousName = asString(previousContact?.contactName).trim();
-        let fromAccountId: string | null = null;
-        if (previousName) {
-          const fromRows = await queryRows<{ id: string }>(
-            "SELECT id FROM accounts WHERE username = ? OR email = ? LIMIT 1",
-            [previousName, asString(previousContact?.email)],
-          );
-          fromAccountId = fromRows[0]?.id ? String(fromRows[0].id) : null;
-          if (fromAccountId && fromAccountId !== managerAccountId) {
-            await connection.execute(
-              "DELETE FROM account_projects WHERE account_id = ? AND project_id = ?",
-              [fromAccountId, projectId],
-            );
-          }
-        }
-
-        const managerRoleRows = await queryRows<{ role: string }>(
-          "SELECT role FROM accounts WHERE id = ? LIMIT 1",
-          [managerAccountId],
-        );
-        const managerRole = normalizeStaffAccountRole(managerRoleRows[0]?.role);
-        if (managerRole === "Manage") {
+        const shouldRecordHistory = scheduleChange || hasTransferDate;
+        // Hủy lịch hẹn cũ chưa áp dụng khi đặt lịch mới / áp dụng ngay.
+        if (shouldRecordHistory) {
           await connection.execute(
-            "INSERT IGNORE INTO account_projects (account_id, project_id) VALUES (?, ?)",
-            [managerAccountId, projectId],
-          );
+            "DELETE FROM project_manager_history WHERE project_id = ? AND applied_at IS NULL",
+            [projectId],
+          ).catch(() => undefined);
         }
 
-        const isNewAssignment = !previousName;
-        const isTransfer = Boolean(previousName && previousName !== managerUsername);
-        if (isNewAssignment || isTransfer) {
+        if (scheduleChange && deferTransfer) {
+          // Chỉ ghi lịch hẹn — A vẫn giữ account_projects đến đúng ngày.
           await connection.execute(
             `INSERT INTO project_manager_history
-               (id, project_id, from_account_id, from_username, to_account_id, to_username, transfer_date)
-             VALUES (?, ?, ?, ?, ?, ?, STR_TO_DATE(?, '%Y-%m-%d'))`,
+               (id, project_id, from_account_id, from_username, to_account_id, to_username,
+                transfer_date, applied_at)
+             VALUES (?, ?, ?, ?, ?, ?, STR_TO_DATE(?, '%Y-%m-%d'), NULL)`,
             [
               `pmh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               projectId,
@@ -1143,9 +1267,45 @@ async function saveResource(resource: string, body: Row) {
               previousName || null,
               managerAccountId,
               managerUsername || managerAccountId,
-              startDate,
+              transferDate,
             ],
           );
+        } else {
+          // Áp dụng ngay (ngày hẹn ≤ hôm nay, hoặc gán lần đầu không hẹn tương lai).
+          if (fromAccountId && fromAccountId !== managerAccountId) {
+            await connection.execute(
+              "DELETE FROM account_projects WHERE account_id = ? AND project_id = ?",
+              [fromAccountId, projectId],
+            );
+          }
+          const managerRoleRows = await queryRows<{ role: string }>(
+            "SELECT role FROM accounts WHERE id = ? LIMIT 1",
+            [managerAccountId],
+          );
+          const managerRole = normalizeStaffAccountRole(managerRoleRows[0]?.role);
+          if (managerRole === "Manage") {
+            await connection.execute(
+              "INSERT IGNORE INTO account_projects (account_id, project_id) VALUES (?, ?)",
+              [managerAccountId, projectId],
+            );
+          }
+          if (scheduleChange) {
+            await connection.execute(
+              `INSERT INTO project_manager_history
+                 (id, project_id, from_account_id, from_username, to_account_id, to_username,
+                  transfer_date, applied_at)
+               VALUES (?, ?, ?, ?, ?, ?, STR_TO_DATE(?, '%Y-%m-%d'), NOW())`,
+              [
+                `pmh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                projectId,
+                fromAccountId,
+                previousName || null,
+                managerAccountId,
+                managerUsername || managerAccountId,
+                transferDate,
+              ],
+            );
+          }
         }
       }
     });

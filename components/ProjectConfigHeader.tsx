@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { hydrateProjects, loadProjects, type Project } from "@/lib/projects";
+import { hydrateProjects, type Project } from "@/lib/projects";
 
 export function ProjectConfigHeader({
   project,
@@ -28,19 +27,8 @@ export function ProjectConfigHeader({
       <div>
         <p className="text-xs font-semibold tracking-wide text-slate-400">CẤU HÌNH DỰ ÁN</p>
         <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">{resolved.name}</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {resolved.id} · {resolved.customer}
-        </p>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {actions}
-        <Link
-          href="/"
-          className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
-          ← Quay lại danh sách dự án
-        </Link>
-      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }

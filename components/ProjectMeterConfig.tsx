@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProjectConfigHeader } from "@/components/ProjectConfigHeader";
 import {
@@ -113,11 +112,10 @@ function fromDbMeters(
 
 export function ProjectMeterConfig({ project }: { project: Project }) {
   const [energies, setEnergies] = useState<MeterType[]>(() => resolveMeterTypes(project));
+  const [energyFilter, setEnergyFilter] = useState<"all" | MeterType>("all");
   const [addingType, setAddingType] = useState(false);
-  const [energyToDelete, setEnergyToDelete] = useState<MeterType | null>(null);
   const [newType, setNewType] = useState("");
   const [query, setQuery] = useState("");
-  const [deviceType, setDeviceType] = useState("all");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [allPoints, setAllPoints] = useState<MeterPoint[]>([]);
@@ -127,6 +125,31 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
   useEffect(() => {
     setEnergies(resolveMeterTypes(project));
   }, [project]);
+
+  function persistEnergies(next: MeterType[]) {
+    setEnergies(next);
+    void upsertProject({ ...project, meterTypes: next }).catch(() => undefined);
+  }
+
+  const suggestions = useMemo(
+    () =>
+      [...METER_TYPES, ...EXTRA_METER_TYPE_SUGGESTIONS].filter(
+        (item) => !energies.includes(item),
+      ),
+    [energies],
+  );
+
+  function addEnergyType(raw: string) {
+    const label = raw.trim();
+    if (!label || energies.includes(label)) return;
+    const next = [...energies, label];
+    persistEnergies(next);
+    void upsertMeterTypeDef({ name: label, description: "" }).catch(() => undefined);
+    setEnergyFilter(label);
+    setPage(1);
+    setNewType("");
+    setAddingType(false);
+  }
 
   useEffect(() => {
     let active = true;
@@ -150,19 +173,6 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
     };
   }, [project.id]);
 
-  function persistEnergies(next: MeterType[]) {
-    setEnergies(next);
-    void upsertProject({ ...project, meterTypes: next }).catch(() => undefined);
-  }
-
-  const suggestions = useMemo(
-    () =>
-      [...METER_TYPES, ...EXTRA_METER_TYPE_SUGGESTIONS].filter(
-        (item) => !energies.includes(item),
-      ),
-    [energies],
-  );
-
   const flatPoints = useMemo(
     () => (meterDataReady ? flatten(allPoints) : []),
     [allPoints, meterDataReady],
@@ -176,27 +186,27 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
     [flatPoints],
   );
 
-  const deviceTypes = useMemo(
-    () => Array.from(new Set(flatPoints.map((p) => p.type))).sort(),
-    [flatPoints],
-  );
+  const filterOptions = useMemo(() => {
+    const fromPoints = flatPoints.map((point) => point.energy).filter(Boolean);
+    return Array.from(new Set([...energies, ...fromPoints]));
+  }, [energies, flatPoints]);
 
   const filteredRoots = useMemo(() => {
     const q = query.trim().toLowerCase();
 
     function match(point: MeterPoint): boolean {
-      const energyOk = energies.includes(point.energy);
-      const typeOk = deviceType === "all" || point.type === deviceType;
+      const energyOk = energyFilter === "all" || point.energy === energyFilter;
       const textOk =
         !q ||
         point.name.toLowerCase().includes(q) ||
         point.id.toLowerCase().includes(q) ||
-        point.sn.toLowerCase().includes(q);
-      return energyOk && typeOk && textOk;
+        point.sn.toLowerCase().includes(q) ||
+        point.type.toLowerCase().includes(q);
+      return energyOk && textOk;
     }
 
     const next: MeterPoint[] = [];
-    for (const root of (meterDataReady ? allPoints : [])) {
+    for (const root of meterDataReady ? allPoints : []) {
       const children = (root.children ?? []).filter(match);
       if (match(root)) {
         next.push(root.children ? { ...root, children } : root);
@@ -205,24 +215,12 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
       }
     }
     return next;
-  }, [allPoints, deviceType, energies, meterDataReady, query]);
+  }, [allPoints, energyFilter, meterDataReady, query]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRoots.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const start = (currentPage - 1) * PAGE_SIZE;
   const pageRows = filteredRoots.slice(start, start + PAGE_SIZE);
-
-  function addEnergyType(raw: string) {
-    const label = raw.trim();
-    if (!label || energies.includes(label)) return;
-    setPage(1);
-    persistEnergies([...energies, label]);
-    void upsertMeterTypeDef({ name: label, description: "" }).catch(() => {
-      // Loại đã có trong catalog thì chỉ cần gán vào dự án.
-    });
-    setNewType("");
-    setAddingType(false);
-  }
 
   function toggleExpand(id: string) {
     setExpanded((current) => {
@@ -247,61 +245,58 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
           </Link>
         }
       />
-          <div className="mb-5 grid gap-3.5 sm:gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mb-5 grid gap-3.5 sm:gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
             <StatCard
               label="TỔNG ĐIỂM ĐO"
               value={String(flatPoints.length)}
-              hint={<span className="text-emerald-600">đồng bộ từ database</span>}
             />
             <StatCard
               label="ĐANG KẾT NỐI"
               value={String(connectedPoints)}
               valueClass="text-emerald-600"
-              hint={<span className="text-slate-500">có bản tin Gateway gần đây</span>}
             />
             <StatCard
               label="KHÔNG KẾT NỐI"
               value={String(disconnectedPoints)}
               valueClass={disconnectedPoints > 0 ? "text-amber-500" : "text-slate-900"}
-              hint={
-                disconnectedPoints > 0 ? (
-                  <span className="text-amber-600">chưa gắn / mất kết nối Gateway</span>
-                ) : (
-                  <span className="text-emerald-600">tất cả trực tuyến</span>
-                )
-              }
             />
-            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-              <p className="text-[11px] font-semibold tracking-wide text-slate-400">
-                BÁO CÁO MỚI NHẤT
-              </p>
-              <button
-                type="button"
-                className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
-              >
-                <DownloadIcon className="h-4 w-4" />
-                Tải về báo cáo tháng 10
-              </button>
-            </article>
           </div>
 
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            {energies.map((energy) => (
-              <div
-                key={energy}
-                className="inline-flex h-8 items-center rounded-full bg-emerald-600 pl-3 text-sm font-semibold text-white shadow-xs"
-              >
-                <span className="pr-1">{energy}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setEnergyFilter("all");
+                setPage(1);
+              }}
+              className={`inline-flex h-8 items-center rounded-full px-3 text-sm font-semibold transition-colors ${
+                energyFilter === "all"
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              Tất cả
+            </button>
+            {filterOptions.map((energy) => {
+              const active = energyFilter === energy;
+              return (
                 <button
+                  key={energy}
                   type="button"
-                  aria-label={`Bỏ loại ${energy}`}
-                  className="px-2 text-base leading-none text-white/80 hover:text-white"
-                  onClick={() => setEnergyToDelete(energy)}
+                  onClick={() => {
+                    setEnergyFilter(energy);
+                    setPage(1);
+                  }}
+                  className={`inline-flex h-8 items-center rounded-full px-3 text-sm font-semibold transition-colors ${
+                    active
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                  }`}
                 >
-                  ×
+                  {energy}
                 </button>
-              </div>
-            ))}
+              );
+            })}
             {addingType ? (
               <div className="flex items-center gap-2">
                 <input
@@ -318,9 +313,9 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                       setNewType("");
                     }
                   }}
-                  placeholder="VD: Khí nén"
+                  placeholder="VD: Nước, Khí nén"
                   list="meter-type-suggestions"
-                  className="h-8 w-36 rounded-full border border-emerald-500 bg-white px-3 text-sm outline-none"
+                  className="h-8 w-40 rounded-full border border-emerald-500 bg-white px-3 text-sm outline-none"
                 />
                 <datalist id="meter-type-suggestions">
                   {suggestions.map((item) => (
@@ -350,16 +345,13 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                 type="button"
                 onClick={() => setAddingType(true)}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-emerald-600 ring-1 ring-slate-200 hover:bg-emerald-50 transition-colors"
-                aria-label="Thêm loại năng lượng"
-                title="Thêm loại điểm đo (hiển thị trên thanh công cụ Sơ đồ)"
+                aria-label="Thêm loại điểm đo"
+                title="Thêm loại điểm đo vào dự án"
               >
                 +
               </button>
             )}
           </div>
-          <p className="mb-3 text-xs text-slate-400">
-            Các loại điểm đo này sẽ hiển thị trên thanh công cụ trang Sơ đồ của khách.
-          </p>
 
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <label className="relative min-w-[240px] flex-1">
@@ -376,21 +368,6 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white pr-3 pl-9 text-sm outline-none placeholder:text-slate-400 focus:border-emerald-500 transition-colors"
               />
             </label>
-            <select
-              value={deviceType}
-              onChange={(e) => {
-                setDeviceType(e.target.value);
-                setPage(1);
-              }}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 outline-none focus:border-emerald-500 transition-colors"
-            >
-              <option value="all">Tất cả loại thiết bị</option>
-              {deviceTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
           </div>
 
           <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
@@ -473,20 +450,6 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
             </div>
           </section>
 
-      <ConfirmDialog
-        open={Boolean(energyToDelete)}
-        title="Xác nhận bỏ loại năng lượng"
-        description={`Bạn có chắc chắn muốn bỏ loại "${energyToDelete}" khỏi dự án này không?`}
-        confirmText="Xác nhận bỏ"
-        onConfirm={() => {
-          if (energyToDelete) {
-            persistEnergies(energies.filter((item) => item !== energyToDelete));
-            setPage(1);
-            setEnergyToDelete(null);
-          }
-        }}
-        onCancel={() => setEnergyToDelete(null)}
-      />
     </div>
   );
 }
@@ -609,14 +572,14 @@ function StatCard({
 }: {
   label: string;
   value: string;
-  hint: ReactNode;
+  hint?: ReactNode;
   valueClass?: string;
 }) {
   return (
     <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <p className="text-[11px] font-semibold tracking-wide text-slate-400">{label}</p>
       <p className={`mt-2 text-3xl font-bold tracking-tight ${valueClass}`}>{value}</p>
-      <p className="mt-1.5 text-xs font-medium">{hint}</p>
+      {hint ? <p className="mt-1.5 text-xs font-medium">{hint}</p> : null}
     </article>
   );
 }

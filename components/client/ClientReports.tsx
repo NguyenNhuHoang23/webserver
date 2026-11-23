@@ -10,11 +10,18 @@ import { hydrateProjectSettings } from "@/lib/project-settings";
 import { hydrateProjects } from "@/lib/projects";
 import {
   REPORT_TEMPLATE_NOTE,
-  REPORTS,
   reportById,
   type ReportFormat,
   type ReportId,
 } from "@/lib/report-defs";
+import {
+  defaultFieldsForReport,
+  defaultReportConfig,
+  fieldsForReport,
+  normalizeReportConfig,
+  visibleReports,
+  type ReportConfig,
+} from "@/lib/report-config";
 import {
   aggregatePeriodMetrics,
   bandLabel,
@@ -73,10 +80,14 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
   const params = useParams<{ id: string }>();
   const projectId = params?.id ?? "default";
   const [projectName, setProjectName] = useState(projectId);
-  const [reportId, setReportId] = useState<ReportId>(
-    REPORTS.some((item) => item.id === initialId) ? initialId : "consumption",
-  );
+  const [reportConfig, setReportConfig] = useState<ReportConfig>(() => defaultReportConfig());
+  const availableReports = useMemo(() => visibleReports(reportConfig), [reportConfig]);
+  const [reportId, setReportId] = useState<ReportId>(initialId);
   const report = reportById(reportId);
+  const reportFields = useMemo(
+    () => fieldsForReport(reportConfig, report.id),
+    [reportConfig, report.id],
+  );
 
   const [title, setTitle] = useState(report.title);
   const [format, setFormat] = useState<ReportFormat>("pdf");
@@ -89,7 +100,9 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     const prevYear = m === 1 ? y - 1 : y;
     return `${prevYear}-${String(prevMonth).padStart(2, "0")}-01`;
   });
-  const [selectedFields, setSelectedFields] = useState<string[]>(report.defaultFields);
+  const [selectedFields, setSelectedFields] = useState<string[]>(() =>
+    defaultFieldsForReport(defaultReportConfig(), initialId),
+  );
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [points, setPoints] = useState<{ id: string; name: string; code: string; utility: string }[]>([]);
@@ -116,6 +129,18 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
         const project = projects.find((item) => item.id === projectId);
         setProjectName(project?.name ?? project?.customer ?? projectId);
         setRates(ratesFromCostConfig(settings.costConfig));
+        const nextReportConfig = normalizeReportConfig(settings.reportConfig);
+        setReportConfig(nextReportConfig);
+        const nextReports = visibleReports(nextReportConfig);
+        const preferred =
+          nextReports.find((item) => item.id === initialId) ??
+          nextReports.find((item) => item.id === reportId) ??
+          nextReports[0];
+        if (preferred) {
+          setReportId(preferred.id);
+          setTitle(preferred.title);
+          setSelectedFields(defaultFieldsForReport(nextReportConfig, preferred.id));
+        }
         const nextPoints = meters.map((meter) => ({
           id: meter.id,
           code: meter.code,
@@ -190,16 +215,19 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     const next = reportById(id);
     setReportId(next.id);
     setTitle(next.title);
-    setSelectedFields(next.defaultFields);
+    setSelectedFields(defaultFieldsForReport(reportConfig, next.id));
     setPreviewOpen(false);
   };
 
   const toggleField = (id: string) => {
+    const allowed = new Set(reportFields.map((field) => field.id));
+    if (!allowed.has(id)) return;
     setSelectedFields((list) => {
-      if (list.includes(id)) {
-        return list.length === 1 ? list : list.filter((item) => item !== id);
+      const current = list.filter((item) => allowed.has(item));
+      if (current.includes(id)) {
+        return current.length === 1 ? current : current.filter((item) => item !== id);
       }
-      return [...list, id];
+      return [...current, id];
     });
   };
 
@@ -241,7 +269,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
   );
 
   const preview = useMemo((): PreviewModel => {
-    const fieldDefs = report.fields.filter((field) => selectedFields.includes(field.id));
+    const fieldDefs = reportFields.filter((field) => selectedFields.includes(field.id));
     const rows: { label: string; value: string }[] = [];
     const tableHeaders: string[] = [];
     const tableRows: string[][] = [];
@@ -452,6 +480,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
     };
   }, [
     report,
+    reportFields,
     selectedFields,
     selectedPointNames,
     selectedPoints,
@@ -580,7 +609,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
           Loại báo cáo
         </p>
         <div className="flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {REPORTS.map((item) => {
+          {availableReports.map((item) => {
             const active = item.id === reportId;
             return (
               <button
@@ -608,7 +637,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
           </p>
         </div>
         <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          {REPORTS.map((item, index) => {
+          {availableReports.map((item, index) => {
             const active = item.id === reportId;
             return (
               <button
@@ -690,7 +719,7 @@ export function ClientReports({ initialId = "consumption" }: { initialId?: Repor
             <SettingRow index={2} label="Trường dữ liệu xuất:">
               <div className="w-full max-w-[520px] rounded-xl border border-slate-200 bg-slate-50/70 p-2">
                 <div className="flex flex-wrap gap-1.5">
-                  {report.fields.map((field) => {
+                  {reportFields.map((field) => {
                     const active = selectedFields.includes(field.id);
                     return (
                       <button
