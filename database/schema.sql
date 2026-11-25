@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS account_projects (
 CREATE TABLE IF NOT EXISTS meter_types (
   name VARCHAR(100) NOT NULL,
   description VARCHAR(255) NOT NULL,
+  code VARCHAR(10) NULL,
   icon VARCHAR(30) NOT NULL,
   builtin TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (name)

@@ -66,14 +66,20 @@ export function hydrateFactorGroups() {
   return factorsHydration;
 }
 
-export function upsertFactorGroup(group: FactorGroup) {
-  const groups = loadFactorGroups();
-  const exists = groups.some((item) => item.id === group.id);
-  const next = exists
-    ? groups.map((item) => (item.id === group.id ? group : item))
-    : [group, ...groups];
-  saveFactorGroups(next);
-  return next;
+/**
+ * Lưu một nhóm hệ số lên database và CHỜ server xác nhận.
+ * Chỉ gửi đúng nhóm này (không gửi lại cả thư viện) và lấy danh sách trả về từ server làm
+ * nguồn sự thật, để trang danh sách không bị ghi đè bằng dữ liệu cũ khi mạng chậm.
+ * Ném lỗi nếu server từ chối, để giao diện báo cho người dùng.
+ */
+export async function upsertFactorGroup(group: FactorGroup): Promise<FactorGroup[]> {
+  const saved = await dbFetch<FactorGroup[]>("emission-factors", {
+    method: "POST",
+    body: JSON.stringify(group),
+  });
+  factorGroupsCache = saved;
+  emitDbChange("emission-factors");
+  return saved;
 }
 
 export function removeFactorGroup(id: string) {

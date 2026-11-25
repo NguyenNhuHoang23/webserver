@@ -103,7 +103,17 @@ function matchCurrentManager(project: Project, accounts: Account[]) {
   );
 }
 
-export function AddProjectForm({ initialProject }: { initialProject?: Project }) {
+export function AddProjectForm({
+  initialProject,
+  cancelHref = "/",
+  successHref = "/",
+}: {
+  initialProject?: Project;
+  /** Hủy: quay về trang đích (mặc định danh sách dự án). */
+  cancelHref?: string;
+  /** Lưu xong: chuyển tới trang đích (mặc định danh sách dự án). */
+  successHref?: string;
+}) {
   const router = useRouter();
 
   const [code, setCode] = useState(() => initialProject?.id ?? nextProjectId());
@@ -367,7 +377,8 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
       } else {
         notifyProjectUpdated({ id: projectCode, name: projectName });
       }
-      router.push("/");
+      router.push(successHref);
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể lưu dự án vào database.");
     }
@@ -618,13 +629,6 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
           <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-[15px] font-semibold text-slate-800">Loại điểm đo</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Chọn các loại năng lượng giám sát cho dự án. Thêm / sửa / xóa thư viện tại{" "}
-                <Link href="/loai-diem-do" className="font-semibold text-emerald-700 hover:underline">
-                  Cấu hình → Loại điểm đo
-                </Link>
-                .
-              </p>
             </div>
           </div>
 
@@ -672,9 +676,6 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
           <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-[15px] font-semibold text-slate-800">Người nhận thông báo cảnh báo</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Chọn người nhận và các kênh gửi (Email, Zalo, Telegram, SMS) — có thể chọn nhiều kênh.
-              </p>
             </div>
             <button
               type="button"
@@ -760,7 +761,7 @@ export function AddProjectForm({ initialProject }: { initialProject?: Project })
 
         <div className="flex flex-wrap justify-end gap-3">
           <Link
-            href="/"
+            href={cancelHref}
             className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"
           >
             Hủy

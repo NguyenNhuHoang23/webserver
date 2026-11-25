@@ -73,8 +73,14 @@ const navGroups: {
   },
 ];
 
-const configItems: { module: ProjectConfigModule; label: string; icon: typeof ChartIcon }[] = [
-  { module: "project-info", label: "Sửa thông tin dự án", icon: EditProjectIcon },
+const configItems: {
+  module: ProjectConfigModule;
+  label: string;
+  icon: typeof ChartIcon;
+  permission?: Permission;
+}[] = [
+  { module: "project-info", label: "Thông tin dự án", icon: ProjectInfoIcon },
+  { module: "project-edit", label: "Sửa thông tin dự án", icon: EditProjectIcon, permission: "manageProjects" },
   { module: "points", label: "Cấu hình điểm đo", icon: MeterConfigIcon },
   { module: "ghg", label: "Cấu hình khí nhà kính", icon: EmissionIcon },
   { module: "alerts", label: "Cấu hình cảnh báo", icon: AlertConfigIcon },
@@ -213,7 +219,7 @@ function SidebarBody({
                 EMS Console
               </span>
               <p className="mt-1 text-[11px] font-medium tracking-wide text-slate-400 truncate">
-                {config?.module === "project-info"
+                {config?.module === "project-info" || config?.module === "project-edit"
                   ? "QUẢN LÝ DỰ ÁN"
                   : config
                     ? "CẤU HÌNH DỰ ÁN"
@@ -252,11 +258,13 @@ function SidebarBody({
 
             {!collapsed && (
               <p className="px-2.5 mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              {config.module === "project-info" ? "Quản lý dự án" : "Module cấu hình"}
+              {config.module === "project-info" || config.module === "project-edit" ? "Quản lý dự án" : "Module cấu hình"}
               </p>
             )}
             <nav className="flex flex-col gap-1">
-              {configItems.map((item) => {
+              {configItems
+                .filter((item) => !item.permission || hasPermission(session, item.permission))
+                .map((item) => {
                 const href = projectConfigPath(config.projectId, item.module);
                 const active = config.module === item.module;
                 const Icon = item.icon;
@@ -421,6 +429,16 @@ function ChartIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 3v18h18" />
       <path d="m19 9-5 5-4-4-3 3" />
+    </svg>
+  );
+}
+
+function ProjectInfoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 8h.01" />
     </svg>
   );
 }

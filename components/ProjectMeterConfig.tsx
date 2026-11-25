@@ -4,14 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProjectConfigHeader } from "@/components/ProjectConfigHeader";
 import {
-  EXTRA_METER_TYPE_SUGGESTIONS,
-  METER_TYPES,
   resolveMeterTypes,
-  upsertProject,
   type MeterType,
   type Project,
 } from "@/lib/projects";
-import { upsertMeterTypeDef } from "@/lib/meter-types";
 import { projectConfigPath } from "@/lib/project-config";
 import { hydrateClientMeters, orderMetersByTree, type ClientMeter } from "@/lib/client-meters";
 import { hydrateDevices, type CatalogDevice } from "@/lib/devices";
@@ -111,45 +107,14 @@ function fromDbMeters(
 }
 
 export function ProjectMeterConfig({ project }: { project: Project }) {
-  const [energies, setEnergies] = useState<MeterType[]>(() => resolveMeterTypes(project));
+  const energies = useMemo(() => resolveMeterTypes(project), [project]);
   const [energyFilter, setEnergyFilter] = useState<"all" | MeterType>("all");
-  const [addingType, setAddingType] = useState(false);
-  const [newType, setNewType] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [allPoints, setAllPoints] = useState<MeterPoint[]>([]);
   const [meterDataReady, setMeterDataReady] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
-
-  useEffect(() => {
-    setEnergies(resolveMeterTypes(project));
-  }, [project]);
-
-  function persistEnergies(next: MeterType[]) {
-    setEnergies(next);
-    void upsertProject({ ...project, meterTypes: next }).catch(() => undefined);
-  }
-
-  const suggestions = useMemo(
-    () =>
-      [...METER_TYPES, ...EXTRA_METER_TYPE_SUGGESTIONS].filter(
-        (item) => !energies.includes(item),
-      ),
-    [energies],
-  );
-
-  function addEnergyType(raw: string) {
-    const label = raw.trim();
-    if (!label || energies.includes(label)) return;
-    const next = [...energies, label];
-    persistEnergies(next);
-    void upsertMeterTypeDef({ name: label, description: "" }).catch(() => undefined);
-    setEnergyFilter(label);
-    setPage(1);
-    setNewType("");
-    setAddingType(false);
-  }
 
   useEffect(() => {
     let active = true;
@@ -297,60 +262,6 @@ export function ProjectMeterConfig({ project }: { project: Project }) {
                 </button>
               );
             })}
-            {addingType ? (
-              <div className="flex items-center gap-2">
-                <input
-                  autoFocus
-                  value={newType}
-                  onChange={(e) => setNewType(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addEnergyType(newType);
-                    }
-                    if (e.key === "Escape") {
-                      setAddingType(false);
-                      setNewType("");
-                    }
-                  }}
-                  placeholder="VD: Nước, Khí nén"
-                  list="meter-type-suggestions"
-                  className="h-8 w-40 rounded-full border border-emerald-500 bg-white px-3 text-sm outline-none"
-                />
-                <datalist id="meter-type-suggestions">
-                  {suggestions.map((item) => (
-                    <option key={item} value={item} />
-                  ))}
-                </datalist>
-                <button
-                  type="button"
-                  onClick={() => addEnergyType(newType)}
-                  className="h-8 rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs"
-                >
-                  Thêm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAddingType(false);
-                    setNewType("");
-                  }}
-                  className="h-8 rounded-full px-2 text-xs text-slate-500 hover:bg-slate-100"
-                >
-                  Hủy
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAddingType(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg text-emerald-600 ring-1 ring-slate-200 hover:bg-emerald-50 transition-colors"
-                aria-label="Thêm loại điểm đo"
-                title="Thêm loại điểm đo vào dự án"
-              >
-                +
-              </button>
-            )}
           </div>
 
           <div className="mb-4 flex flex-wrap items-center gap-3">

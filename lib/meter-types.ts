@@ -5,9 +5,18 @@ export type MeterTypeIconId = "bolt" | "drop" | "thermo" | "steam" | "air" | "ge
 export type MeterTypeDef = {
   name: string;
   description: string;
+  /** Mã điểm đo (ký hiệu ngắn, vd. E, W). Rỗng nếu chưa đặt. */
+  code: string;
   icon: MeterTypeIconId;
   builtin: boolean;
 };
+
+/** Mã điểm đo: chữ/số không dấu, `_` hoặc `-`, tối đa 10 ký tự. */
+export const METER_TYPE_CODE_PATTERN = /^[A-Z0-9_-]{0,10}$/;
+
+export function normalizeMeterTypeCode(value: unknown) {
+  return String(value ?? "").trim().toUpperCase();
+}
 
 let meterTypeCache: MeterTypeDef[] = [];
 let meterTypesHydration: Promise<MeterTypeDef[]> | null = null;
@@ -16,24 +25,28 @@ export const DEFAULT_METER_TYPE_DEFS: MeterTypeDef[] = [
   {
     name: "Điện",
     description: "Điện năng, công suất, chất lượng điện",
+    code: "",
     icon: "bolt",
     builtin: true,
   },
   {
     name: "Nước",
     description: "Lưu lượng và sản lượng nước",
+    code: "",
     icon: "drop",
     builtin: true,
   },
   {
     name: "Nhiệt",
     description: "Nhiệt độ và năng lượng nhiệt",
+    code: "",
     icon: "thermo",
     builtin: true,
   },
   {
     name: "Hơi",
     description: "Áp suất và lưu lượng hơi",
+    code: "",
     icon: "steam",
     builtin: true,
   },
@@ -52,6 +65,7 @@ export function inferMeterTypeIcon(name: string): MeterTypeIconId {
 function normalizeDefs(defs: MeterTypeDef[]) {
   return defs.map((item) => ({
     ...item,
+    code: normalizeMeterTypeCode(item.code),
     builtin: Boolean(item.builtin),
   }));
 }
@@ -76,12 +90,16 @@ export function hydrateMeterTypeDefs() {
 }
 
 export async function upsertMeterTypeDef(
-  input: { name: string; description: string },
+  input: { name: string; description: string; code?: string },
   previousName?: string,
 ) {
   const name = input.name.trim();
   const description = input.description.trim();
+  const code = normalizeMeterTypeCode(input.code);
   if (!name) throw new Error("Vui lòng nhập tên loại điểm đo.");
+  if (!METER_TYPE_CODE_PATTERN.test(code)) {
+    throw new Error("Mã điểm đo chỉ gồm chữ không dấu, số, _ hoặc -, tối đa 10 ký tự.");
+  }
   const defs = loadMeterTypeDefs();
   const previous = previousName?.trim();
   const duplicate = defs.find(
@@ -99,6 +117,7 @@ export async function upsertMeterTypeDef(
     payload = {
       name: current.builtin ? current.name : name,
       description: description || current.description,
+      code,
       icon: current.builtin ? current.icon : inferMeterTypeIcon(name),
       builtin: current.builtin,
       previousName: previous !== name ? previous : undefined,
@@ -107,6 +126,7 @@ export async function upsertMeterTypeDef(
     payload = {
       name,
       description: description || "Loại điểm đo tùy chỉnh",
+      code,
       icon: inferMeterTypeIcon(name),
       builtin: false,
     };

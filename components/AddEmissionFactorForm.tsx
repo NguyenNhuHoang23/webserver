@@ -55,6 +55,8 @@ export function AddEmissionFactorForm() {
   const [rows, setRows] = useState<GasRow[]>(() => [emptyRow()]);
   const [isEdit, setIsEdit] = useState(false);
   const [rowToDelete, setRowToDelete] = useState<GasRow | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (!editingId) {
@@ -93,7 +95,8 @@ export function AddEmissionFactorForm() {
     setRows((current) => current.filter((row) => row.id !== id));
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (saving) return;
     const trimmed = name.trim();
     if (!trimmed) return;
 
@@ -104,24 +107,35 @@ export function AddEmissionFactorForm() {
     }
 
     const usedKeys = new Set<string>();
-    upsertFactorGroup({
-      id: editingId && isEdit ? editingId : `ef-${Date.now()}`,
-      name: trimmed,
-      source: source.trim(),
-      gases: validRows.map((row, idx) => {
-        const cleanLabel = row.label.trim();
-        let cleanKey = keyFromLabel(cleanLabel, `gas_${idx + 1}`);
-        if (usedKeys.has(cleanKey)) cleanKey = `${cleanKey}_${idx + 1}`;
-        usedKeys.add(cleanKey);
-        return {
-          key: cleanKey,
-          label: cleanLabel,
-          value: parseFactorNumber(row.value),
-          unit: row.unit.trim() || "kg/TJ",
-        };
-      }),
-    });
-    router.push("/he-so-phat-thai");
+    setSaving(true);
+    setSaveError("");
+    try {
+      await upsertFactorGroup({
+        id: editingId && isEdit ? editingId : `ef-${Date.now()}`,
+        name: trimmed,
+        source: source.trim(),
+        gases: validRows.map((row, idx) => {
+          const cleanLabel = row.label.trim();
+          let cleanKey = keyFromLabel(cleanLabel, `gas_${idx + 1}`);
+          if (usedKeys.has(cleanKey)) cleanKey = `${cleanKey}_${idx + 1}`;
+          usedKeys.add(cleanKey);
+          return {
+            key: cleanKey,
+            label: cleanLabel,
+            value: parseFactorNumber(row.value),
+            unit: row.unit.trim() || "kg/TJ",
+          };
+        }),
+      });
+      router.push("/he-so-phat-thai");
+    } catch (error) {
+      setSaveError(
+        error instanceof Error && error.message
+          ? `Không thể lưu hệ số phát thải vào database: ${error.message}`
+          : "Không thể lưu hệ số phát thải vào database.",
+      );
+      setSaving(false);
+    }
   }
 
   return (
@@ -137,7 +151,7 @@ export function AddEmissionFactorForm() {
         className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-8"
         onSubmit={(e) => {
           e.preventDefault();
-          handleSubmit();
+          void handleSubmit();
         }}
       >
         <div className="mb-6">
@@ -263,6 +277,10 @@ export function AddEmissionFactorForm() {
 
         </div>
 
+        {saveError ? (
+          <p className="mt-6 text-sm font-medium text-red-500">{saveError}</p>
+        ) : null}
+
         <div className="mt-8 flex flex-wrap justify-end gap-3">
           <Link
             href="/he-so-phat-thai"
@@ -272,9 +290,10 @@ export function AddEmissionFactorForm() {
           </Link>
           <button
             type="submit"
-            className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors"
+            disabled={saving}
+            className="h-10 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors disabled:cursor-not-allowed disabled:bg-emerald-400"
           >
-            {isEdit ? "Cập nhật hệ số" : "Lưu hệ số"}
+            {saving ? "Đang lưu..." : isEdit ? "Cập nhật hệ số" : "Lưu hệ số"}
           </button>
         </div>
       </form>

@@ -1,8 +1,8 @@
-import { AddProjectForm } from "@/components/AddProjectForm";
+import { ProjectInfoView } from "@/components/ProjectInfoView";
 import { getProjectFromDb } from "@/lib/server-projects";
 import { notFound } from "next/navigation";
 
-export default async function EditProjectDetailsPage({
+export default async function ProjectInfoPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -11,5 +11,5 @@ export default async function EditProjectDetailsPage({
   const project = await getProjectFromDb(id);
   if (!project) notFound();
 
-  return <AddProjectForm initialProject={project} />;
+  return <ProjectInfoView project={project} />;
 }

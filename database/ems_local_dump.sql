@@ -246,8 +246,8 @@ DROP TABLE IF EXISTS `emission_factor_gases`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `emission_factor_gases` (
   `group_id` varchar(100) NOT NULL,
-  `gas_key` varchar(10) NOT NULL,
-  `gas_label` varchar(20) NOT NULL,
+  `gas_key` varchar(40) NOT NULL,
+  `gas_label` varchar(80) NOT NULL,
   `factor_value` decimal(18,6) NOT NULL,
   `unit` varchar(80) NOT NULL,
   PRIMARY KEY (`group_id`,`gas_key`),

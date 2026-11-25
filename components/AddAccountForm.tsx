@@ -15,6 +15,7 @@ import {
   type Account,
   type AccountRole,
 } from "@/lib/accounts";
+import { CANNOT_MANAGE_PEER_MESSAGE, canManageInternalAccount } from "@/lib/account-hierarchy";
 import { hasPermission } from "@/lib/permissions";
 import { hydrateProjects, type Project } from "@/lib/projects";
 
@@ -46,6 +47,10 @@ export function AddAccountForm() {
   const isAdminResettingOther = canManage && isEdit && !isSelf;
   const isSelfPasswordChange = isEdit && isSelf;
   const canAccessForm = canManage || (isEdit && isSelf) || (!editingId && canManage);
+  /** Tài khoản cùng hoặc cao hơn cấp của người đang đăng nhập: chỉ xem, không sửa/hạ cấp/xóa. */
+  const isPeerLocked = Boolean(
+    isEdit && existing && !isSelf && !canManageInternalAccount(session, existing),
+  );
 
   useEffect(() => {
     let active = true;
@@ -97,7 +102,7 @@ export function AddAccountForm() {
   }
 
   function handleSubmit() {
-    if (saving) return;
+    if (saving || isPeerLocked) return;
     if (!canManage && !isSelf) return;
     if (!canManage && !isEdit) return;
 
@@ -207,6 +212,12 @@ export function AddAccountForm() {
         </h1>
       </div>
 
+      {isPeerLocked ? (
+        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+          {CANNOT_MANAGE_PEER_MESSAGE} Bạn chỉ xem được thông tin tài khoản này.
+        </p>
+      ) : null}
+
       <form
         className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:p-8"
         onSubmit={(e) => {
@@ -214,6 +225,8 @@ export function AddAccountForm() {
           handleSubmit();
         }}
       >
+        {/* Khóa toàn bộ ô nhập và nút Lưu khi là tài khoản cùng/cao hơn cấp */}
+        <fieldset disabled={isPeerLocked} className="contents">
         <div className="mb-6">
           <h2 className="text-[15px] font-semibold text-slate-800">Thông tin đăng nhập</h2>
         </div>
@@ -409,6 +422,7 @@ export function AddAccountForm() {
             {saving ? "Đang lưu..." : isEdit ? "Cập nhật tài khoản" : "Lưu tài khoản"}
           </button>
         </div>
+        </fieldset>
       </form>
     </div>
   );

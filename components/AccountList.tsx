@@ -12,6 +12,7 @@ import {
   type Account,
   type AccountRole,
 } from "@/lib/accounts";
+import { CANNOT_MANAGE_PEER_MESSAGE, canManageInternalAccount } from "@/lib/account-hierarchy";
 import { hasPermission } from "@/lib/permissions";
 import { hydrateProjects, loadProjects, type Project } from "@/lib/projects";
 
@@ -153,33 +154,41 @@ export function AccountList() {
                   </td>
                   <td className="px-5 py-3.5 text-slate-500">{account.createdAt}</td>
                   <td className="px-5 py-3.5 text-right">
-                    {canManage || session?.userId === account.id ? (
-                      <div className="flex justify-end gap-1">
-                        <Link
-                          href={`/tai-khoan/them-moi?id=${account.id}`}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
-                          title={
-                            session?.userId === account.id
-                              ? "Cập nhật tài khoản của tôi"
-                              : `Sửa ${account.username}`
-                          }
-                        >
-                          <EditIcon className="h-3.5 w-3.5" />
-                        </Link>
-                        {canManage && session?.userId !== account.id ? (
-                          <button
-                            type="button"
-                            onClick={() => setAccountToDelete(account)}
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                            title={`Xóa ${account.username}`}
+                    {(() => {
+                      const isSelf = session?.userId === account.id;
+                      const canManageThis = canManageInternalAccount(session, account);
+                      if (!canManageThis && !isSelf) {
+                        return (
+                          <span
+                            className="text-[11px] text-slate-400"
+                            title={CANNOT_MANAGE_PEER_MESSAGE}
                           >
-                            <TrashIcon className="h-3.5 w-3.5" />
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-slate-400">Chỉ xem</span>
-                    )}
+                            Cùng/cao hơn cấp
+                          </span>
+                        );
+                      }
+                      return (
+                        <div className="flex justify-end gap-1">
+                          <Link
+                            href={`/tai-khoan/them-moi?id=${account.id}`}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
+                            title={isSelf ? "Cập nhật tài khoản của tôi" : `Sửa ${account.username}`}
+                          >
+                            <EditIcon className="h-3.5 w-3.5" />
+                          </Link>
+                          {canManageThis ? (
+                            <button
+                              type="button"
+                              onClick={() => setAccountToDelete(account)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                              title={`Xóa ${account.username}`}
+                            >
+                              <TrashIcon className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

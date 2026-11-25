@@ -1,6 +1,11 @@
 import type { PoolConnection } from "mysql2/promise";
 import { NextRequest } from "next/server";
 import { normalizeAccountRole } from "@/lib/accounts";
+import {
+  CANNOT_MANAGE_PEER_MESSAGE,
+  canAssignInternalRole,
+  canManageInternalAccount,
+} from "@/lib/account-hierarchy";
 import { getProjectsListTelemetry } from "@/lib/gateway-store";
 import { hasPermission } from "@/lib/permissions";
 import { getServerSession, requirePermission } from "@/lib/server-auth";
@@ -129,6 +134,25 @@ function ensureMeterModelsTables() {
   return meterModelsReady;
 }
 
+let meterTypeCodeReady: Promise<void> | null = null;
+
+function ensureMeterTypeCodeColumn() {
+  if (!meterTypeCodeReady) {
+    meterTypeCodeReady = emsDb
+      .query(
+        `ALTER TABLE meter_types
+           ADD COLUMN IF NOT EXISTS code VARCHAR(10) NULL AFTER description`,
+      )
+      .then(() => undefined)
+      .catch((error) => {
+        meterTypeCodeReady = null;
+        console.error("meter_types.code migrate failed", error);
+        throw error;
+      });
+  }
+  return meterTypeCodeReady;
+}
+
 function ensureAccountPhoneColumn() {
   if (!accountPhoneReady) {
     accountPhoneReady = emsDb
@@ -255,12 +279,14 @@ async function applyDueManagerTransfers() {
 function ensureEmissionFactorGasColumns() {
   if (!emissionFactorGasColumnsReady) {
     emissionFactorGasColumnsReady = (async () => {
+      // Dump cũ tạo cột quá ngắn (gas_key VARCHAR(10), gas_label VARCHAR(20)) nên phải nới rộng.
+      // Nếu tài khoản DB không có quyền ALTER thì ghi log để còn biết, thay vì im lặng.
       await emsDb
         .query("ALTER TABLE emission_factor_gases MODIFY COLUMN gas_key VARCHAR(40) NOT NULL")
-        .catch(() => undefined);
+        .catch((error) => console.error("Không thể nới cột emission_factor_gases.gas_key", error));
       await emsDb
         .query("ALTER TABLE emission_factor_gases MODIFY COLUMN gas_label VARCHAR(80) NOT NULL")
-        .catch(() => undefined);
+        .catch((error) => console.error("Không thể nới cột emission_factor_gases.gas_label", error));
     })().catch((error) => {
       emissionFactorGasColumnsReady = null;
       console.error("emission factor gas columns migrate failed", error);
@@ -742,7 +768,10 @@ async function getResource(resource: string, request: NextRequest) {
     }));
   }
   if (resource === "meter-types") {
-    return queryRows<Row>("SELECT name, description, icon, builtin FROM meter_types ORDER BY builtin DESC, name");
+    await ensureMeterTypeCodeColumn();
+    return queryRows<Row>(
+      "SELECT name, description, COALESCE(code, '') AS code, icon, builtin FROM meter_types ORDER BY builtin DESC, name",
+    );
   }
   if (resource === "meter-models") {
     await ensureMeterModelsTables();
@@ -1001,9 +1030,16 @@ async function saveResource(resource: string, body: Row) {
       if (isCreate && !isAdminActor) {
         throw new Error("Chỉ Admin được tạo tài khoản nội bộ.");
       }
+      // Chỉ sửa được tài khoản cấp thấp hơn mình (tự đổi mật khẩu của mình thì không qua bước này).
+      if (existing && !isSelf && !canManageInternalAccount(session, { id: accountId, role: existing.role })) {
+        throw new Error(CANNOT_MANAGE_PEER_MESSAGE);
+      }
 
       // Không tự phân quyền cho mình; chỉ cấp trên (Admin) gán quyền cấp dưới.
       let role = normalizeStaffAccountRole(item.role);
+      if (!isSelf && !canAssignInternalRole(session, role)) {
+        throw new Error("Không thể gán cấp quyền cao hơn cấp của bạn.");
+      }
       if (isSelf || !isAdminActor) {
         role = existing ? normalizeStaffAccountRole(existing.role) : role;
       }
@@ -1353,9 +1389,23 @@ async function saveResource(resource: string, body: Row) {
     return getResource(resource, new NextRequest("http://localhost/api/ems/devices"));
   }
   if (resource === "meter-types") {
+    await ensureMeterTypeCodeColumn();
     const previousName = asString(body.previousName);
     const name = asString(body.name).trim();
     if (!name) throw new Error("Tên loại điểm đo không được để trống.");
+    const code = asString(body.code).trim().toUpperCase();
+    if (!/^[A-Z0-9_-]{0,10}$/.test(code)) {
+      throw new Error("Mã điểm đo chỉ gồm chữ không dấu, số, _ hoặc -, tối đa 10 ký tự.");
+    }
+    if (code) {
+      const duplicateCode = await queryRows<{ name: string }>(
+        "SELECT name FROM meter_types WHERE code = ? AND name <> ? LIMIT 1",
+        [code, previousName || name],
+      );
+      if (duplicateCode.length) {
+        throw new Error(`Mã "${code}" đã được dùng cho loại ${duplicateCode[0].name}.`);
+      }
+    }
     await transaction(async (connection) => {
       if (previousName && previousName !== name) {
         const existing = await queryRows<{ builtin: number }>(
@@ -1366,10 +1416,16 @@ async function saveResource(resource: string, body: Row) {
           throw new Error("Không thể đổi tên loại điểm đo mặc định.");
         }
         await connection.execute(
-          `INSERT INTO meter_types (name, description, icon, builtin)
-           SELECT ?, ?, ?, builtin FROM meter_types WHERE name = ?
-           ON DUPLICATE KEY UPDATE description=VALUES(description), icon=VALUES(icon)`,
-          [name, body.description || "Loại điểm đo tùy chỉnh", body.icon || "generic", previousName],
+          `INSERT INTO meter_types (name, description, code, icon, builtin)
+           SELECT ?, ?, ?, ?, builtin FROM meter_types WHERE name = ?
+           ON DUPLICATE KEY UPDATE description=VALUES(description), code=VALUES(code), icon=VALUES(icon)`,
+          [
+            name,
+            body.description || "Loại điểm đo tùy chỉnh",
+            code || null,
+            body.icon || "generic",
+            previousName,
+          ],
         );
         await connection.execute(
           "UPDATE project_meter_types SET meter_type_name = ? WHERE meter_type_name = ?",
@@ -1378,9 +1434,15 @@ async function saveResource(resource: string, body: Row) {
         await connection.execute("DELETE FROM meter_types WHERE name = ? AND builtin = 0", [previousName]);
       } else {
         await connection.execute(
-          `INSERT INTO meter_types (name, description, icon, builtin) VALUES (?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE description=VALUES(description), icon=VALUES(icon)`,
-          [name, body.description || "Loại điểm đo tùy chỉnh", body.icon || "generic", body.builtin ? 1 : 0],
+          `INSERT INTO meter_types (name, description, code, icon, builtin) VALUES (?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE description=VALUES(description), code=VALUES(code), icon=VALUES(icon)`,
+          [
+            name,
+            body.description || "Loại điểm đo tùy chỉnh",
+            code || null,
+            body.icon || "generic",
+            body.builtin ? 1 : 0,
+          ],
         );
       }
     });
@@ -1546,23 +1608,38 @@ async function saveResource(resource: string, body: Row) {
   if (resource === "emission-factors") {
     await ensureEmissionFactorGasColumns();
     const group = body;
+    const groupId = asString(group.id).trim();
+    const groupName = asString(group.name).trim();
+    if (!groupId || !groupName) throw new Error("Thiếu mã hoặc tên nhóm hệ số phát thải.");
     const gases = Array.isArray(group.gases) ? group.gases as Row[] : [];
     await transaction(async (connection) => {
       await connection.execute(
         `INSERT INTO emission_factor_groups (id, name, source) VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE name=VALUES(name), source=VALUES(source)`,
-        [group.id, group.name, group.source || ""],
+        [groupId, groupName, asString(group.source)],
       );
-      await connection.execute("DELETE FROM emission_factor_gases WHERE group_id = ?", [group.id]);
+      const keptKeys: string[] = [];
       for (const gas of gases) {
         const key = asString(gas.key).trim().slice(0, 40) || "gas";
         const label = asString(gas.label).trim().slice(0, 80) || key;
+        keptKeys.push(key);
         await connection.execute(
           `INSERT INTO emission_factor_gases (group_id, gas_key, gas_label, factor_value, unit)
            VALUES (?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE gas_label=VALUES(gas_label), factor_value=VALUES(factor_value), unit=VALUES(unit)`,
-          [group.id, key, label, asNumber(gas.value), gas.unit || ""],
+          [groupId, key, label, asNumber(gas.value), asString(gas.unit)],
         );
+      }
+      // Chỉ xóa các khí không còn trong nhóm. Không xóa toàn bộ rồi chèn lại, vì ghg_sources
+      // tham chiếu (group_id, gas_key) bằng khóa ngoại — xóa hết sẽ làm lệnh lưu thất bại.
+      if (keptKeys.length) {
+        await connection.execute(
+          `DELETE FROM emission_factor_gases
+            WHERE group_id = ? AND gas_key NOT IN (${keptKeys.map(() => "?").join(", ")})`,
+          [groupId, ...keptKeys],
+        );
+      } else {
+        await connection.execute("DELETE FROM emission_factor_gases WHERE group_id = ?", [groupId]);
       }
     });
     return getResource(resource, new NextRequest("http://localhost/api/ems/emission-factors"));
@@ -1834,6 +1911,15 @@ export async function DELETE(request: NextRequest, context: Params) {
     if (resource === "accounts") {
       const gate = await requirePermission("manageUsers");
       if (!gate.ok) return forbidden("Chỉ Quản trị viên được quản lý tài khoản.");
+      const targetId = request.nextUrl.searchParams.get("id") ?? "";
+      const targetRows = await queryRows<{ id: string; role: string }>(
+        "SELECT id, role FROM accounts WHERE id = ? LIMIT 1",
+        [targetId],
+      );
+      const target = targetRows[0];
+      if (target && !canManageInternalAccount(gate.session, target)) {
+        return forbidden(CANNOT_MANAGE_PEER_MESSAGE);
+      }
     }
     if (resource === "customer-accounts") {
       const id = request.nextUrl.searchParams.get("id");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   formatFactorValue,
   hydrateFactorGroups,
@@ -22,6 +22,7 @@ import {
   type ScopeId,
 } from "@/lib/ghg-sources";
 import { vietnamNow } from "@/lib/vietnam-time";
+import { hydrateProjectSettings, saveProjectSettings } from "@/lib/project-settings";
 import {
   hydrateClientMeters,
   loadClientMeters,
@@ -36,7 +37,6 @@ const SCOPES = GHG_SCOPES.map((item) => ({ id: item.id, label: item.label }));
 const METHODS: { id: InputMethod; label: string; hint: string }[] = [
   { id: "meter", label: "Chọn từ điểm đo", hint: "Lấy số liệu realtime" },
   { id: "manual", label: "Nhập thủ công", hint: "Nhập khối lượng nhiên liệu" },
-  { id: "file", label: "Tải file", hint: "CSV / Excel phát thải" },
 ];
 
 const METHOD_LABEL: Record<InputMethod, string> = {
@@ -44,9 +44,6 @@ const METHOD_LABEL: Record<InputMethod, string> = {
   manual: "Thủ công",
   file: "Tải file",
 };
-
-const DEFAULT_METER_FORMULA = "{Giá trị điểm đo} * {Hệ số phát thải}";
-const DEFAULT_MANUAL_FORMULA = "{Giá trị thủ công} * {Hệ số phát thải}";
 
 type MultiplierDraft = {
   id: string;
@@ -77,6 +74,31 @@ function groupIdFromFactor(factorId: string) {
 
 function activityToken(method: InputMethod) {
   return method === "meter" ? "{Giá trị điểm đo}" : "{Giá trị thủ công}";
+}
+
+/** Công thức tự sinh: dữ liệu hoạt động × hệ số phát thải (nếu có) × hệ số nhân cấu hình sẵn. */
+function buildFormula(
+  method: InputMethod,
+  gas: Pick<GasValue, "key" | "label"> | undefined,
+  multipliers: GhgMultiplier[],
+) {
+  const parts = [activityToken(method)];
+  if (gas) parts.push(gasToken(gas));
+  for (const row of multipliers) parts.push(`{${row.symbol}}`);
+  return parts.join(" * ");
+}
+
+function parsePresetMultipliers(raw: unknown): GhgMultiplier[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((row): row is GhgMultiplier => Boolean(row && typeof row === "object"))
+    .map((row) => ({
+      id: String(row.id),
+      label: String(row.label ?? ""),
+      symbol: String(row.symbol ?? ""),
+      value: Number(row.value),
+      unit: String(row.unit ?? ""),
+    }));
 }
 
 function draftsFromMultipliers(rows: GhgMultiplier[] | undefined): MultiplierDraft[] {
@@ -118,7 +140,8 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropHover, setDropHover] = useState(false);
-  const formulaRef = useRef<HTMLTextAreaElement>(null);
+  /** Hệ số nhân cấu hình sẵn cho cả dự án (lưu trong project settings). */
+  const [presetMultipliers, setPresetMultipliers] = useState<GhgMultiplier[]>([]);
 
   const [name, setName] = useState("");
   const [method, setMethod] = useState<InputMethod>("meter");
@@ -126,8 +149,6 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const [manualValue, setManualValue] = useState("");
   const [manualUnit, setManualUnit] = useState("lít");
   const [factorGroupId, setFactorGroupId] = useState("");
-  const [multipliers, setMultipliers] = useState<MultiplierDraft[]>([]);
-  const [formula, setFormula] = useState(DEFAULT_METER_FORMULA);
   const [appliedAt, setAppliedAt] = useState(() => vietnamNow().date);
   const [formError, setFormError] = useState("");
 
@@ -138,6 +159,19 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   const selectedGroup = useMemo(
     () => groups.find((group) => group.id === factorGroupId),
     [groups, factorGroupId],
+  );
+  /** Hệ số phát thải chính dùng cho công thức và lưu nguồn (ưu tiên CO₂). */
+  const primary = useMemo(
+    () =>
+      selectedGroup
+        ? selectedGroup.gases.find((gas) => gas.key === "co2") ?? selectedGroup.gases[0]
+        : undefined,
+    [selectedGroup],
+  );
+  /** Công thức chỉ hiển thị, tự sinh từ lựa chọn: không cho người dùng sửa. */
+  const formula = useMemo(
+    () => buildFormula(method, primary, presetMultipliers),
+    [method, primary, presetMultipliers],
   );
   const factorHistoryRows = useMemo<FactorHistoryRow[]>(() => {
     if (!selectedGroup) return [];
@@ -153,12 +187,6 @@ export function GhgConfig({ projectId }: { projectId: string }) {
 
   function handleMethodChange(nextMethod: InputMethod) {
     setMethod(nextMethod);
-    setFormula((current) => {
-      if (current.trim() && current !== DEFAULT_METER_FORMULA && current !== DEFAULT_MANUAL_FORMULA) {
-        return current;
-      }
-      return nextMethod === "meter" ? DEFAULT_METER_FORMULA : DEFAULT_MANUAL_FORMULA;
-    });
     setFormError("");
   }
 
@@ -211,6 +239,20 @@ export function GhgConfig({ projectId }: { projectId: string }) {
   }, [editingId, projectId, sources, sourcesProjectId]);
 
   useEffect(() => {
+    let active = true;
+    void hydrateProjectSettings(projectId)
+      .then((settings) => {
+        if (!active) return;
+        const preset = settings.ghgPreset as { multipliers?: unknown } | undefined;
+        setPresetMultipliers(parsePresetMultipliers(preset?.multipliers));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
     window.dispatchEvent(new CustomEvent("ems-ghg-form-open", { detail: formOpen }));
   }, [formOpen]);
 
@@ -223,8 +265,6 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setManualValue("");
       setManualUnit("lít");
       setFactorGroupId("");
-      setMultipliers([]);
-      setFormula(DEFAULT_METER_FORMULA);
       setAppliedAt(vietnamNow().date);
       setFormError("");
       setTableFilter((current) => {
@@ -267,38 +307,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
 
   function applyGroup(group: FactorGroup) {
     setFactorGroupId(group.id);
-    setFormula((current) => {
-      const trimmed = current.trim();
-      if (trimmed && trimmed !== DEFAULT_METER_FORMULA && trimmed !== DEFAULT_MANUAL_FORMULA) {
-        return current;
-      }
-      const first = group.gases[0];
-      return first ? `${activityToken(method)} * ${gasToken(first)}` : activityToken(method);
-    });
     if (formError) setFormError("");
-  }
-
-  function addMultiplier() {
-    setMultipliers((current) => [
-      ...current,
-      {
-        id: `mul-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        label: "",
-        symbol: "",
-        value: "",
-        unit: "tấn CO2e",
-      },
-    ]);
-  }
-
-  function updateMultiplier(id: string, patch: Partial<Omit<MultiplierDraft, "id">>) {
-    setMultipliers((current) =>
-      current.map((row) => (row.id === id ? { ...row, ...patch } : row)),
-    );
-  }
-
-  function removeMultiplier(id: string) {
-    setMultipliers((current) => current.filter((row) => row.id !== id));
   }
 
   function closeForm() {
@@ -309,8 +318,6 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setManualValue("");
     setManualUnit("lít");
     setFactorGroupId("");
-    setMultipliers([]);
-    setFormula(DEFAULT_METER_FORMULA);
     setAppliedAt(vietnamNow().date);
     setFormError("");
     setFormOpen(false);
@@ -318,23 +325,6 @@ export function GhgConfig({ projectId }: { projectId: string }) {
 
   function handleCancel() {
     closeForm();
-  }
-
-  function insertToken(token: string) {
-    const el = formulaRef.current;
-    if (!el) {
-      setFormula((current) => `${current}${current ? " " : ""}${token}`);
-      return;
-    }
-    const start = el.selectionStart ?? formula.length;
-    const end = el.selectionEnd ?? formula.length;
-    const next = `${formula.slice(0, start)}${token}${formula.slice(end)}`;
-    setFormula(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      const cursor = start + token.length;
-      el.setSelectionRange(cursor, cursor);
-    });
   }
 
   function handleSave() {
@@ -353,33 +343,12 @@ export function GhgConfig({ projectId }: { projectId: string }) {
       setFormError("Giá trị thủ công không hợp lệ.");
       return;
     }
-    const filledMultipliers = multipliers.filter(
-      (row) => row.label.trim() || row.symbol.trim() || row.value.trim(),
-    );
-    if (filledMultipliers.some((row) => !row.label.trim() || !row.symbol.trim() || !row.value.trim())) {
-      setFormError("Mỗi hệ số nhân cần đủ tên, ký hiệu và giá trị.");
+    if ((!selectedGroup || selectedGroup.gases.length === 0) && presetMultipliers.length === 0) {
+      setFormError("Chọn hệ số phát thải, hoặc cấu hình ít nhất một hệ số nhân cho dự án.");
       return;
     }
-    const symbols = filledMultipliers.map((row) => row.symbol.trim());
-    if (new Set(symbols).size !== symbols.length) {
-      setFormError("Ký hiệu hệ số nhân không được trùng nhau.");
-      return;
-    }
-    if ((!selectedGroup || selectedGroup.gases.length === 0) && filledMultipliers.length === 0) {
-      setFormError("Chọn hệ số phát thải hoặc thêm ít nhất một hệ số nhân để tính toán.");
-      return;
-    }
-    const primary = selectedGroup
-      ? selectedGroup.gases.find((gas) => gas.key === "co2") ?? selectedGroup.gases[0]
-      : undefined;
     const existing = editingId ? sources.find((item) => item.id === editingId) : undefined;
-    const nextMultipliers = filledMultipliers.map((row) => ({
-      id: row.id,
-      label: row.label.trim(),
-      symbol: row.symbol.trim(),
-      value: parseFactorNumber(row.value),
-      unit: row.unit.trim() || "tấn CO2e",
-    }));
+    const nextMultipliers = presetMultipliers.map((row) => ({ ...row }));
     const factorId = selectedGroup && primary ? `${selectedGroup.id}:${primary.key}` : "none:none";
     const factorValue = primary?.value ?? 0;
     const next: EmissionSource = {
@@ -426,8 +395,6 @@ export function GhgConfig({ projectId }: { projectId: string }) {
     setManualValue(source.manualValue == null ? "" : String(source.manualValue));
     setManualUnit(source.manualUnit ?? "lít");
     setFactorGroupId(groupIdFromFactor(source.factorId));
-    setMultipliers(draftsFromMultipliers(source.multipliers));
-    setFormula(source.formula);
     setAppliedAt(source.appliedAt);
     setFormError("");
     setFormOpen(true);
@@ -435,6 +402,13 @@ export function GhgConfig({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-5">
+      <GhgPresetPanel
+        key={projectId}
+        projectId={projectId}
+        value={presetMultipliers}
+        onSaved={setPresetMultipliers}
+      />
+
       {formOpen ? (
       <>
       <div className="flex flex-wrap items-center gap-2">
@@ -515,7 +489,7 @@ export function GhgConfig({ projectId }: { projectId: string }) {
               <legend className="mb-2 text-[11px] font-semibold tracking-wide text-slate-500">
                 PHƯƠNG THỨC NHẬP SỐ LIỆU
               </legend>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {METHODS.map((item) => {
                   const selected = method === item.id;
                   const Icon = methodIcons[item.id];
@@ -677,136 +651,38 @@ export function GhgConfig({ projectId }: { projectId: string }) {
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="text-[11px] font-semibold tracking-wide text-slate-500">
-                  HỆ SỐ NHÂN
+                  HỆ SỐ NHÂN (CẤU HÌNH SẴN)
                 </span>
-                <button
-                  type="button"
-                  onClick={addMultiplier}
-                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                >
-                  <span aria-hidden>+</span>
-                  Thêm hệ số nhân
-                </button>
               </div>
               <p className="mb-2 text-[12px] text-slate-500">
-                Luôn dùng được — kể cả khi không chọn hệ số phát thải. Ký hiệu chèn vào công thức bên dưới.
+                Áp dụng tự động cho mọi nguồn. Chỉnh sửa tại mục &quot;Cấu hình hệ số nhân &amp; công thức&quot; phía trên.
               </p>
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full min-w-[560px] text-left text-xs">
-                  <thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                    <tr>
-                      <th className="px-3 py-2">Hệ số</th>
-                      <th className="px-3 py-2">Ký hiệu</th>
-                      <th className="px-3 py-2">Giá trị</th>
-                      <th className="px-3 py-2">Đơn vị</th>
-                      <th className="w-10 px-2 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {multipliers.map((row) => (
-                      <tr key={row.id} className="border-b border-slate-50 last:border-0">
-                        <td className="px-2 py-2">
-                          <input
-                            value={row.label}
-                            onChange={(e) => updateMultiplier(row.id, { label: e.target.value })}
-                            placeholder="VD: Nhiệt trị"
-                            className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            value={row.symbol}
-                            onChange={(e) =>
-                              updateMultiplier(row.id, {
-                                symbol: e.target.value.replace(/[{}[\]]/g, ""),
-                              })
-                            }
-                            placeholder="Q"
-                            className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            value={row.value}
-                            onChange={(e) => updateMultiplier(row.id, { value: e.target.value })}
-                            inputMode="decimal"
-                            placeholder="43.215"
-                            className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            value={row.unit}
-                            onChange={(e) => updateMultiplier(row.id, { unit: e.target.value })}
-                            placeholder="kJ/kg"
-                            className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <button
-                            type="button"
-                            onClick={() => removeMultiplier(row.id)}
-                            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
-                            aria-label={`Xóa ${row.label || "hệ số nhân"}`}
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {multipliers.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-4 text-center text-xs text-slate-400">
-                          Thêm hệ số nhân (vd. nhiệt trị Q). Có thể tính chỉ với hệ số nhân, không cần hệ số phát thải.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
+              {presetMultipliers.length ? (
+                <ul className="flex flex-wrap gap-2">
+                  {presetMultipliers.map((row) => (
+                    <li
+                      key={row.id}
+                      className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 ring-1 ring-slate-200"
+                    >
+                      <span className="font-mono font-semibold">{row.symbol}</span>
+                      {" = "}
+                      <span className="font-mono">{row.value}</span> {row.unit}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                  Chưa có hệ số nhân cấu hình sẵn.
+                </p>
+              )}
             </div>
 
-            <Field label="NHẬP CÔNG THỨC TÍNH (KG CO₂E)">
-              <div className="overflow-hidden rounded-xl border border-slate-200 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/15 transition-all">
-                <textarea
-                  ref={formulaRef}
-                  value={formula}
-                  onChange={(e) => setFormula(e.target.value)}
-                  rows={4}
-                  placeholder={`${activityToken(method)} * [CO2] * {kCO2}`}
-                  className="w-full resize-none bg-white px-3 pt-3 pb-2 font-mono text-sm text-slate-800 outline-none placeholder:text-slate-400"
-                />
-                <div className="flex flex-wrap justify-end gap-2 px-3 pb-3">
-                  {(selectedGroup?.gases ?? []).map((gas) => (
-                    <button
-                      key={gas.key}
-                      type="button"
-                      onClick={() => insertToken(gasToken(gas))}
-                      className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
-                    >
-                      {gasToken(gas)}
-                    </button>
-                  ))}
-                  {multipliers
-                    .filter((row) => row.symbol.trim())
-                    .map((row) => (
-                      <button
-                        key={row.id}
-                        type="button"
-                        onClick={() => insertToken(`{${row.symbol.trim()}}`)}
-                        className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
-                      >
-                        [{row.symbol.trim()}]
-                      </button>
-                    ))}
-                  <button
-                    type="button"
-                    onClick={() => insertToken(activityToken(method))}
-                    className="rounded-lg bg-emerald-50 px-2 py-1 font-mono text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
-                  >
-                    {method === "meter" ? "[Điểm đo]" : "[Giá trị thủ công]"}
-                  </button>
-                </div>
+            <Field label="CÔNG THỨC TÍNH (KG CO₂E) — TỰ SINH">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                <p className="break-all font-mono text-sm text-slate-800">{formula}</p>
+                <p className="mt-2 text-[12px] text-slate-500">
+                  Công thức tự tạo từ điểm đo (hoặc giá trị thủ công), hệ số phát thải đã chọn và hệ số nhân cấu hình sẵn.
+                </p>
               </div>
             </Field>
 
@@ -1266,6 +1142,189 @@ function EditIcon({ className }: { className?: string }) {
       />
       <path d="M13.8 7.7 16.3 10.2" stroke="currentColor" strokeWidth="1.8" />
     </svg>
+  );
+}
+
+/** Cấu hình sẵn hệ số nhân cho cả dự án; form nguồn phát thải chỉ còn việc chọn. */
+function GhgPresetPanel({
+  projectId,
+  value,
+  onSaved,
+}: {
+  projectId: string;
+  value: GhgMultiplier[];
+  onSaved: (next: GhgMultiplier[]) => void;
+}) {
+  const [rows, setRows] = useState<MultiplierDraft[]>(() => draftsFromMultipliers(value));
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!dirty) setRows(draftsFromMultipliers(value));
+  }, [value, dirty]);
+
+  function addRow() {
+    setRows((current) => [
+      ...current,
+      {
+        id: `mul-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        label: "",
+        symbol: "",
+        value: "",
+        unit: "tấn CO2e",
+      },
+    ]);
+    setDirty(true);
+  }
+
+  function updateRow(id: string, patch: Partial<Omit<MultiplierDraft, "id">>) {
+    setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+    setDirty(true);
+  }
+
+  function removeRow(id: string) {
+    setRows((current) => current.filter((row) => row.id !== id));
+    setDirty(true);
+  }
+
+  async function handleSave() {
+    const filled = rows.filter((row) => row.label.trim() || row.symbol.trim() || row.value.trim());
+    if (filled.some((row) => !row.label.trim() || !row.symbol.trim() || !row.value.trim())) {
+      setError("Mỗi hệ số nhân cần đủ tên, ký hiệu và giá trị.");
+      return;
+    }
+    const symbols = filled.map((row) => row.symbol.trim());
+    if (new Set(symbols).size !== symbols.length) {
+      setError("Ký hiệu hệ số nhân không được trùng nhau.");
+      return;
+    }
+    const next: GhgMultiplier[] = filled.map((row) => ({
+      id: row.id,
+      label: row.label.trim(),
+      symbol: row.symbol.trim(),
+      value: parseFactorNumber(row.value),
+      unit: row.unit.trim() || "tấn CO2e",
+    }));
+    if (next.some((row) => !Number.isFinite(row.value))) {
+      setError("Giá trị hệ số nhân không hợp lệ.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await saveProjectSettings(projectId, { ghgPreset: { multipliers: next } });
+      onSaved(next);
+      setDirty(false);
+    } catch {
+      setError("Không thể lưu cấu hình hệ số nhân. Vui lòng thử lại.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-slate-800">Cấu hình hệ số nhân &amp; công thức</h2>
+          <p className="mt-1 max-w-[640px] text-xs leading-relaxed text-slate-500">
+            Cấu hình một lần cho dự án. Khi thêm nguồn phát thải, người dùng chỉ cần chọn điểm đo và hệ số
+            phát thải; hệ số nhân và công thức được áp dụng tự động.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={addRow}
+            className="inline-flex h-9 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+          >
+            <span aria-hidden>+</span>
+            Thêm hệ số nhân
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={!dirty || saving}
+            className="h-9 rounded-lg bg-emerald-600 px-4 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {saving ? "Đang lưu..." : "Lưu cấu hình"}
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <table className="w-full min-w-[560px] text-left text-xs">
+          <thead className="border-b border-slate-100 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="px-3 py-2">Hệ số</th>
+              <th className="px-3 py-2">Ký hiệu</th>
+              <th className="px-3 py-2">Giá trị</th>
+              <th className="px-3 py-2">Đơn vị</th>
+              <th className="w-10 px-2 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className="border-b border-slate-50 last:border-0">
+                <td className="px-2 py-2">
+                  <input
+                    value={row.label}
+                    onChange={(e) => updateRow(row.id, { label: e.target.value })}
+                    placeholder="VD: Nhiệt trị"
+                    className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.symbol}
+                    onChange={(e) => updateRow(row.id, { symbol: e.target.value.replace(/[{}[\]]/g, "") })}
+                    placeholder="Q"
+                    className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.value}
+                    onChange={(e) => updateRow(row.id, { value: e.target.value })}
+                    inputMode="decimal"
+                    placeholder="43.215"
+                    className="h-9 w-full rounded-lg border border-slate-200 px-2 font-mono text-sm outline-none focus:border-emerald-500"
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    value={row.unit}
+                    onChange={(e) => updateRow(row.id, { unit: e.target.value })}
+                    placeholder="kJ/kg"
+                    className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-emerald-500"
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.id)}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500"
+                    aria-label={`Xóa ${row.label || "hệ số nhân"}`}
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-3 py-4 text-center text-xs text-slate-400">
+                  Chưa có hệ số nhân. Thêm hệ số nhân (vd. nhiệt trị Q) rồi bấm &quot;Lưu cấu hình&quot;.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      {error ? <p className="mt-3 text-sm font-medium text-red-500">{error}</p> : null}
+    </section>
   );
 }
 

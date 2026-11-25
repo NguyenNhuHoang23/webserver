@@ -17,6 +17,7 @@ export function MeterTypeCatalog() {
   const [editor, setEditor] = useState<"add" | string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
+  const [draftCode, setDraftCode] = useState("");
   const [error, setError] = useState("");
   const [toDelete, setToDelete] = useState<MeterTypeDef | null>(null);
   const [saving, setSaving] = useState(false);
@@ -38,6 +39,7 @@ export function MeterTypeCatalog() {
     setEditor("add");
     setDraftName("");
     setDraftDescription("");
+    setDraftCode("");
     setError("");
   }
 
@@ -45,6 +47,7 @@ export function MeterTypeCatalog() {
     setEditor(item.name);
     setDraftName(item.name);
     setDraftDescription(item.description);
+    setDraftCode(item.code);
     setError("");
   }
 
@@ -52,6 +55,7 @@ export function MeterTypeCatalog() {
     setEditor(null);
     setDraftName("");
     setDraftDescription("");
+    setDraftCode("");
     setError("");
   }
 
@@ -61,7 +65,7 @@ export function MeterTypeCatalog() {
     try {
       const previous = editor === "add" ? undefined : editor ?? undefined;
       const next = await upsertMeterTypeDef(
-        { name: draftName, description: draftDescription },
+        { name: draftName, description: draftDescription, code: draftCode },
         previous,
       );
       setCatalog(next);
@@ -94,17 +98,9 @@ export function MeterTypeCatalog() {
     <div className="mx-auto max-w-[1100px] p-4 sm:p-6 lg:p-8 font-sans">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-              Loại điểm đo
-            </h1>
-            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
-              {catalog.length} loại
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-slate-500">
-            Thêm, sửa, xóa thư viện loại điểm đo dùng chung. Khi tạo dự án chỉ chọn từ danh sách này.
-          </p>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+            Loại điểm đo
+          </h1>
         </div>
         <button
           type="button"
@@ -129,7 +125,7 @@ export function MeterTypeCatalog() {
       </div>
 
       {editor ? (
-        <div className="mb-5 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50/30 p-4 sm:grid-cols-[1fr_1fr_auto]">
+        <div className="mb-5 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50/30 p-4 sm:grid-cols-[1fr_1fr_120px_auto]">
           <label className="block">
             <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">
               TÊN LOẠI ĐIỂM ĐO
@@ -150,6 +146,28 @@ export function MeterTypeCatalog() {
               placeholder="VD: Khí nén"
               className="input"
               disabled={editor !== "add" && catalog.find((item) => item.name === editor)?.builtin}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-slate-500">
+              MÃ ĐIỂM ĐO
+            </span>
+            <input
+              value={draftCode}
+              onChange={(e) => {
+                setDraftCode(e.target.value.toUpperCase());
+                setError("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void save();
+                }
+                if (e.key === "Escape") cancelEditor();
+              }}
+              placeholder="VD: E"
+              maxLength={10}
+              className="input font-mono"
             />
           </label>
           <label className="block">
@@ -212,6 +230,13 @@ export function MeterTypeCatalog() {
                     Mặc định
                   </span>
                 ) : null}
+                {item.code ? (
+                  <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                    {item.code}
+                  </span>
+                ) : (
+                  <span className="text-[11px] italic text-amber-600">Chưa có mã điểm đo</span>
+                )}
               </div>
               <p className="mt-0.5 text-xs text-slate-500">{item.description}</p>
             </div>
